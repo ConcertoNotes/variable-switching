@@ -1,0 +1,98 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Config Switcher</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-left">
+        <div class="logo">
+          <img src="app-icon.png" width="28" height="28" alt="VarSwitch" style="border-radius:4px;">
+        </div>
+        <h1 id="appTitle">Claude Config Switcher</h1>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-ghost" id="langBtn" type="button">中文</button>
+        <button class="btn btn-ghost" id="themeBtn" type="button">Dark</button>
+        <button class="btn btn-outline" id="importBtn" type="button">Import Current</button>
+        <button class="btn btn-primary" id="addBtn" type="button">+ Add Config</button>
+      </div>
+    </header>
+
+    <section class="status-section">
+      <h2 class="section-title" id="statusSectionTitle">Current Status</h2>
+      <div class="status-grid" id="statusGrid"></div>
+      <p class="hint" id="statusHint">Restart terminal and VSCode after switching to apply env variables.</p>
+    </section>
+
+    <section class="profiles-section">
+      <h2 class="section-title" id="profilesSectionTitle">Config List</h2>
+      <div class="profiles-grid" id="profilesGrid"></div>
+    </section>
+  </div>
+
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modalTitle">Add Config</h2>
+        <button class="modal-close" id="modalClose" type="button">&times;</button>
+      </div>
+      <form id="profileForm">
+        <input type="hidden" id="profileId">
+        <div class="form-group">
+          <label id="profileNameLabel" for="profileName">Config Name</label>
+          <input type="text" id="profileName" required placeholder="e.g. Production">
+        </div>
+        <div class="form-group">
+          <label id="profileApiKeyLabel" for="profileApiKey">API Key</label>
+          <input type="text" id="profileApiKey" required placeholder="sk-...">
+        </div>
+        <div class="form-group">
+          <label id="profileBaseUrlLabel" for="profileBaseUrl">Base URL</label>
+          <input type="text" id="profileBaseUrl" required placeholder="https://api.example.com">
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="submitBtn">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="switch-overlay" id="switchOverlay">
+    <div class="switch-panel">
+      <div class="switch-panel-title" id="switchPanelTitle">Switching to</div>
+      <div class="switch-panel-name" id="switchProfileName"></div>
+      <div class="switch-progress-track">
+        <div class="switch-progress-bar" id="switchProgressBar"></div>
+      </div>
+      <div class="switch-progress-meta">
+        <div class="switch-step-label" id="switchStepLabel">Preparing...</div>
+        <div class="switch-progress-percent" id="switchProgressPercent">0%</div>
+      </div>
+      <div class="switch-steps">
+        <div class="switch-step" id="switchStep1">
+          <span class="step-dot"></span>
+          <span class="step-text" id="switchStep1Text">System Env</span>
+        </div>
+        <div class="switch-step" id="switchStep2">
+          <span class="step-dot"></span>
+          <span class="step-text" id="switchStep2Text">VSCode</span>
+        </div>
+        <div class="switch-step" id="switchStep3">
+          <span class="step-dot"></span>
+          <span class="step-text" id="switchStep3Text">Claude</span>
+        </div>
+      </div>
+      <button class="btn btn-cancel-switch" id="switchCancelBtn" type="button">Cancel</button>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="app.js"></script>
+</body>
+</html>

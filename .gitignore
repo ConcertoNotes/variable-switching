@@ -1,0 +1,39 @@
+# Build outputs
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+
+# NSIS installer
+nsis/
+
+# Data
+data/
+
+# Tauri / Rust build
+src-tauri/target/
+src-tauri/.tmp-target*/
+src-tauri/.codex-dir-test2/
+src-tauri/src-tauri/
+target/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude local settings
+.claude/settings.local.json
