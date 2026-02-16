@@ -3,26 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Claude Config Switcher</title>
+  <title>VarSwitch</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
-    <header class="header">
-      <div class="header-left">
-        <div class="logo">
-          <img src="app-icon.png" width="28" height="28" alt="VarSwitch" style="border-radius:4px;">
-        </div>
-        <h1 id="appTitle">Claude Config Switcher</h1>
+  <header class="toolbar">
+    <div class="toolbar-inner">
+      <div class="toolbar-left">
+        <img src="app-icon.png" width="20" height="20" alt="VarSwitch" class="toolbar-icon">
+        <span class="toolbar-title" id="appTitle">VarSwitch</span>
       </div>
-      <div class="header-right">
-        <button class="btn btn-ghost" id="langBtn" type="button">中文</button>
-        <button class="btn btn-ghost" id="themeBtn" type="button">Dark</button>
-        <button class="btn btn-outline" id="importBtn" type="button">Import Current</button>
-        <button class="btn btn-primary" id="addBtn" type="button">+ Add Config</button>
+      <div class="toolbar-right">
+        <button class="toolbar-btn" id="langBtn" type="button">中文</button>
+        <button class="toolbar-btn" id="themeBtn" type="button">Dark</button>
+        <div class="toolbar-divider"></div>
+        <button class="toolbar-btn" id="importBtn" type="button">Import Current</button>
+        <button class="toolbar-btn toolbar-btn-accent" id="addBtn" type="button">+ Add Config</button>
       </div>
-    </header>
+    </div>
+  </header>
 
+  <div class="app">
     <section class="status-section">
       <h2 class="section-title" id="statusSectionTitle">Current Status</h2>
       <div class="status-grid" id="statusGrid"></div>

@@ -20,7 +20,7 @@ const THEME_STORAGE_KEY = "varswitch.theme";
 
 const I18N = {
   en: {
-    appTitle: "Claude Config Switcher",
+    appTitle: "VarSwitch",
     importBtn: "Import Current",
     addBtn: "+ Add Config",
     statusTitle: "Current Status",
@@ -82,7 +82,7 @@ const I18N = {
     placeholderBaseUrl: "https://api.example.com"
   },
   zh: {
-    appTitle: "Claude 配置切换器",
+    appTitle: "VarSwitch",
     importBtn: "导入当前配置",
     addBtn: "+ 添加配置",
     statusTitle: "当前配置状态",
