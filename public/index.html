@@ -10,14 +10,26 @@
   <header class="toolbar">
     <div class="toolbar-inner">
       <div class="toolbar-left">
-        <img src="app-icon.png" width="20" height="20" alt="VarSwitch" class="toolbar-icon">
-        <span class="toolbar-title" id="appTitle">VarSwitch</span>
+        <img src="app-icon.png" width="24" height="24" alt="VarSwitch" class="toolbar-icon">
+        <div class="toolbar-brand">
+          <span class="toolbar-title" id="appTitle">VarSwitch</span>
+          <span class="toolbar-subtitle" id="appSubtitle">Environment Sync Manager</span>
+        </div>
       </div>
       <div class="toolbar-right">
-        <button class="toolbar-btn" id="langBtn" type="button">中文</button>
-        <button class="toolbar-btn" id="themeBtn" type="button">Dark</button>
+        <div class="seg-control" id="langSegControl">
+          <button class="seg-btn" id="langZhBtn" type="button">中文</button>
+          <button class="seg-btn" id="langEnBtn" type="button">EN</button>
+        </div>
+        <div class="seg-control" id="themeSegControl">
+          <button class="seg-btn" id="themeLightBtn" type="button">Light</button>
+          <button class="seg-btn" id="themeDarkBtn" type="button">Dark</button>
+        </div>
         <div class="toolbar-divider"></div>
-        <button class="toolbar-btn" id="importBtn" type="button">Import Current</button>
+        <button class="toolbar-btn toolbar-btn-secondary" id="importBtn" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span id="importBtnText">Import Current</span>
+        </button>
         <button class="toolbar-btn toolbar-btn-accent" id="addBtn" type="button">+ Add Config</button>
       </div>
     </div>
@@ -28,6 +40,21 @@
       <h2 class="section-title" id="statusSectionTitle">Current Status</h2>
       <div class="status-grid" id="statusGrid"></div>
       <p class="hint" id="statusHint">Restart terminal and VSCode after switching to apply env variables.</p>
+    </section>
+
+    <section class="active-config-section" id="activeConfigSection" style="display:none;">
+      <div class="active-config-bar">
+        <div class="active-config-info">
+          <span class="active-config-label" id="activeConfigLabel">Active Config</span>
+          <span class="active-config-name" id="activeConfigName">--</span>
+        </div>
+        <div class="active-config-actions">
+          <button class="btn btn-primary btn-sm" id="syncNowBtn" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <span id="syncNowBtnText">Sync Now</span>
+          </button>
+        </div>
+      </div>
     </section>
 
     <section class="profiles-section">

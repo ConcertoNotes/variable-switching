@@ -21,6 +21,7 @@ const THEME_STORAGE_KEY = "varswitch.theme";
 const I18N = {
   en: {
     appTitle: "VarSwitch",
+    appSubtitle: "Environment Sync Manager",
     importBtn: "Import Current",
     addBtn: "+ Add Config",
     statusTitle: "Current Status",
@@ -29,7 +30,7 @@ const I18N = {
     addConfig: "Add Config",
     editConfig: "Edit Config",
     nameLabel: "Config Name",
-    keyLabel: "Key",
+    tokenLabel: "Token",
     urlLabel: "URL",
     cancel: "Cancel",
     save: "Save",
@@ -50,9 +51,10 @@ const I18N = {
     statusVscode: "VSCode Settings",
     statusClaude: "Claude Settings",
     readFailed: "Read failed",
-    synced: "✓ Synced",
-    unsynced: "⚠ Not Synced",
-    noConfigs: "No configs yet",
+    synced: "Synced",
+    unsynced: "Not Synced",
+    noConfigsTitle: "No configs yet",
+    noConfigsDesc: "Create a config to sync System / VSCode / Claude in one click.",
     addFirstConfig: "Add your first config",
     inUse: "In Use",
     switchUse: "Switch",
@@ -62,6 +64,7 @@ const I18N = {
     toastAdded: "Config added",
     toastDeleted: "Config deleted",
     toastImported: "Current config imported",
+    toastCopied: "Copied to clipboard",
     switchedTo: "Switched to {name}",
     partialSuccess: "Partially succeeded: {ok}\nFailed: {errors}",
     cancelledRestored: "Switch cancelled. Previous config restored",
@@ -73,16 +76,17 @@ const I18N = {
     importDefaultName: "Current Config",
     loadStatusFailed: "Failed to load status: {error}",
     loadProfilesFailed: "Failed to load profiles: {error}",
+    activeConfigLabel: "Active Config",
+    syncNow: "Sync Now",
     switchToDark: "Dark",
     switchToLight: "Light",
-    langZhButton: "中文",
-    langEnButton: "EN",
     placeholderName: "e.g. Production",
     placeholderApiKey: "sk-...",
     placeholderBaseUrl: "https://api.example.com"
   },
   zh: {
     appTitle: "VarSwitch",
+    appSubtitle: "环境变量同步工具",
     importBtn: "导入当前配置",
     addBtn: "+ 添加配置",
     statusTitle: "当前配置状态",
@@ -91,7 +95,7 @@ const I18N = {
     addConfig: "添加配置",
     editConfig: "编辑配置",
     nameLabel: "配置名称",
-    keyLabel: "密钥",
+    tokenLabel: "令牌",
     urlLabel: "地址",
     cancel: "取消",
     save: "保存",
@@ -112,9 +116,10 @@ const I18N = {
     statusVscode: "VSCode 设置",
     statusClaude: "Claude 设置",
     readFailed: "读取失败",
-    synced: "✓ 已同步",
-    unsynced: "⚠ 未同步",
-    noConfigs: "暂无配置",
+    synced: "已同步",
+    unsynced: "未同步",
+    noConfigsTitle: "暂无配置",
+    noConfigsDesc: "创建一个配置，一键同步系统环境变量 / VSCode / Claude。",
     addFirstConfig: "添加第一个配置",
     inUse: "使用中",
     switchUse: "切换使用",
@@ -124,6 +129,7 @@ const I18N = {
     toastAdded: "配置已添加",
     toastDeleted: "配置已删除",
     toastImported: "当前配置已导入",
+    toastCopied: "已复制到剪贴板",
     switchedTo: "已切换到 {name}",
     partialSuccess: "部分成功: {ok}\n失败: {errors}",
     cancelledRestored: "已取消切换，已恢复之前配置",
@@ -135,10 +141,10 @@ const I18N = {
     importDefaultName: "当前配置",
     loadStatusFailed: "读取状态失败: {error}",
     loadProfilesFailed: "读取配置失败: {error}",
+    activeConfigLabel: "当前配置",
+    syncNow: "立即同步",
     switchToDark: "夜间",
     switchToLight: "白天",
-    langZhButton: "中文",
-    langEnButton: "en",
     placeholderName: "例如：生产环境",
     placeholderApiKey: "sk-...",
     placeholderBaseUrl: "https://api.example.com"
@@ -190,13 +196,35 @@ function truncUrl(url, max = 40) {
   return url.length > max ? `${url.slice(0, max)}...` : url;
 }
 
-function updateThemeButtonText() {
-  $("themeBtn").textContent = currentTheme === "light" ? t("switchToDark") : t("switchToLight");
+function updateThemeSegControl() {
+  const lightBtn = $("themeLightBtn");
+  const darkBtn = $("themeDarkBtn");
+  if (currentTheme === "light") {
+    lightBtn.classList.add("active");
+    darkBtn.classList.remove("active");
+  } else {
+    lightBtn.classList.remove("active");
+    darkBtn.classList.add("active");
+  }
+  lightBtn.textContent = t("switchToLight");
+  darkBtn.textContent = t("switchToDark");
+}
+
+function updateLangSegControl() {
+  const zhBtn = $("langZhBtn");
+  const enBtn = $("langEnBtn");
+  if (currentLang === "zh") {
+    zhBtn.classList.add("active");
+    enBtn.classList.remove("active");
+  } else {
+    zhBtn.classList.remove("active");
+    enBtn.classList.add("active");
+  }
 }
 
 function applyTheme() {
   document.documentElement.setAttribute("data-theme", currentTheme);
-  updateThemeButtonText();
+  updateThemeSegControl();
 }
 
 function applyLanguage() {
@@ -204,13 +232,14 @@ function applyLanguage() {
   document.title = t("appTitle");
 
   $("appTitle").textContent = t("appTitle");
-  $("importBtn").textContent = t("importBtn");
+  $("appSubtitle").textContent = t("appSubtitle");
+  $("importBtnText").textContent = t("importBtn");
   $("addBtn").textContent = t("addBtn");
   $("statusSectionTitle").textContent = t("statusTitle");
   $("statusHint").textContent = t("statusHint");
   $("profilesSectionTitle").textContent = t("profilesTitle");
   $("profileNameLabel").textContent = t("nameLabel");
-  $("profileApiKeyLabel").textContent = t("keyLabel");
+  $("profileApiKeyLabel").textContent = t("tokenLabel");
   $("profileBaseUrlLabel").textContent = t("urlLabel");
   $("cancelBtn").textContent = t("cancel");
   $("submitBtn").textContent = t("save");
@@ -220,29 +249,31 @@ function applyLanguage() {
   $("switchStep3Text").textContent = t("stepClaude");
   $("switchCancelBtn").textContent = t("cancelSwitch");
   $("switchStepLabel").textContent = t("preparing");
+  $("activeConfigLabel").textContent = t("activeConfigLabel");
+  $("syncNowBtnText").textContent = t("syncNow");
 
   $("profileName").placeholder = t("placeholderName");
   $("profileApiKey").placeholder = t("placeholderApiKey");
   $("profileBaseUrl").placeholder = t("placeholderBaseUrl");
 
-  $("langBtn").textContent = currentLang === "en" ? t("langZhButton") : t("langEnButton");
-  updateThemeButtonText();
+  updateLangSegControl();
+  updateThemeSegControl();
 
   if ($("modalOverlay").classList.contains("open")) {
     $("modalTitle").textContent = editingId ? t("editConfig") : t("addConfig");
   }
 }
 
-function toggleLanguage() {
-  currentLang = currentLang === "en" ? "zh" : "en";
+function setLanguage(lang) {
+  currentLang = lang;
   localStorage.setItem(LANG_STORAGE_KEY, currentLang);
   applyLanguage();
   renderProfiles();
   loadStatus();
 }
 
-function toggleTheme() {
-  currentTheme = currentTheme === "light" ? "dark" : "light";
+function setTheme(theme) {
+  currentTheme = theme;
   localStorage.setItem(THEME_STORAGE_KEY, currentTheme);
   applyTheme();
 }
@@ -320,32 +351,60 @@ async function loadStatus() {
     const urls = locations.map((l) => status[l.key]?.baseUrl).filter(Boolean);
     const synced = keys.length > 0 && new Set(keys).size <= 1 && new Set(urls).size <= 1;
 
+    const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+
     grid.innerHTML = locations.map((loc) => {
       const item = status[loc.key];
       if (!item) {
         return `
           <div class="status-card error-card">
-            <div class="status-card-title">${loc.title}</div>
+            <div class="status-card-title">
+              <span class="status-card-title-text">${loc.title}</span>
+            </div>
             <div style="font-size:13px;color:var(--error-text)">${t("readFailed")}</div>
           </div>`;
       }
 
+      const badgeClass = synced ? "synced" : "unsynced";
+      const badgeText = synced ? t("synced") : t("unsynced");
+      const dotColor = synced ? "var(--success-text)" : "var(--warning-text)";
+
       return `
         <div class="status-card">
-          <div class="status-card-title">${loc.title}</div>
+          <div class="status-card-title">
+            <span class="status-card-title-text">${loc.title}</span>
+            <span class="status-badge ${badgeClass}">
+              <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0;"></span>
+              ${badgeText}
+            </span>
+          </div>
           <div class="status-item">
-            <span class="status-label">${t("keyLabel")}</span>
-            <span class="status-value">${maskKey(item.apiKey)}</span>
+            <span class="status-label">${t("tokenLabel")}</span>
+            <div class="status-value-wrapper">
+              <span class="status-value">${maskKey(item.apiKey)}</span>
+              <button class="copy-btn" type="button" data-copy="${esc(item.apiKey || "")}" title="Copy">${COPY_ICON}</button>
+            </div>
           </div>
           <div class="status-item">
             <span class="status-label">${t("urlLabel")}</span>
-            <span class="status-value">${truncUrl(item.baseUrl)}</span>
+            <div class="status-value-wrapper">
+              <span class="status-value has-tooltip" data-tooltip="${esc(item.baseUrl || "")}">${truncUrl(item.baseUrl)}</span>
+              <button class="copy-btn" type="button" data-copy="${esc(item.baseUrl || "")}" title="Copy">${COPY_ICON}</button>
+            </div>
           </div>
-          <span class="status-badge ${synced ? "synced" : "unsynced"}">
-            ${synced ? t("synced") : t("unsynced")}
-          </span>
         </div>`;
     }).join("");
+
+    grid.querySelectorAll(".copy-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const text = btn.getAttribute("data-copy");
+        if (text) {
+          navigator.clipboard.writeText(text).then(() => {
+            showToast(t("toastCopied"), "success");
+          });
+        }
+      });
+    });
   } catch (error) {
     showToast(t("loadStatusFailed", { error: String(error) }), "error");
   }
@@ -368,13 +427,31 @@ function renderProfiles() {
   if (profiles.length === 0) {
     grid.innerHTML = `
       <div class="empty-state">
-        <p>${t("noConfigs")}</p>
-        <button class="btn btn-primary" id="addFirstBtn" type="button">${t("addFirstConfig")}</button>
+        <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="18" x2="12" y2="12"/>
+          <line x1="9" y1="15" x2="15" y2="15"/>
+        </svg>
+        <div class="empty-state-title">${t("noConfigsTitle")}</div>
+        <p>${t("noConfigsDesc")}</p>
+        <div class="empty-state-actions">
+          <button class="btn btn-primary" id="addFirstBtn" type="button">${t("addFirstConfig")}</button>
+          <button class="btn btn-secondary" id="importFirstBtn" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            ${t("importBtn")}
+          </button>
+        </div>
       </div>`;
     const addFirstBtn = $("addFirstBtn");
     if (addFirstBtn) {
       addFirstBtn.addEventListener("click", () => $("addBtn").click());
     }
+    const importFirstBtn = $("importFirstBtn");
+    if (importFirstBtn) {
+      importFirstBtn.addEventListener("click", handleImport);
+    }
+    updateActiveConfigBar();
     return;
   }
 
@@ -386,7 +463,7 @@ function renderProfiles() {
       </div>
       <div class="profile-body">
         <div class="profile-field">
-          <span class="field-label">${t("keyLabel")}</span>
+          <span class="field-label">${t("tokenLabel")}</span>
           <span class="field-value">${maskKey(profile.apiKey)}</span>
         </div>
         <div class="profile-field">
@@ -413,6 +490,28 @@ function renderProfiles() {
       if (action === "delete") handleDelete(id);
     });
   });
+
+  updateActiveConfigBar();
+}
+
+function updateActiveConfigBar() {
+  const section = $("activeConfigSection");
+  const nameEl = $("activeConfigName");
+  const activeProfile = profiles.find((p) => p.isActive);
+
+  if (activeProfile) {
+    nameEl.textContent = activeProfile.name;
+    section.style.display = "";
+  } else {
+    section.style.display = "none";
+  }
+}
+
+function handleSyncNow() {
+  const activeProfile = profiles.find((p) => p.isActive);
+  if (activeProfile) {
+    handleSwitch(activeProfile.id);
+  }
 }
 
 function openModal(profile) {
@@ -593,12 +692,15 @@ function showToast(message, type = "success") {
 
 $("addBtn").addEventListener("click", () => openModal(null));
 $("importBtn").addEventListener("click", handleImport);
-$("langBtn").addEventListener("click", toggleLanguage);
-$("themeBtn").addEventListener("click", toggleTheme);
+$("langZhBtn").addEventListener("click", () => setLanguage("zh"));
+$("langEnBtn").addEventListener("click", () => setLanguage("en"));
+$("themeLightBtn").addEventListener("click", () => setTheme("light"));
+$("themeDarkBtn").addEventListener("click", () => setTheme("dark"));
 $("cancelBtn").addEventListener("click", closeModal);
 $("modalClose").addEventListener("click", closeModal);
 $("switchCancelBtn").addEventListener("click", handleCancelSwitch);
 $("profileForm").addEventListener("submit", handleSubmit);
+$("syncNowBtn").addEventListener("click", handleSyncNow);
 $("modalOverlay").addEventListener("click", (event) => {
   if (event.target === $("modalOverlay")) {
     closeModal();
