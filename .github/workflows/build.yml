@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 permissions:
   contents: write
@@ -55,8 +60,8 @@ jobs:
         with:
           tauriScript: npm run tauri
           args: ${{ matrix.args }}
-          tagName: ${{ github.ref_name }}
-          releaseName: VarSwitch ${{ github.ref_name }}
+          tagName: ${{ github.event.inputs.version || github.ref_name }}
+          releaseName: VarSwitch ${{ github.event.inputs.version || github.ref_name }}
           releaseBody: 'See the assets below to download the installer for your platform.'
           releaseDraft: false
           prerelease: false
