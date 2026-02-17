@@ -37,3 +37,7 @@ Thumbs.db
 
 # Claude local settings
 .claude/settings.local.json
+
+# Project local files
+PLAN.md
+src-tauri/varswitch-profiles.json
