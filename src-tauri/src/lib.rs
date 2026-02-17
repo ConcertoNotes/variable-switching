@@ -192,31 +192,51 @@ fn write_profiles(app: &tauri::AppHandle, data: &ProfilesData) -> Result<(), Str
     write_profiles_to_path(&path, data)
 }
 
+fn home_dir() -> PathBuf {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default();
+    PathBuf::from(home)
+}
+
 fn claude_settings_path() -> PathBuf {
-    let home = std::env::var("USERPROFILE").unwrap_or_default();
-    PathBuf::from(home).join(".claude").join("settings.json")
+    home_dir().join(".claude").join("settings.json")
 }
 
 fn vscode_settings_path() -> PathBuf {
-    let appdata = std::env::var("APPDATA").unwrap_or_default();
-    PathBuf::from(appdata)
-        .join("Code")
-        .join("User")
-        .join("settings.json")
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA").unwrap_or_default();
+        PathBuf::from(appdata)
+            .join("Code")
+            .join("User")
+            .join("settings.json")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        home_dir()
+            .join("Library")
+            .join("Application Support")
+            .join("Code")
+            .join("User")
+            .join("settings.json")
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        home_dir()
+            .join(".config")
+            .join("Code")
+            .join("User")
+            .join("settings.json")
+    }
 }
 
 fn claude_commands_dir() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_default();
-    PathBuf::from(home).join(".claude").join("commands")
+    home_dir().join(".claude").join("commands")
 }
 
 fn claude_skills_dir() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_default();
-    PathBuf::from(home).join(".claude").join("skills")
+    home_dir().join(".claude").join("skills")
 }
 
 /// 从 SKILL.md 的 YAML frontmatter 中解析 description
@@ -276,17 +296,11 @@ fn collect_skills_from_skills_dir(skills: &mut Vec<SkillInfo>) {
 }
 
 fn claude_md_path() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_default();
-    PathBuf::from(home).join(".claude").join("CLAUDE.md")
+    home_dir().join(".claude").join("CLAUDE.md")
 }
 
 fn claude_mcp_path() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_default();
-    PathBuf::from(home).join(".claude.json")
+    home_dir().join(".claude.json")
 }
 
 fn read_json(path: &PathBuf) -> Result<serde_json::Value, String> {
@@ -316,9 +330,84 @@ fn reg_set_env(name: &str, value: &str) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
+fn shell_rc_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    PathBuf::from(home).join(".zshrc")
+}
+
+/// 从 shell 配置文件中读取 VarSwitch 管理的环境变量值
+#[cfg(not(target_os = "windows"))]
+fn shell_rc_get_env(name: &str) -> Option<String> {
+    let rc = shell_rc_path();
+    let content = fs::read_to_string(&rc).ok()?;
+    // 查找格式: export NAME="value" # VarSwitch-managed
+    let prefix = format!("export {}=\"", name);
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(&prefix) && trimmed.contains("# VarSwitch-managed") {
+            // 提取引号内的值
+            let after_prefix = &trimmed[prefix.len()..];
+            if let Some(end_quote) = after_prefix.find('"') {
+                return Some(after_prefix[..end_quote].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 在 shell 配置文件中设置环境变量（带 VarSwitch-managed 标记）
+#[cfg(not(target_os = "windows"))]
+fn shell_rc_set_env(name: &str, value: &str) -> Result<(), String> {
+    let rc = shell_rc_path();
+    let content = fs::read_to_string(&rc).unwrap_or_default();
+    let marker = format!("export {}=\"", name);
+    // 过滤掉旧的同名行（仅删除 VarSwitch 管理的行）
+    let mut lines: Vec<&str> = content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !(trimmed.starts_with(&marker) && trimmed.contains("# VarSwitch-managed"))
+        })
+        .collect();
+    // 添加新行
+    let new_line = format!("export {}=\"{}\" # VarSwitch-managed", name, value);
+    lines.push(&new_line);
+    // 确保文件末尾有换行
+    let mut result = lines.join("\n");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    fs::write(&rc, result).map_err(|e| e.to_string())
+}
+
+/// 从 shell 配置文件中删除 VarSwitch 管理的环境变量
+#[cfg(not(target_os = "windows"))]
+fn shell_rc_delete_env(name: &str) -> Result<(), String> {
+    let rc = shell_rc_path();
+    let content = match fs::read_to_string(&rc) {
+        Ok(c) => c,
+        Err(_) => return Ok(()), // 文件不存在则无需删除
+    };
+    let marker = format!("export {}=\"", name);
+    let lines: Vec<&str> = content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !(trimmed.starts_with(&marker) && trimmed.contains("# VarSwitch-managed"))
+        })
+        .collect();
+    let mut result = lines.join("\n");
+    if !result.ends_with('\n') && !result.is_empty() {
+        result.push('\n');
+    }
+    fs::write(&rc, result).map_err(|e| e.to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
 fn reg_set_env(name: &str, value: &str) -> Result<(), String> {
+    // 同时设置进程内环境变量和持久化到 shell 配置文件
     std::env::set_var(name, value);
-    Ok(())
+    shell_rc_set_env(name, value)
 }
 
 #[cfg(target_os = "windows")]
@@ -329,7 +418,8 @@ fn reg_get_env_opt(name: &str) -> Option<String> {
 
 #[cfg(not(target_os = "windows"))]
 fn reg_get_env_opt(name: &str) -> Option<String> {
-    std::env::var(name).ok()
+    // 优先从 shell 配置文件读取持久化的值，回退到进程环境变量
+    shell_rc_get_env(name).or_else(|| std::env::var(name).ok())
 }
 
 fn reg_get_env(name: &str) -> String {
@@ -349,7 +439,7 @@ fn reg_delete_env(name: &str) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 fn reg_delete_env(name: &str) -> Result<(), String> {
     std::env::remove_var(name);
-    Ok(())
+    shell_rc_delete_env(name)
 }
 
 /// Broadcast WM_SETTINGCHANGE so other apps pick up new env vars immediately
@@ -949,7 +1039,45 @@ fn set_auto_start(enable: bool) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+/// macOS 开机自启：通过 LaunchAgent plist 实现
+#[cfg(target_os = "macos")]
+fn set_auto_start(enable: bool) -> Result<(), String> {
+    let home = std::env::var("HOME").map_err(|_| "无法获取 HOME 目录".to_string())?;
+    let launch_agents_dir = PathBuf::from(&home).join("Library").join("LaunchAgents");
+    let plist_path = launch_agents_dir.join("com.varswitch.app.plist");
+
+    if enable {
+        fs::create_dir_all(&launch_agents_dir).map_err(|e| e.to_string())?;
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_str = exe.to_string_lossy();
+        let plist_content = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.varswitch.app</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>"#,
+            exe_str
+        );
+        fs::write(&plist_path, plist_content).map_err(|e| e.to_string())
+    } else {
+        match fs::remove_file(&plist_path) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn set_auto_start(_enable: bool) -> Result<(), String> {
     Ok(())
 }
@@ -998,7 +1126,11 @@ fn open_folder(path: String) -> Result<(), String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        std::process::Command::new("xdg-open")
+        #[cfg(target_os = "macos")]
+        let cmd = "open";
+        #[cfg(not(target_os = "macos"))]
+        let cmd = "xdg-open";
+        std::process::Command::new(cmd)
             .arg(dir.to_string_lossy().to_string())
             .spawn()
             .map_err(|e| e.to_string())?;
