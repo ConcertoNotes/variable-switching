@@ -7,6 +7,23 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- 启动动画遮罩 -->
+  <div class="splash-screen" id="splashScreen">
+    <div class="splash-content">
+      <div class="splash-icon-wrapper">
+        <div class="splash-glow"></div>
+        <img src="app-icon.png" width="64" height="64" alt="VarSwitch" class="splash-icon">
+      </div>
+      <div class="splash-text">
+        <div class="splash-title">VarSwitch</div>
+        <div class="splash-subtitle">Environment Sync Manager</div>
+      </div>
+      <div class="splash-loader">
+        <div class="splash-loader-bar"></div>
+      </div>
+    </div>
+  </div>
+
   <header class="toolbar">
     <div class="toolbar-inner">
       <div class="toolbar-left">
@@ -26,6 +43,18 @@
           <button class="seg-btn" id="themeDarkBtn" type="button">Dark</button>
         </div>
         <div class="toolbar-divider"></div>
+        <button class="toolbar-btn-icon" id="skillsBtn" type="button" title="Skills">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        </button>
+        <button class="toolbar-btn-icon" id="promptsBtn" type="button" title="Prompts">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </button>
+        <button class="toolbar-btn-icon" id="mcpBtn" type="button" title="MCP">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        </button>
+        <button class="toolbar-btn-icon" id="settingsBtn" type="button" title="Settings">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
         <button class="toolbar-btn toolbar-btn-secondary" id="importBtn" type="button">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           <span id="importBtnText">Import Current</span>
@@ -117,6 +146,277 @@
         </div>
       </div>
       <button class="btn btn-cancel-switch" id="switchCancelBtn" type="button">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Skills Management Panel -->
+  <div class="mgmt-overlay" id="skillsOverlay">
+    <div class="mgmt-panel mgmt-panel-wide">
+      <div class="mgmt-header">
+        <h2 id="skillsTitle">Skills Management</h2>
+        <button class="modal-close" id="skillsClose" type="button">&times;</button>
+      </div>
+
+      <!-- Tab Bar -->
+      <div class="skills-tabs">
+        <button class="skills-tab active" id="skillsTabInstalled" type="button">Installed</button>
+        <button class="skills-tab" id="skillsTabDiscover" type="button">Discover</button>
+      </div>
+
+      <!-- Installed Tab -->
+      <div class="skills-tab-content" id="skillsInstalledContent">
+        <div class="mgmt-toolbar" id="skillsToolbar">
+          <button class="btn btn-primary btn-sm" id="addSkillBtn" type="button">+ Add Skill</button>
+        </div>
+        <div class="mgmt-body" id="skillsList"></div>
+        <div class="mgmt-edit" id="skillsEdit" style="display:none;">
+          <div class="form-group">
+            <label id="skillNameLabel2">Command Name</label>
+            <input type="text" id="skillNameInput" placeholder="command-name">
+          </div>
+          <div class="form-group">
+            <label id="skillContentLabel">Content</label>
+            <textarea class="mgmt-textarea" id="skillContentInput" rows="14" placeholder="Skill content in Markdown..."></textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-secondary" id="skillCancelBtn" type="button">Cancel</button>
+            <button class="btn btn-primary" id="skillSaveBtn" type="button">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Discover Tab -->
+      <div class="skills-tab-content" id="skillsDiscoverContent" style="display:none;">
+        <div class="discover-toolbar">
+          <input type="text" class="discover-search" id="discoverSearch" placeholder="Filter or Enter to search GitHub...">
+          <button class="btn btn-primary btn-sm" id="searchGithubSkillsBtn" type="button" title="Search GitHub">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span id="searchGithubSkillsBtnText">GitHub</span>
+          </button>
+          <select class="discover-filter" id="discoverRepoFilter">
+            <option value="all">All Repos</option>
+          </select>
+          <select class="discover-filter" id="discoverStatusFilter">
+            <option value="all">All</option>
+            <option value="installed">Installed</option>
+            <option value="not-installed">Not Installed</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" id="refreshDiscoverBtn" type="button" title="Refresh">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+          <button class="btn btn-secondary btn-sm" id="manageReposBtn" type="button">Repos</button>
+        </div>
+        <!-- GitHub 搜索结果提示栏 -->
+        <div class="discover-github-banner" id="discoverGithubBanner" style="display:none;">
+          <span id="discoverGithubBannerText">Showing GitHub search results</span>
+          <button class="btn btn-secondary btn-sm" id="backToCatalogBtn" type="button">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            <span id="backToCatalogBtnText">Back to catalog</span>
+          </button>
+        </div>
+        <div class="discover-loading" id="discoverLoading" style="display:none;">
+          <div class="discover-spinner"></div>
+          <span id="discoverLoadingText">Loading skills...</span>
+        </div>
+        <div class="discover-grid" id="discoverGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Repo Manager Modal -->
+  <div class="modal-overlay" id="repoManagerOverlay">
+    <div class="modal" style="max-width:540px;">
+      <div class="modal-header">
+        <h2 id="repoManagerTitle">Manage Repositories</h2>
+        <button class="modal-close" id="repoManagerClose" type="button">&times;</button>
+      </div>
+      <div class="mgmt-body" id="repoList" style="max-height:300px;margin-bottom:16px;"></div>
+      <div class="form-group" style="margin-bottom:0;">
+        <label id="addRepoLabel">Add Repository</label>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="repoUrlInput" placeholder="owner/repo or https://github.com/owner/repo" style="flex:1;">
+          <button class="btn btn-primary btn-sm" id="addRepoBtn" type="button">Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompts Management Panel -->
+  <div class="mgmt-overlay" id="promptsOverlay">
+    <div class="mgmt-panel mgmt-panel-wide">
+      <div class="mgmt-header">
+        <h2 id="promptsTitle2">Claude Prompts</h2>
+        <button class="modal-close" id="promptsClose" type="button">&times;</button>
+      </div>
+
+      <!-- Prompt Tabs -->
+      <div class="skills-tabs">
+        <button class="skills-tab active" id="promptTabEditor" type="button">Editor</button>
+        <button class="skills-tab" id="promptTabTemplates" type="button">Templates</button>
+      </div>
+
+      <!-- Editor Tab -->
+      <div class="skills-tab-content" id="promptEditorContent">
+        <div class="mgmt-hint" id="promptsPath">~/.claude/CLAUDE.md</div>
+        <div class="mgmt-toolbar" style="gap:8px;">
+          <select class="discover-filter" id="promptInsertSelect" style="flex:1;">
+            <option value="">-- Insert snippet --</option>
+          </select>
+          <button class="btn btn-primary btn-sm" id="promptSaveBtn" type="button">Save</button>
+        </div>
+        <div class="mgmt-body">
+          <textarea class="mgmt-textarea mgmt-textarea-lg" id="promptContentInput" rows="20" placeholder="CLAUDE.md content..."></textarea>
+        </div>
+      </div>
+
+      <!-- Templates Tab -->
+      <div class="skills-tab-content" id="promptTemplatesContent" style="display:none;">
+        <div class="discover-grid" id="promptTemplatesGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MCP Server Management Panel -->
+  <div class="mgmt-overlay" id="mcpOverlay">
+    <div class="mgmt-panel mgmt-panel-wide">
+      <div class="mgmt-header">
+        <h2 id="mcpTitle2">MCP Servers</h2>
+        <button class="modal-close" id="mcpClose" type="button">&times;</button>
+      </div>
+
+      <!-- MCP Tabs -->
+      <div class="skills-tabs">
+        <button class="skills-tab active" id="mcpTabInstalled" type="button">Installed</button>
+        <button class="skills-tab" id="mcpTabPresets" type="button">Presets</button>
+      </div>
+
+      <!-- Installed Tab -->
+      <div class="skills-tab-content" id="mcpInstalledContent">
+        <div class="mgmt-hint" id="mcpPath">~/.claude.json</div>
+        <div class="mgmt-toolbar" id="mcpToolbar">
+          <button class="btn btn-primary btn-sm" id="addMcpBtn" type="button">+ Add Server</button>
+        </div>
+        <div class="mgmt-body" id="mcpList"></div>
+        <div class="mgmt-edit" id="mcpEdit" style="display:none;">
+          <div class="form-group">
+            <label id="mcpNameLabel2">Server Name</label>
+            <input type="text" id="mcpNameInput" placeholder="server-name">
+          </div>
+          <div class="form-group">
+            <label id="mcpConfigLabel">Config (JSON)</label>
+            <textarea class="mgmt-textarea" id="mcpConfigInput" rows="12" placeholder='{"command": "npx", "args": [...]}'></textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-secondary" id="mcpCancelBtn" type="button">Cancel</button>
+            <button class="btn btn-primary" id="mcpSaveBtn" type="button">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Presets Tab -->
+      <div class="skills-tab-content" id="mcpPresetsContent" style="display:none;">
+        <div class="discover-toolbar">
+          <input type="text" class="discover-search" id="mcpPresetSearch" placeholder="Search MCP servers on GitHub...">
+        </div>
+        <div class="discover-loading" id="mcpPresetLoading" style="display:none;">
+          <span class="spinner"></span>
+          <span id="mcpPresetLoadingText">Searching GitHub...</span>
+        </div>
+        <div class="discover-grid" id="mcpPresetsGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Panel -->
+  <div class="mgmt-overlay" id="settingsOverlay">
+    <div class="mgmt-panel">
+      <div class="mgmt-header">
+        <h2 id="settingsTitle2">Settings</h2>
+        <button class="modal-close" id="settingsClose" type="button">&times;</button>
+      </div>
+      <div class="settings-body">
+        <!-- 通用设置 -->
+        <div class="settings-group">
+          <div class="settings-group-title" id="settingsGroupGeneral">General</div>
+          <div class="settings-group-items">
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsAutoStartLabel">Launch at startup</div>
+                <div class="settings-row-desc" id="settingsAutoStartDesc">Automatically start VarSwitch when you log in</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="settingsAutoStart">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsMinTrayLabel">Minimize to tray</div>
+                <div class="settings-row-desc" id="settingsMinTrayDesc">Hide to system tray when closing the window</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="settingsMinTray">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsSilentStartLabel">Silent startup</div>
+                <div class="settings-row-desc" id="settingsSilentStartDesc">Start minimized to system tray</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="settingsSilentStart">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 目录设置 -->
+        <div class="settings-group">
+          <div class="settings-group-title" id="settingsGroupPaths">Paths</div>
+          <div class="settings-group-items">
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsConfigDirLabel">Config directory</div>
+                <div class="settings-row-value" id="settingsConfigDirValue">--</div>
+              </div>
+              <div class="settings-row-action">
+                <button class="btn btn-secondary btn-sm" id="settingsOpenConfigDir" type="button">Open</button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsClaudePathLabel">Claude settings</div>
+                <div class="settings-row-value" id="settingsClaudePathValue">--</div>
+              </div>
+              <div class="settings-row-action">
+                <button class="btn btn-secondary btn-sm" id="settingsOpenClaudeDir" type="button">Open</button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsVscodePathLabel">VSCode settings</div>
+                <div class="settings-row-value" id="settingsVscodePathValue">--</div>
+              </div>
+              <div class="settings-row-action">
+                <button class="btn btn-secondary btn-sm" id="settingsOpenVscodeDir" type="button">Open</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 备份管理 -->
+        <div class="settings-group">
+          <div class="settings-group-title" id="settingsGroupBackup">Backup</div>
+          <div class="settings-group-items">
+            <div class="settings-backup-actions">
+              <button class="btn btn-secondary" id="settingsExportBtn" type="button">Export Profiles</button>
+              <button class="btn btn-secondary" id="settingsImportBtn" type="button">Import Profiles</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
