@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,7 +52,8 @@ struct SwitchResult {
 #[serde(rename_all = "camelCase")]
 struct SwitchDetails {
     env_vars: bool,
-    vscode: bool,
+    /// 动态编辑器结果: key = 编辑器 id (如 "vscode", "cursor"), value = 是否成功
+    editors: HashMap<String, bool>,
     claude: bool,
 }
 
@@ -66,7 +68,8 @@ struct LocationStatus {
 #[serde(rename_all = "camelCase")]
 struct StatusResult {
     env_vars: Option<LocationStatus>,
-    vscode: Option<LocationStatus>,
+    /// 动态编辑器状态: key = 编辑器 id, value = 状态
+    editors: HashMap<String, LocationStatus>,
     claude: Option<LocationStatus>,
 }
 
@@ -77,7 +80,8 @@ struct ConfigSnapshot {
     env_auth_key: Option<String>,
     env_api_key: Option<String>,
     env_base_url: Option<String>,
-    vscode_content: Option<String>,
+    /// 动态编辑器快照: key = 编辑器 id, value = 文件内容
+    editor_contents: HashMap<String, String>,
     claude_content: Option<String>,
 }
 
@@ -127,7 +131,8 @@ struct AppPaths {
     config_dir: String,
     profiles_path: String,
     claude_settings: String,
-    vscode_settings: String,
+    /// 动态编辑器路径: key = 编辑器 id, value = settings.json 路径
+    editor_settings: HashMap<String, String>,
     claude_md: String,
     claude_mcp: String,
 }
@@ -203,12 +208,58 @@ fn claude_settings_path() -> PathBuf {
     home_dir().join(".claude").join("settings.json")
 }
 
-fn vscode_settings_path() -> PathBuf {
+/// 编辑器信息
+struct EditorDef {
+    /// 唯一标识 (如 "vscode", "cursor")
+    id: &'static str,
+    /// 显示名称
+    display_name: &'static str,
+    /// Windows 下 %APPDATA% 内的子目录名
+    #[cfg(target_os = "windows")]
+    win_appdata_dir: &'static str,
+    /// macOS 下 ~/Library/Application Support/ 内的子目录名
+    #[cfg(target_os = "macos")]
+    mac_app_support_dir: &'static str,
+    /// Linux 下 ~/.config/ 内的子目录名
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    linux_config_dir: &'static str,
+}
+
+/// 所有支持的编辑器定义
+#[cfg(target_os = "windows")]
+const KNOWN_EDITORS: &[EditorDef] = &[
+    EditorDef { id: "vscode", display_name: "VS Code", win_appdata_dir: "Code" },
+    EditorDef { id: "vscode-insiders", display_name: "VS Code Insiders", win_appdata_dir: "Code - Insiders" },
+    EditorDef { id: "cursor", display_name: "Cursor", win_appdata_dir: "Cursor" },
+    EditorDef { id: "windsurf", display_name: "Windsurf", win_appdata_dir: "Windsurf" },
+    EditorDef { id: "trae", display_name: "Trae", win_appdata_dir: "Trae" },
+];
+
+#[cfg(target_os = "macos")]
+const KNOWN_EDITORS: &[EditorDef] = &[
+    EditorDef { id: "vscode", display_name: "VS Code", mac_app_support_dir: "Code" },
+    EditorDef { id: "vscode-insiders", display_name: "VS Code Insiders", mac_app_support_dir: "Code - Insiders" },
+    EditorDef { id: "cursor", display_name: "Cursor", mac_app_support_dir: "Cursor" },
+    EditorDef { id: "windsurf", display_name: "Windsurf", mac_app_support_dir: "Windsurf" },
+    EditorDef { id: "trae", display_name: "Trae", mac_app_support_dir: "Trae" },
+];
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+const KNOWN_EDITORS: &[EditorDef] = &[
+    EditorDef { id: "vscode", display_name: "VS Code", linux_config_dir: "Code" },
+    EditorDef { id: "vscode-insiders", display_name: "VS Code Insiders", linux_config_dir: "Code - Insiders" },
+    EditorDef { id: "cursor", display_name: "Cursor", linux_config_dir: "Cursor" },
+    EditorDef { id: "windsurf", display_name: "Windsurf", linux_config_dir: "Windsurf" },
+    EditorDef { id: "trae", display_name: "Trae", linux_config_dir: "Trae" },
+];
+
+/// 获取编辑器 settings.json 的路径
+fn editor_settings_path(editor: &EditorDef) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA").unwrap_or_default();
         PathBuf::from(appdata)
-            .join("Code")
+            .join(editor.win_appdata_dir)
             .join("User")
             .join("settings.json")
     }
@@ -217,7 +268,7 @@ fn vscode_settings_path() -> PathBuf {
         home_dir()
             .join("Library")
             .join("Application Support")
-            .join("Code")
+            .join(editor.mac_app_support_dir)
             .join("User")
             .join("settings.json")
     }
@@ -225,10 +276,22 @@ fn vscode_settings_path() -> PathBuf {
     {
         home_dir()
             .join(".config")
-            .join("Code")
+            .join(editor.linux_config_dir)
             .join("User")
             .join("settings.json")
     }
+}
+
+/// 检测已安装的编辑器（配置目录 User/ 存在即视为已安装）
+fn detect_installed_editors() -> Vec<&'static EditorDef> {
+    KNOWN_EDITORS
+        .iter()
+        .filter(|ed| {
+            let path = editor_settings_path(ed);
+            // 只要 User 目录存在就认为已安装（settings.json 可以不存在，我们会自动创建）
+            path.parent().map(|p| p.exists()).unwrap_or(false)
+        })
+        .collect()
 }
 
 fn claude_commands_dir() -> PathBuf {
@@ -308,7 +371,16 @@ fn read_json(path: &PathBuf) -> Result<serde_json::Value, String> {
     serde_json::from_str(&s).map_err(|e| e.to_string())
 }
 
+/// 读取 JSON 文件，如果不存在则返回默认值
+fn read_json_or_default(path: &PathBuf, default: serde_json::Value) -> serde_json::Value {
+    read_json(path).unwrap_or(default)
+}
+
 fn write_json(path: &PathBuf, val: &serde_json::Value) -> Result<(), String> {
+    // 自动创建父目录
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     let s = serde_json::to_string_pretty(val).map_err(|e| e.to_string())?;
     fs::write(path, s).map_err(|e| e.to_string())
 }
@@ -691,12 +763,18 @@ fn delete_profile(app: tauri::AppHandle, id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn snapshot_config() -> ConfigSnapshot {
+    let mut editor_contents = HashMap::new();
+    for editor in detect_installed_editors() {
+        if let Ok(content) = fs::read_to_string(editor_settings_path(editor)) {
+            editor_contents.insert(editor.id.to_string(), content);
+        }
+    }
     ConfigSnapshot {
         env_auth_token: reg_get_env_opt(AUTH_TOKEN_ENV),
         env_auth_key: reg_get_env_opt(AUTH_KEY_ENV),
         env_api_key: reg_get_env_opt(LEGACY_AUTH_ENV),
         env_base_url: reg_get_env_opt(BASE_URL_ENV),
-        vscode_content: fs::read_to_string(vscode_settings_path()).ok(),
+        editor_contents,
         claude_content: fs::read_to_string(claude_settings_path()).ok(),
     }
 }
@@ -709,13 +787,19 @@ fn restore_config(snapshot: ConfigSnapshot) -> Result<(), String> {
     restore_system_env_var(BASE_URL_ENV, &snapshot.env_base_url)?;
     broadcast_env_change();
 
-    if let Some(content) = &snapshot.vscode_content {
-        let path = vscode_settings_path();
-        fs::write(&path, content).map_err(|e| e.to_string())?;
+    // 恢复所有编辑器配置
+    for (editor_id, content) in &snapshot.editor_contents {
+        if let Some(editor) = KNOWN_EDITORS.iter().find(|e| e.id == editor_id.as_str()) {
+            let path = editor_settings_path(editor);
+            fs::write(&path, content).map_err(|e| e.to_string())?;
+        }
     }
 
     if let Some(content) = &snapshot.claude_content {
         let path = claude_settings_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
         fs::write(&path, content).map_err(|e| e.to_string())?;
     }
 
@@ -746,7 +830,7 @@ fn switch_profile(
     let mut errors: Vec<String> = Vec::new();
     let mut details = SwitchDetails {
         env_vars: false,
-        vscode: false,
+        editors: HashMap::new(),
         claude: false,
     };
 
@@ -781,29 +865,33 @@ fn switch_profile(
         });
     }
 
-    emit_switch_progress(&app, 3, "vscode");
-    let vsc = vscode_settings_path();
-    match read_json(&vsc) {
-        Ok(mut settings) => {
-            if !settings
-                .get("claudeCode.environmentVariables")
-                .map(|v| v.is_array())
-                .unwrap_or(false)
-            {
-                settings["claudeCode.environmentVariables"] = serde_json::json!([]);
-            }
-            if let Some(arr) = settings
-                .get_mut("claudeCode.environmentVariables")
-                .and_then(|v| v.as_array_mut())
-            {
-                apply_auth_to_env_array(arr, &profile.api_key, &profile.base_url);
-            }
-            match write_json(&vsc, &settings) {
-                Ok(_) => details.vscode = true,
-                Err(e) => errors.push(format!("VSCode: {}", e)),
+    emit_switch_progress(&app, 3, "editors");
+    // 自动检测已安装的编辑器并逐一写入配置
+    let editors = detect_installed_editors();
+    for editor in &editors {
+        let path = editor_settings_path(editor);
+        // 读取现有配置，文件不存在则使用空 JSON 对象
+        let mut settings = read_json_or_default(&path, serde_json::json!({}));
+        if !settings
+            .get("claudeCode.environmentVariables")
+            .map(|v| v.is_array())
+            .unwrap_or(false)
+        {
+            settings["claudeCode.environmentVariables"] = serde_json::json!([]);
+        }
+        if let Some(arr) = settings
+            .get_mut("claudeCode.environmentVariables")
+            .and_then(|v| v.as_array_mut())
+        {
+            apply_auth_to_env_array(arr, &profile.api_key, &profile.base_url);
+        }
+        match write_json(&path, &settings) {
+            Ok(_) => { details.editors.insert(editor.id.to_string(), true); }
+            Err(e) => {
+                details.editors.insert(editor.id.to_string(), false);
+                errors.push(format!("{}: {}", editor.display_name, e));
             }
         }
-        Err(e) => errors.push(format!("VSCode: {}", e)),
     }
 
     if state.cancel_flag.load(Ordering::SeqCst) {
@@ -818,26 +906,29 @@ fn switch_profile(
 
     emit_switch_progress(&app, 4, "claude");
     let cp = claude_settings_path();
-    match read_json(&cp) {
-        Ok(mut settings) => {
-            if !settings.is_object() {
-                settings = serde_json::json!({});
-            }
-            if !settings
-                .get("env")
-                .map(|v| v.is_object())
-                .unwrap_or(false)
-            {
-                settings["env"] = serde_json::json!({});
-            }
-            if let Some(env) = settings.get_mut("env").and_then(|v| v.as_object_mut()) {
-                apply_auth_to_env_object(env, &profile.api_key, &profile.base_url);
-            }
-            match write_json(&cp, &settings) {
-                Ok(_) => details.claude = true,
-                Err(e) => errors.push(format!("Claude: {}", e)),
-            }
-        }
+    // 文件不存在时自动创建默认配置
+    let mut settings = read_json_or_default(&cp, serde_json::json!({
+        "permissions": {
+            "allow": [],
+            "deny": []
+        },
+        "env": {}
+    }));
+    if !settings.is_object() {
+        settings = serde_json::json!({});
+    }
+    if !settings
+        .get("env")
+        .map(|v| v.is_object())
+        .unwrap_or(false)
+    {
+        settings["env"] = serde_json::json!({});
+    }
+    if let Some(env) = settings.get_mut("env").and_then(|v| v.as_object_mut()) {
+        apply_auth_to_env_object(env, &profile.api_key, &profile.base_url);
+    }
+    match write_json(&cp, &settings) {
+        Ok(_) => details.claude = true,
         Err(e) => errors.push(format!("Claude: {}", e)),
     }
 
@@ -876,14 +967,20 @@ fn get_status() -> StatusResult {
         base_url: reg_get_env(BASE_URL_ENV),
     });
 
-    let vscode = (|| -> Option<LocationStatus> {
-        let s = read_json(&vscode_settings_path()).ok()?;
-        let arr = s.get("claudeCode.environmentVariables")?.as_array()?;
-        Some(LocationStatus {
-            api_key: read_auth_from_env_array(arr),
-            base_url: get_env_array_value(arr, BASE_URL_ENV).unwrap_or_default(),
-        })
-    })();
+    // 动态检测已安装的编辑器并读取状态
+    let mut editors = HashMap::new();
+    for editor in detect_installed_editors() {
+        if let Some(status) = (|| -> Option<LocationStatus> {
+            let s = read_json(&editor_settings_path(editor)).ok()?;
+            let arr = s.get("claudeCode.environmentVariables")?.as_array()?;
+            Some(LocationStatus {
+                api_key: read_auth_from_env_array(arr),
+                base_url: get_env_array_value(arr, BASE_URL_ENV).unwrap_or_default(),
+            })
+        })() {
+            editors.insert(editor.id.to_string(), status);
+        }
+    }
 
     let claude = (|| -> Option<LocationStatus> {
         let s = read_json(&claude_settings_path()).ok()?;
@@ -900,9 +997,18 @@ fn get_status() -> StatusResult {
 
     StatusResult {
         env_vars,
-        vscode,
+        editors,
         claude,
     }
+}
+
+/// 返回检测到的已安装编辑器列表 (id -> displayName)
+#[tauri::command]
+fn get_detected_editors() -> HashMap<String, String> {
+    detect_installed_editors()
+        .into_iter()
+        .map(|ed| (ed.id.to_string(), ed.display_name.to_string()))
+        .collect()
 }
 
 #[tauri::command]
@@ -910,7 +1016,7 @@ fn import_current(app: tauri::AppHandle, name: String) -> Result<Profile, String
     let mut api_key = String::new();
     let mut base_url = String::new();
 
-    // Try Claude settings first
+    // 先尝试 Claude settings
     if let Ok(s) = read_json(&claude_settings_path()) {
         if let Some(env) = s.get("env").and_then(|v| v.as_object()) {
             api_key = read_auth_from_env_object(env);
@@ -922,19 +1028,24 @@ fn import_current(app: tauri::AppHandle, name: String) -> Result<Profile, String
         }
     }
 
-    // Fallback to VSCode settings for any missing field
+    // 回退到已安装的编辑器配置
     if api_key.is_empty() || base_url.is_empty() {
-        if let Ok(s) = read_json(&vscode_settings_path()) {
-            if let Some(arr) = s
-                .get("claudeCode.environmentVariables")
-                .and_then(|v| v.as_array())
-            {
-                if api_key.is_empty() {
-                    api_key = read_auth_from_env_array(arr);
+        for editor in detect_installed_editors() {
+            if let Ok(s) = read_json(&editor_settings_path(editor)) {
+                if let Some(arr) = s
+                    .get("claudeCode.environmentVariables")
+                    .and_then(|v| v.as_array())
+                {
+                    if api_key.is_empty() {
+                        api_key = read_auth_from_env_array(arr);
+                    }
+                    if base_url.is_empty() {
+                        base_url = get_env_array_value(arr, BASE_URL_ENV).unwrap_or_default();
+                    }
                 }
-                if base_url.is_empty() {
-                    base_url = get_env_array_value(arr, BASE_URL_ENV).unwrap_or_default();
-                }
+            }
+            if !api_key.is_empty() && !base_url.is_empty() {
+                break;
             }
         }
     }
@@ -1098,11 +1209,18 @@ fn save_app_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(),
 
 #[tauri::command]
 fn get_app_paths(app: tauri::AppHandle) -> AppPaths {
+    let mut editor_settings = HashMap::new();
+    for editor in detect_installed_editors() {
+        editor_settings.insert(
+            editor.id.to_string(),
+            editor_settings_path(editor).to_string_lossy().to_string(),
+        );
+    }
     AppPaths {
         config_dir: data_dir(&app).to_string_lossy().to_string(),
         profiles_path: profiles_path(&app).to_string_lossy().to_string(),
         claude_settings: claude_settings_path().to_string_lossy().to_string(),
-        vscode_settings: vscode_settings_path().to_string_lossy().to_string(),
+        editor_settings,
         claude_md: claude_md_path().to_string_lossy().to_string(),
         claude_mcp: claude_mcp_path().to_string_lossy().to_string(),
     }
@@ -2581,6 +2699,7 @@ pub fn run() {
             delete_profile,
             switch_profile,
             get_status,
+            get_detected_editors,
             import_current,
             snapshot_config,
             restore_config,

@@ -623,6 +623,74 @@ body::before {
   border-color: transparent;
 }
 
+/* ======================== EDITOR CAROUSEL ======================== */
+
+.editor-carousel {
+  position: relative;
+  min-height: 140px;
+  cursor: pointer;
+}
+
+.editor-carousel .status-card {
+  position: absolute;
+  inset: 0;
+  transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1),
+              opacity 0.35s cubic-bezier(0.32, 0.72, 0, 1),
+              box-shadow 0.35s ease;
+  will-change: transform, opacity;
+}
+
+/* 当前显示的卡片 */
+.editor-carousel .status-card.carousel-active {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+  z-index: 3;
+}
+
+/* 非当前卡片全部隐藏 */
+.editor-carousel .status-card.carousel-next,
+.editor-carousel .status-card.carousel-hidden {
+  transform: translateY(0) scale(1);
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* 轮播指示器 */
+.carousel-indicator {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 5px;
+  z-index: 10;
+}
+
+.carousel-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.3;
+  transition: opacity 0.2s, background 0.2s, transform 0.2s;
+}
+
+.carousel-dot.active {
+  opacity: 1;
+  background: var(--brand);
+  transform: scale(1.3);
+}
+
+/* 单个编辑器时不需要轮播样式 */
+.editor-carousel.single .status-card {
+  position: relative;
+}
+
+.editor-carousel.single .carousel-indicator {
+  display: none;
+}
+
 /* ======================== PROFILES ======================== */
 
 .profiles-grid {

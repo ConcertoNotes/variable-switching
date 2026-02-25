@@ -25,7 +25,7 @@ const I18N = {
     importBtn: "Import Current",
     addBtn: "+ Add Config",
     statusTitle: "Current Status",
-    statusHint: "Restart terminal and VSCode after switching to apply environment variables.",
+    statusHint: "Restart terminal and editor after switching to apply environment variables.",
     profilesTitle: "Config List",
     addConfig: "Add Config",
     editConfig: "Edit Config",
@@ -39,16 +39,15 @@ const I18N = {
     switchDone: "Switch complete",
     cancelSwitch: "Cancel Switch",
     stepSystem: "System Env",
-    stepVscode: "VSCode",
+    stepEditors: "Editors",
     stepClaude: "Claude",
     progressSystem: "Updating system environment variables...",
-    progressVscode: "Updating VSCode settings...",
+    progressEditors: "Updating editor settings...",
     progressClaude: "Updating Claude settings...",
     progressFinalize: "Finalizing switch...",
     progressDone: "Done",
     progressCancelling: "Cancelling...",
     statusSystemEnv: "System Environment",
-    statusVscode: "VSCode Settings",
     statusClaude: "Claude Settings",
     readFailed: "Read failed",
     synced: "Synced",
@@ -178,7 +177,6 @@ const I18N = {
     settingsMinTrayDesc: "Hide to system tray when closing the window",
     settingsConfigDir: "Config directory",
     settingsClaudePath: "Claude settings",
-    settingsVscodePath: "VSCode settings",
     settingsOpen: "Open",
     settingsExport: "Export Profiles",
     settingsImport: "Import Profiles",
@@ -197,7 +195,7 @@ const I18N = {
     importBtn: "导入当前配置",
     addBtn: "+ 添加配置",
     statusTitle: "当前配置状态",
-    statusHint: "切换后请重启终端和 VSCode，使环境变量生效。",
+    statusHint: "切换后请重启终端和编辑器，使环境变量生效。",
     profilesTitle: "配置列表",
     addConfig: "添加配置",
     editConfig: "编辑配置",
@@ -211,16 +209,15 @@ const I18N = {
     switchDone: "切换完成",
     cancelSwitch: "取消切换",
     stepSystem: "系统环境变量",
-    stepVscode: "VSCode",
+    stepEditors: "编辑器",
     stepClaude: "Claude",
     progressSystem: "正在更新系统环境变量...",
-    progressVscode: "正在更新 VSCode 设置...",
+    progressEditors: "正在更新编辑器设置...",
     progressClaude: "正在更新 Claude 设置...",
     progressFinalize: "正在收尾...",
     progressDone: "完成",
     progressCancelling: "正在取消...",
     statusSystemEnv: "系统环境变量",
-    statusVscode: "VSCode 设置",
     statusClaude: "Claude 设置",
     readFailed: "读取失败",
     synced: "已同步",
@@ -348,7 +345,6 @@ const I18N = {
     settingsMinTrayDesc: "关闭窗口时隐藏到系统托盘",
     settingsConfigDir: "配置目录",
     settingsClaudePath: "Claude 设置",
-    settingsVscodePath: "VSCode 设置",
     settingsOpen: "打开",
     settingsExport: "导出配置",
     settingsImport: "导入配置",
@@ -374,6 +370,7 @@ if (currentTheme !== "light" && currentTheme !== "dark") {
 }
 
 let profiles = [];
+let detectedEditors = {}; // { id: displayName }
 let editingId = null;
 let switchingSnapshot = null;
 let progressUnlisten = null;
@@ -387,6 +384,7 @@ let activeSkillsTab = "installed";
 let discoverSearchQuery = "";
 let discoverRepoFilter = "all";
 let discoverStatusFilter = "all";
+let editorCarouselIndex = 0;
 let isDiscovering = false;
 let promptTemplates = [];
 let activePromptTab = "editor";
@@ -471,7 +469,7 @@ function applyLanguage() {
   $("submitBtn").textContent = t("save");
   $("switchPanelTitle").textContent = t("switchingTo");
   $("switchStep1Text").textContent = t("stepSystem");
-  $("switchStep2Text").textContent = t("stepVscode");
+  $("switchStep2Text").textContent = t("stepEditors");
   $("switchStep3Text").textContent = t("stepClaude");
   $("switchCancelBtn").textContent = t("cancelSwitch");
   $("switchStepLabel").textContent = t("preparing");
@@ -554,10 +552,8 @@ function applyLanguage() {
   $("settingsMinTrayDesc").textContent = t("settingsMinTrayDesc");
   $("settingsConfigDirLabel").textContent = t("settingsConfigDir");
   $("settingsClaudePathLabel").textContent = t("settingsClaudePath");
-  $("settingsVscodePathLabel").textContent = t("settingsVscodePath");
   $("settingsOpenConfigDir").textContent = t("settingsOpen");
   $("settingsOpenClaudeDir").textContent = t("settingsOpen");
-  $("settingsOpenVscodeDir").textContent = t("settingsOpen");
   $("settingsExportBtn").textContent = t("settingsExport");
   $("settingsImportBtn").textContent = t("settingsImport");
   $("settingsSilentStartLabel").textContent = t("settingsSilentStart");
@@ -604,7 +600,7 @@ function hideSwitchOverlay() {
 function switchProgressLabel(step) {
   if (step <= 1) return t("preparing");
   if (step === 2) return t("progressSystem");
-  if (step === 3) return t("progressVscode");
+  if (step === 3) return t("progressEditors");
   if (step === 4) return t("progressClaude");
   if (step === 5) return t("progressFinalize");
   if (step >= 6) return t("progressDone");
@@ -622,7 +618,8 @@ function updateSwitchProgress(payload) {
   const labelMap = {
     prepare: t("preparing"),
     system: t("progressSystem"),
-    vscode: t("progressVscode"),
+    vscode: t("progressEditors"),
+    editors: t("progressEditors"),
     claude: t("progressClaude"),
     finalize: t("progressFinalize"),
     done: t("progressDone")
@@ -645,39 +642,53 @@ function updateSwitchProgress(payload) {
 
 async function loadStatus() {
   try {
-    const status = await invoke("get_status");
+    // 同时获取状态和检测到的编辑器列表
+    const [status, editors] = await Promise.all([
+      invoke("get_status"),
+      invoke("get_detected_editors"),
+    ]);
+    detectedEditors = editors || {};
     const grid = $("statusGrid");
 
-    const locations = [
-      { key: "envVars", title: t("statusSystemEnv") },
-      { key: "vscode", title: t("statusVscode") },
-      { key: "claude", title: t("statusClaude") }
-    ];
+    // 构建编辑器列表
+    const editorLocations = [];
+    for (const [editorId, displayName] of Object.entries(detectedEditors)) {
+      editorLocations.push({
+        key: `editor_${editorId}`,
+        title: `${displayName} ${t("settingsOpen") === "打开" ? "设置" : "Settings"}`,
+        data: (status.editors || {})[editorId] || null
+      });
+    }
 
-    const keys = locations.map((l) => status[l.key]?.apiKey).filter(Boolean);
-    const urls = locations.map((l) => status[l.key]?.baseUrl).filter(Boolean);
-    const synced = keys.length > 0 && new Set(keys).size <= 1 && new Set(urls).size <= 1;
+    // 固定三列：系统环境变量、编辑器轮播、Claude
+    const systemLoc = { key: "envVars", title: t("statusSystemEnv"), data: status.envVars };
+    const claudeLoc = { key: "claude", title: t("statusClaude"), data: status.claude };
+
+    // 计算同步状态
+    const allLocations = [systemLoc, ...editorLocations, claudeLoc];
+    const allKeys = allLocations.map((l) => l.data?.apiKey).filter(Boolean);
+    const allUrls = allLocations.map((l) => l.data?.baseUrl).filter(Boolean);
+    const synced = allKeys.length > 0 && new Set(allKeys).size <= 1 && new Set(allUrls).size <= 1;
 
     const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 
-    grid.innerHTML = locations.map((loc) => {
-      const item = status[loc.key];
+    // 渲染单张状态卡片
+    function renderCard(loc, extraClass) {
+      const item = loc.data;
       if (!item) {
         return `
-          <div class="status-card error-card">
+          <div class="status-card error-card ${extraClass || ""}">
             <div class="status-card-title">
               <span class="status-card-title-text">${loc.title}</span>
             </div>
             <div style="font-size:13px;color:var(--error-text)">${t("readFailed")}</div>
           </div>`;
       }
-
       const badgeClass = synced ? "synced" : "unsynced";
       const badgeText = synced ? t("synced") : t("unsynced");
       const dotColor = synced ? "var(--success-text)" : "var(--warning-text)";
-
       return `
-        <div class="status-card">
+        <div class="status-card ${extraClass || ""}">
           <div class="status-card-title">
             <span class="status-card-title-text">${loc.title}</span>
             <span class="status-badge ${badgeClass}">
@@ -700,10 +711,58 @@ async function loadStatus() {
             </div>
           </div>
         </div>`;
-    }).join("");
+    }
 
+    // 列1：系统环境变量
+    let html = renderCard(systemLoc);
+
+    // 列2：编辑器轮播
+    if (editorLocations.length === 0) {
+      html += `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">${t("stepEditors")}: --</div>`;
+    } else if (editorLocations.length === 1) {
+      html += `<div class="editor-carousel single">${renderCard(editorLocations[0])}</div>`;
+    } else {
+      if (editorCarouselIndex >= editorLocations.length) editorCarouselIndex = 0;
+      const cards = editorLocations.map((loc, i) => {
+        let cls = "carousel-hidden";
+        if (i === editorCarouselIndex) cls = "carousel-active";
+        else if (i === (editorCarouselIndex + 1) % editorLocations.length) cls = "carousel-next";
+        return renderCard(loc, cls);
+      }).join("");
+      const dots = editorLocations.map((_, i) =>
+        `<span class="carousel-dot ${i === editorCarouselIndex ? "active" : ""}"></span>`
+      ).join("");
+      html += `<div class="editor-carousel" id="editorCarousel">${cards}<div class="carousel-indicator">${dots}</div></div>`;
+    }
+
+    // 列3：Claude
+    html += renderCard(claudeLoc);
+
+    grid.innerHTML = html;
+
+    // 绑定轮播点击
+    const carousel = $("editorCarousel");
+    if (carousel && editorLocations.length > 1) {
+      carousel.addEventListener("click", () => {
+        editorCarouselIndex = (editorCarouselIndex + 1) % editorLocations.length;
+        const cards = carousel.querySelectorAll(".status-card");
+        const dots = carousel.querySelectorAll(".carousel-dot");
+        cards.forEach((card, i) => {
+          card.classList.remove("carousel-active", "carousel-next", "carousel-hidden");
+          if (i === editorCarouselIndex) card.classList.add("carousel-active");
+          else if (i === (editorCarouselIndex + 1) % editorLocations.length) card.classList.add("carousel-next");
+          else card.classList.add("carousel-hidden");
+        });
+        dots.forEach((dot, i) => {
+          dot.classList.toggle("active", i === editorCarouselIndex);
+        });
+      });
+    }
+
+    // 绑定复制按钮
     grid.querySelectorAll(".copy-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
         const text = btn.getAttribute("data-copy");
         if (text) {
           navigator.clipboard.writeText(text).then(() => {
@@ -904,17 +963,19 @@ async function handleSwitch(id) {
     } else if (result.success) {
       showToast(t("switchedTo", { name: result.profileName }), "success");
     } else {
-      const locationNames = {
-        envVars: t("statusSystemEnv"),
-        vscode: t("statusVscode"),
-        claude: t("statusClaude")
-      };
-      const ok = Object.entries(result.results || {})
-        .filter(([, success]) => Boolean(success))
-        .map(([name]) => locationNames[name] || name);
+      // 构建成功项列表
+      const okItems = [];
+      if (result.results?.envVars) okItems.push(t("statusSystemEnv"));
+      // 动态编辑器结果
+      if (result.results?.editors) {
+        for (const [editorId, success] of Object.entries(result.results.editors)) {
+          if (success) okItems.push(detectedEditors[editorId] || editorId);
+        }
+      }
+      if (result.results?.claude) okItems.push(t("statusClaude"));
       showToast(
         t("partialSuccess", {
-          ok: ok.join(", ") || "--",
+          ok: okItems.join(", ") || "--",
           errors: (result.errors || []).join("; ") || "--"
         }),
         "warning"
@@ -1854,7 +1915,29 @@ async function openSettingsPanel() {
     $("settingsSilentStart").checked = settings.silentStartup;
     $("settingsConfigDirValue").textContent = paths.configDir;
     $("settingsClaudePathValue").textContent = paths.claudeSettings;
-    $("settingsVscodePathValue").textContent = paths.vscodeSettings;
+    // 动态渲染编辑器路径
+    const editorPathsContainer = $("settingsEditorPaths");
+    editorPathsContainer.innerHTML = "";
+    for (const [editorId, editorPath] of Object.entries(paths.editorSettings || {})) {
+      const displayName = detectedEditors[editorId] || editorId;
+      const row = document.createElement("div");
+      row.className = "settings-row";
+      row.innerHTML = `
+        <div class="settings-row-info">
+          <div class="settings-row-label">${displayName} settings</div>
+          <div class="settings-row-value">${editorPath}</div>
+        </div>
+        <div class="settings-row-action">
+          <button class="btn btn-secondary btn-sm editor-open-btn" type="button" data-path="${editorPath}">${t("settingsOpen")}</button>
+        </div>`;
+      editorPathsContainer.appendChild(row);
+    }
+    // 绑定编辑器打开按钮事件
+    editorPathsContainer.querySelectorAll(".editor-open-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        invoke("open_folder", { path: btn.getAttribute("data-path") });
+      });
+    });
   } catch (e) {
     console.error("加载设置失败:", e);
   }
@@ -1928,9 +2011,6 @@ $("settingsOpenConfigDir").addEventListener("click", () => {
 });
 $("settingsOpenClaudeDir").addEventListener("click", () => {
   if (appPaths) invoke("open_folder", { path: appPaths.claudeSettings });
-});
-$("settingsOpenVscodeDir").addEventListener("click", () => {
-  if (appPaths) invoke("open_folder", { path: appPaths.vscodeSettings });
 });
 $("settingsExportBtn").addEventListener("click", handleExportProfiles);
 $("settingsImportBtn").addEventListener("click", handleImportProfiles);
