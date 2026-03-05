@@ -35,6 +35,10 @@ build/
 .DS_Store
 Thumbs.db
 
+# Temp directories
+.tmp-target*/
+.tmp-target-*/
+
 # Claude local settings
 .claude/settings.local.json
 

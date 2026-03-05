@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering as CmpOrdering;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -19,6 +20,9 @@ const AUTH_KEY_ENV: &str = "ANTHROPIC_AUTH_KEY";
 const LEGACY_AUTH_ENV: &str = "ANTHROPIC_API_KEY";
 const BASE_URL_ENV: &str = "ANTHROPIC_BASE_URL";
 const SWITCH_TOTAL_STEPS: u32 = 6;
+const GITHUB_REPO_URL: &str = "https://github.com/ConcertoNotes/variable-switching";
+const GITHUB_LATEST_RELEASE_API: &str =
+    "https://api.github.com/repos/ConcertoNotes/variable-switching/releases/latest";
 
 // ── Data Structures ─────────────────────────────────
 
@@ -29,6 +33,8 @@ struct Profile {
     name: String,
     api_key: String,
     base_url: String,
+    #[serde(default)]
+    model_id: String,
     is_active: bool,
     created_at: String,
 }
@@ -99,7 +105,7 @@ struct SkillInfo {
 // ── 应用设置数据结构 ──
 
 #[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 struct AppSettings {
     /// 语言: "zh" | "en"
     language: String,
@@ -111,6 +117,8 @@ struct AppSettings {
     silent_startup: bool,
     /// 关闭窗口时最小化到托盘
     minimize_to_tray: bool,
+    never_show_usage_guide: bool,
+    editor_paths: HashMap<String, String>,
 }
 
 impl Default for AppSettings {
@@ -121,8 +129,63 @@ impl Default for AppSettings {
             auto_start: false,
             silent_startup: false,
             minimize_to_tray: true,
+            never_show_usage_guide: false,
+            editor_paths: HashMap::new(),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ReleaseAsset {
+    name: String,
+    browser_download_url: String,
+    #[serde(default)]
+    size: u64,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct GitHubRelease {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    published_at: String,
+    #[serde(default)]
+    assets: Vec<ReleaseAsset>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheckResult {
+    current_version: String,
+    latest_version: String,
+    has_update: bool,
+    release_url: String,
+    release_notes: String,
+    published_at: String,
+    asset_name: Option<String>,
+    can_auto_update: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateDownloadResult {
+    latest_version: String,
+    file_name: String,
+    file_path: String,
+    release_url: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EditorPathInfo {
+    id: String,
+    display_name: String,
+    settings_path: String,
+    default_path: String,
+    customized: bool,
+    detected: bool,
 }
 
 #[derive(Serialize)]
@@ -132,7 +195,7 @@ struct AppPaths {
     profiles_path: String,
     claude_settings: String,
     /// 动态编辑器路径: key = 编辑器 id, value = settings.json 路径
-    editor_settings: HashMap<String, String>,
+    editor_settings: Vec<EditorPathInfo>,
     claude_md: String,
     claude_mcp: String,
 }
@@ -217,6 +280,8 @@ struct EditorDef {
     /// Windows 下 %APPDATA% 内的子目录名
     #[cfg(target_os = "windows")]
     win_appdata_dir: &'static str,
+    #[cfg(target_os = "windows")]
+    win_program_dirs: &'static [&'static str],
     /// macOS 下 ~/Library/Application Support/ 内的子目录名
     #[cfg(target_os = "macos")]
     mac_app_support_dir: &'static str,
@@ -228,11 +293,12 @@ struct EditorDef {
 /// 所有支持的编辑器定义
 #[cfg(target_os = "windows")]
 const KNOWN_EDITORS: &[EditorDef] = &[
-    EditorDef { id: "vscode", display_name: "VS Code", win_appdata_dir: "Code" },
-    EditorDef { id: "vscode-insiders", display_name: "VS Code Insiders", win_appdata_dir: "Code - Insiders" },
-    EditorDef { id: "cursor", display_name: "Cursor", win_appdata_dir: "Cursor" },
-    EditorDef { id: "windsurf", display_name: "Windsurf", win_appdata_dir: "Windsurf" },
-    EditorDef { id: "trae", display_name: "Trae", win_appdata_dir: "Trae" },
+    EditorDef { id: "vscode", display_name: "VS Code", win_appdata_dir: "Code", win_program_dirs: &["Microsoft VS Code"] },
+    EditorDef { id: "vscode-insiders", display_name: "VS Code Insiders", win_appdata_dir: "Code - Insiders", win_program_dirs: &["Microsoft VS Code Insiders"] },
+    EditorDef { id: "cursor", display_name: "Cursor", win_appdata_dir: "Cursor", win_program_dirs: &["Cursor"] },
+    EditorDef { id: "windsurf", display_name: "Windsurf", win_appdata_dir: "Windsurf", win_program_dirs: &["Windsurf"] },
+    EditorDef { id: "trae", display_name: "Trae", win_appdata_dir: "Trae", win_program_dirs: &["Trae"] },
+    EditorDef { id: "vscodium", display_name: "VSCodium", win_appdata_dir: "VSCodium", win_program_dirs: &["VSCodium"] },
 ];
 
 #[cfg(target_os = "macos")]
@@ -242,6 +308,7 @@ const KNOWN_EDITORS: &[EditorDef] = &[
     EditorDef { id: "cursor", display_name: "Cursor", mac_app_support_dir: "Cursor" },
     EditorDef { id: "windsurf", display_name: "Windsurf", mac_app_support_dir: "Windsurf" },
     EditorDef { id: "trae", display_name: "Trae", mac_app_support_dir: "Trae" },
+    EditorDef { id: "vscodium", display_name: "VSCodium", mac_app_support_dir: "VSCodium" },
 ];
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -251,10 +318,11 @@ const KNOWN_EDITORS: &[EditorDef] = &[
     EditorDef { id: "cursor", display_name: "Cursor", linux_config_dir: "Cursor" },
     EditorDef { id: "windsurf", display_name: "Windsurf", linux_config_dir: "Windsurf" },
     EditorDef { id: "trae", display_name: "Trae", linux_config_dir: "Trae" },
+    EditorDef { id: "vscodium", display_name: "VSCodium", linux_config_dir: "VSCodium" },
 ];
 
 /// 获取编辑器 settings.json 的路径
-fn editor_settings_path(editor: &EditorDef) -> PathBuf {
+fn default_editor_settings_path(editor: &EditorDef) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA").unwrap_or_default();
@@ -282,14 +350,126 @@ fn editor_settings_path(editor: &EditorDef) -> PathBuf {
     }
 }
 
-/// 检测已安装的编辑器（配置目录 User/ 存在即视为已安装）
-fn detect_installed_editors() -> Vec<&'static EditorDef> {
+fn normalize_editor_path_value(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let path = PathBuf::from(trimmed);
+    let normalized = if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("json"))
+        .unwrap_or(false)
+    {
+        path
+    } else {
+        path.join("settings.json")
+    };
+
+    Some(normalized.to_string_lossy().to_string())
+}
+
+fn normalize_app_settings(mut settings: AppSettings) -> AppSettings {
+    let mut normalized_paths = HashMap::new();
+    for (editor_id, raw_path) in settings.editor_paths {
+        if let Some(path) = normalize_editor_path_value(&raw_path) {
+            normalized_paths.insert(editor_id, path);
+        }
+    }
+    settings.editor_paths = normalized_paths;
+    settings
+}
+
+fn editor_override_path(settings: &AppSettings, editor_id: &str) -> Option<PathBuf> {
+    settings
+        .editor_paths
+        .get(editor_id)
+        .and_then(|raw| normalize_editor_path_value(raw))
+        .map(PathBuf::from)
+}
+
+fn resolved_editor_settings_path(editor: &EditorDef, settings: &AppSettings) -> PathBuf {
+    editor_override_path(settings, editor.id)
+        .unwrap_or_else(|| default_editor_settings_path(editor))
+}
+
+fn editor_has_custom_path(settings: &AppSettings, editor_id: &str) -> bool {
+    editor_override_path(settings, editor_id).is_some()
+}
+
+fn editor_install_markers(editor: &EditorDef) -> Vec<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut markers = Vec::new();
+        let appdata = std::env::var("APPDATA").unwrap_or_default();
+        if !appdata.is_empty() {
+            markers.push(PathBuf::from(&appdata).join(editor.win_appdata_dir));
+        }
+        let local_appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        if !local_appdata.is_empty() {
+            for dir in editor.win_program_dirs {
+                markers.push(PathBuf::from(&local_appdata).join("Programs").join(dir));
+            }
+        }
+        markers
+    }
+    #[cfg(target_os = "macos")]
+    {
+        vec![
+            home_dir()
+                .join("Library")
+                .join("Application Support")
+                .join(editor.mac_app_support_dir),
+        ]
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        vec![home_dir().join(".config").join(editor.linux_config_dir)]
+    }
+}
+
+fn editor_is_detected(editor: &EditorDef, settings: &AppSettings) -> bool {
+    if editor_has_custom_path(settings, editor.id) {
+        return true;
+    }
+
+    let default_path = default_editor_settings_path(editor);
+    if default_path.exists() {
+        return true;
+    }
+
+    if default_path.parent().map(|parent| parent.exists()).unwrap_or(false) {
+        return true;
+    }
+
+    editor_install_markers(editor)
+        .into_iter()
+        .any(|path| path.exists())
+}
+
+fn detect_installed_editors(settings: &AppSettings) -> Vec<&'static EditorDef> {
     KNOWN_EDITORS
         .iter()
-        .filter(|ed| {
-            let path = editor_settings_path(ed);
-            // 只要 User 目录存在就认为已安装（settings.json 可以不存在，我们会自动创建）
-            path.parent().map(|p| p.exists()).unwrap_or(false)
+        .filter(|editor| editor_is_detected(editor, settings))
+        .collect()
+}
+
+fn collect_editor_path_infos(settings: &AppSettings) -> Vec<EditorPathInfo> {
+    KNOWN_EDITORS
+        .iter()
+        .map(|editor| EditorPathInfo {
+            id: editor.id.to_string(),
+            display_name: editor.display_name.to_string(),
+            settings_path: resolved_editor_settings_path(editor, settings)
+                .to_string_lossy()
+                .to_string(),
+            default_path: default_editor_settings_path(editor)
+                .to_string_lossy()
+                .to_string(),
+            customized: editor_has_custom_path(settings, editor.id),
+            detected: editor_is_detected(editor, settings),
         })
         .collect()
 }
@@ -708,6 +888,7 @@ fn add_profile(
     name: String,
     api_key: String,
     base_url: String,
+    model_id: Option<String>,
 ) -> Result<Profile, String> {
     if name.is_empty() || api_key.is_empty() || base_url.is_empty() {
         return Err("所有字段都必须填写".into());
@@ -718,6 +899,7 @@ fn add_profile(
         name: name.trim().to_string(),
         api_key: api_key.trim().to_string(),
         base_url: base_url.trim().trim_end_matches('/').to_string(),
+        model_id: model_id.unwrap_or_default().trim().to_string(),
         is_active: false,
         created_at: chrono_now(),
     };
@@ -733,6 +915,7 @@ fn update_profile(
     name: String,
     api_key: String,
     base_url: String,
+    model_id: Option<String>,
 ) -> Result<Profile, String> {
     let mut data = read_profiles(&app);
     let p = data
@@ -749,6 +932,9 @@ fn update_profile(
     if !base_url.is_empty() {
         p.base_url = base_url.trim().trim_end_matches('/').to_string();
     }
+    if let Some(mid) = model_id {
+        p.model_id = mid.trim().to_string();
+    }
     let updated = p.clone();
     write_profiles(&app, &data)?;
     Ok(updated)
@@ -762,10 +948,11 @@ fn delete_profile(app: tauri::AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn snapshot_config() -> ConfigSnapshot {
+fn snapshot_config(app: tauri::AppHandle) -> ConfigSnapshot {
+    let settings = read_app_settings(&app);
     let mut editor_contents = HashMap::new();
-    for editor in detect_installed_editors() {
-        if let Ok(content) = fs::read_to_string(editor_settings_path(editor)) {
+    for editor in detect_installed_editors(&settings) {
+        if let Ok(content) = fs::read_to_string(resolved_editor_settings_path(editor, &settings)) {
             editor_contents.insert(editor.id.to_string(), content);
         }
     }
@@ -780,7 +967,8 @@ fn snapshot_config() -> ConfigSnapshot {
 }
 
 #[tauri::command]
-fn restore_config(snapshot: ConfigSnapshot) -> Result<(), String> {
+fn restore_config(app: tauri::AppHandle, snapshot: ConfigSnapshot) -> Result<(), String> {
+    let settings = read_app_settings(&app);
     restore_system_env_var(AUTH_TOKEN_ENV, &snapshot.env_auth_token)?;
     restore_system_env_var(AUTH_KEY_ENV, &snapshot.env_auth_key)?;
     restore_system_env_var(LEGACY_AUTH_ENV, &snapshot.env_api_key)?;
@@ -790,7 +978,10 @@ fn restore_config(snapshot: ConfigSnapshot) -> Result<(), String> {
     // 恢复所有编辑器配置
     for (editor_id, content) in &snapshot.editor_contents {
         if let Some(editor) = KNOWN_EDITORS.iter().find(|e| e.id == editor_id.as_str()) {
-            let path = editor_settings_path(editor);
+            let path = resolved_editor_settings_path(editor, &settings);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
             fs::write(&path, content).map_err(|e| e.to_string())?;
         }
     }
@@ -817,6 +1008,7 @@ fn switch_profile(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<SwitchResult, String> {
+    let settings = read_app_settings(&app);
     let mut data = read_profiles(&app);
     let profile = data
         .profiles
@@ -867,9 +1059,9 @@ fn switch_profile(
 
     emit_switch_progress(&app, 3, "editors");
     // 自动检测已安装的编辑器并逐一写入配置
-    let editors = detect_installed_editors();
+    let editors = detect_installed_editors(&settings);
     for editor in &editors {
-        let path = editor_settings_path(editor);
+        let path = resolved_editor_settings_path(editor, &settings);
         // 读取现有配置，文件不存在则使用空 JSON 对象
         let mut settings = read_json_or_default(&path, serde_json::json!({}));
         if !settings
@@ -884,6 +1076,10 @@ fn switch_profile(
             .and_then(|v| v.as_array_mut())
         {
             apply_auth_to_env_array(arr, &profile.api_key, &profile.base_url);
+        }
+        // 处理 claudeCode.selectedModel: 仅当 profile.model_id 非空时才写入
+        if !profile.model_id.is_empty() {
+            settings["claudeCode.selectedModel"] = serde_json::json!(profile.model_id);
         }
         match write_json(&path, &settings) {
             Ok(_) => { details.editors.insert(editor.id.to_string(), true); }
@@ -927,6 +1123,10 @@ fn switch_profile(
     if let Some(env) = settings.get_mut("env").and_then(|v| v.as_object_mut()) {
         apply_auth_to_env_object(env, &profile.api_key, &profile.base_url);
     }
+    // 处理 model: 仅当 profile.model_id 非空时才写入，逻辑与编辑器一致
+    if !profile.model_id.is_empty() {
+        settings["model"] = serde_json::json!(profile.model_id);
+    }
     match write_json(&cp, &settings) {
         Ok(_) => details.claude = true,
         Err(e) => errors.push(format!("Claude: {}", e)),
@@ -961,17 +1161,19 @@ fn switch_profile(
 }
 
 #[tauri::command]
-fn get_status() -> StatusResult {
+fn get_status(app: tauri::AppHandle) -> StatusResult {
+    let settings = read_app_settings(&app);
     let env_vars = Some(LocationStatus {
         api_key: read_auth_from_system_env(),
         base_url: reg_get_env(BASE_URL_ENV),
     });
+    let mut editors: HashMap<String, LocationStatus> = HashMap::new();
 
     // 动态检测已安装的编辑器并读取状态
     let mut editors = HashMap::new();
-    for editor in detect_installed_editors() {
+    for editor in detect_installed_editors(&settings) {
         if let Some(status) = (|| -> Option<LocationStatus> {
-            let s = read_json(&editor_settings_path(editor)).ok()?;
+            let s = read_json(&resolved_editor_settings_path(editor, &settings)).ok()?;
             let arr = s.get("claudeCode.environmentVariables")?.as_array()?;
             Some(LocationStatus {
                 api_key: read_auth_from_env_array(arr),
@@ -1004,8 +1206,9 @@ fn get_status() -> StatusResult {
 
 /// 返回检测到的已安装编辑器列表 (id -> displayName)
 #[tauri::command]
-fn get_detected_editors() -> HashMap<String, String> {
-    detect_installed_editors()
+fn get_detected_editors(app: tauri::AppHandle) -> HashMap<String, String> {
+    let settings = read_app_settings(&app);
+    detect_installed_editors(&settings)
         .into_iter()
         .map(|ed| (ed.id.to_string(), ed.display_name.to_string()))
         .collect()
@@ -1013,6 +1216,7 @@ fn get_detected_editors() -> HashMap<String, String> {
 
 #[tauri::command]
 fn import_current(app: tauri::AppHandle, name: String) -> Result<Profile, String> {
+    let settings = read_app_settings(&app);
     let mut api_key = String::new();
     let mut base_url = String::new();
 
@@ -1030,8 +1234,8 @@ fn import_current(app: tauri::AppHandle, name: String) -> Result<Profile, String
 
     // 回退到已安装的编辑器配置
     if api_key.is_empty() || base_url.is_empty() {
-        for editor in detect_installed_editors() {
-            if let Ok(s) = read_json(&editor_settings_path(editor)) {
+        for editor in detect_installed_editors(&settings) {
+            if let Ok(s) = read_json(&resolved_editor_settings_path(editor, &settings)) {
                 if let Some(arr) = s
                     .get("claudeCode.environmentVariables")
                     .and_then(|v| v.as_array())
@@ -1084,6 +1288,7 @@ fn import_current(app: tauri::AppHandle, name: String) -> Result<Profile, String
         },
         api_key,
         base_url,
+        model_id: String::new(),
         is_active: true,
         created_at: chrono_now(),
     };
@@ -1109,15 +1314,18 @@ fn read_app_settings(app: &tauri::AppHandle) -> AppSettings {
     if !path.exists() {
         return AppSettings::default();
     }
-    fs::read_to_string(&path)
+    normalize_app_settings(
+        fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default(),
+    )
 }
 
 fn write_app_settings(app: &tauri::AppHandle, settings: &AppSettings) -> Result<(), String> {
     let path = settings_path(app);
-    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    let normalized = normalize_app_settings(settings.clone());
+    let json = serde_json::to_string_pretty(&normalized).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }
 
@@ -1202,6 +1410,7 @@ fn get_app_settings(app: tauri::AppHandle) -> AppSettings {
 
 #[tauri::command]
 fn save_app_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
+    let settings = normalize_app_settings(settings);
     // 处理开机自启
     set_auto_start(settings.auto_start)?;
     write_app_settings(&app, &settings)
@@ -1209,18 +1418,12 @@ fn save_app_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(),
 
 #[tauri::command]
 fn get_app_paths(app: tauri::AppHandle) -> AppPaths {
-    let mut editor_settings = HashMap::new();
-    for editor in detect_installed_editors() {
-        editor_settings.insert(
-            editor.id.to_string(),
-            editor_settings_path(editor).to_string_lossy().to_string(),
-        );
-    }
+    let settings = read_app_settings(&app);
     AppPaths {
         config_dir: data_dir(&app).to_string_lossy().to_string(),
         profiles_path: profiles_path(&app).to_string_lossy().to_string(),
         claude_settings: claude_settings_path().to_string_lossy().to_string(),
-        editor_settings,
+        editor_settings: collect_editor_path_infos(&settings),
         claude_md: claude_md_path().to_string_lossy().to_string(),
         claude_mcp: claude_mcp_path().to_string_lossy().to_string(),
     }
@@ -1230,7 +1433,7 @@ fn get_app_paths(app: tauri::AppHandle) -> AppPaths {
 fn open_folder(path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     // 如果是文件，打开其所在目录
-    let dir = if p.is_file() {
+    let dir = if p.is_file() || p.extension().is_some() {
         p.parent().unwrap_or(&p).to_path_buf()
     } else {
         p
@@ -1254,6 +1457,95 @@ fn open_folder(path: String) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn open_external_target(target: String) -> Result<(), String> {
+    let trimmed = target.trim();
+    if trimmed.is_empty() {
+        return Err("Target is required".into());
+    }
+    open_with_system(trimmed)
+}
+
+#[tauri::command]
+async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
+    let current_version = app.package_info().version.to_string();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let release = fetch_latest_release()?;
+        let asset =
+            select_release_asset(&release.assets, std::env::consts::OS, std::env::consts::ARCH);
+
+        Ok(UpdateCheckResult {
+            current_version: current_version.clone(),
+            latest_version: release.tag_name.clone(),
+            has_update: is_remote_version_newer(&release.tag_name, &current_version),
+            release_url: if release.html_url.is_empty() {
+                format!("{}/releases", GITHUB_REPO_URL)
+            } else {
+                release.html_url
+            },
+            release_notes: release.body,
+            published_at: release.published_at,
+            asset_name: asset.as_ref().map(|item| item.name.clone()),
+            can_auto_update: asset.is_some(),
+        })
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+#[tauri::command]
+async fn download_and_open_update(app: tauri::AppHandle) -> Result<UpdateDownloadResult, String> {
+    let current_version = app.package_info().version.to_string();
+    let app_handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let release = fetch_latest_release()?;
+        if !is_remote_version_newer(&release.tag_name, &current_version) {
+            return Err("Already on the latest version".into());
+        }
+
+        let asset =
+            select_release_asset(&release.assets, std::env::consts::OS, std::env::consts::ARCH)
+                .ok_or_else(|| "No installer found for the current platform".to_string())?;
+
+        let client = build_http_client(120)?;
+        let resp = client
+            .get(&asset.browser_download_url)
+            .send()
+            .map_err(|e| format!("Download error: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Download failed with {}", resp.status()));
+        }
+
+        let bytes = resp
+            .bytes()
+            .map_err(|e| format!("Read download failed: {}", e))?;
+
+        let update_dir = data_dir(&app_handle).join("updates");
+        fs::create_dir_all(&update_dir).map_err(|e| e.to_string())?;
+        let file_path = update_dir.join(&asset.name);
+        fs::write(&file_path, &bytes).map_err(|e| e.to_string())?;
+
+        let file_path_str = file_path.to_string_lossy().to_string();
+        open_with_system(&file_path_str)?;
+
+        Ok(UpdateDownloadResult {
+            latest_version: release.tag_name,
+            file_name: asset.name,
+            file_path: file_path_str,
+            release_url: if release.html_url.is_empty() {
+                format!("{}/releases", GITHUB_REPO_URL)
+            } else {
+                release.html_url
+            },
+        })
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
 }
 
 #[tauri::command]
@@ -2525,24 +2817,238 @@ fn get_mcp_presets() -> Vec<serde_json::Value> {
 }
 
 /// 构建支持系统代理的 HTTP 客户端
+fn resolve_proxy_url_from_values(values: &[Option<&str>]) -> Option<String> {
+    for value in values {
+        let candidate = match value {
+            Some(raw) => raw.trim(),
+            None => continue,
+        };
+
+        if candidate.is_empty() {
+            continue;
+        }
+
+        let parsed = match reqwest::Url::parse(candidate) {
+            Ok(url) => url,
+            Err(_) => continue,
+        };
+
+        let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+        let port = parsed.port_or_known_default().unwrap_or(0);
+        let is_loopback = matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1");
+        let is_disabled_proxy = is_loopback && matches!(port, 0 | 9);
+
+        if is_disabled_proxy {
+            continue;
+        }
+
+        return Some(candidate.to_string());
+    }
+
+    None
+}
+
+fn resolve_proxy_url_from_env() -> Option<String> {
+    let https_upper = std::env::var("HTTPS_PROXY").ok();
+    let https_lower = std::env::var("https_proxy").ok();
+    let http_upper = std::env::var("HTTP_PROXY").ok();
+    let http_lower = std::env::var("http_proxy").ok();
+
+    resolve_proxy_url_from_values(&[
+        https_upper.as_deref(),
+        https_lower.as_deref(),
+        http_upper.as_deref(),
+        http_lower.as_deref(),
+    ])
+}
+
 fn build_http_client(timeout_secs: u64) -> Result<reqwest::blocking::Client, String> {
     let mut builder = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .user_agent("VarSwitch/1.0");
 
-    if let Ok(proxy_url) = std::env::var("HTTPS_PROXY")
-        .or_else(|_| std::env::var("https_proxy"))
-        .or_else(|_| std::env::var("HTTP_PROXY"))
-        .or_else(|_| std::env::var("http_proxy"))
-    {
-        if !proxy_url.is_empty() {
-            if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
-                builder = builder.proxy(proxy);
-            }
+    if let Some(proxy_url) = resolve_proxy_url_from_env() {
+        if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
+            builder = builder.proxy(proxy);
         }
     }
 
     builder.build().map_err(|e| format!("HTTP client error: {}", e))
+}
+
+fn normalize_version_parts(version: &str) -> Vec<u64> {
+    version
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .split('.')
+        .map(|part| {
+            part.chars()
+                .take_while(|ch| ch.is_ascii_digit())
+                .collect::<String>()
+        })
+        .map(|digits| digits.parse::<u64>().unwrap_or(0))
+        .collect()
+}
+
+fn compare_versions(left: &str, right: &str) -> CmpOrdering {
+    let left_parts = normalize_version_parts(left);
+    let right_parts = normalize_version_parts(right);
+    let len = left_parts.len().max(right_parts.len()).max(3);
+
+    for idx in 0..len {
+        let left_num = *left_parts.get(idx).unwrap_or(&0);
+        let right_num = *right_parts.get(idx).unwrap_or(&0);
+        match left_num.cmp(&right_num) {
+            CmpOrdering::Equal => continue,
+            other => return other,
+        }
+    }
+
+    CmpOrdering::Equal
+}
+
+fn is_remote_version_newer(remote: &str, local: &str) -> bool {
+    compare_versions(remote, local) == CmpOrdering::Greater
+}
+
+fn asset_has_known_arch_marker(name_lower: &str) -> bool {
+    [
+        "x64",
+        "x86_64",
+        "amd64",
+        "arm64",
+        "aarch64",
+        "universal",
+    ]
+    .iter()
+    .any(|token| name_lower.contains(token))
+}
+
+fn asset_matches_target_arch(name_lower: &str, target_arch: &str) -> Option<bool> {
+    let aliases: Vec<&str> = match target_arch {
+        "x86_64" => vec!["x64", "x86_64", "amd64"],
+        "aarch64" => vec!["arm64", "aarch64"],
+        other => vec![other],
+    };
+
+    if aliases.iter().any(|alias| name_lower.contains(alias)) {
+        return Some(true);
+    }
+
+    if name_lower.contains("universal") {
+        return Some(true);
+    }
+
+    if asset_has_known_arch_marker(name_lower) {
+        return Some(false);
+    }
+
+    None
+}
+
+fn installer_extension_score(name_lower: &str, target_os: &str) -> Option<i32> {
+    match target_os {
+        "windows" => {
+            if name_lower.ends_with(".msi") {
+                Some(30)
+            } else if name_lower.ends_with(".exe") {
+                Some(25)
+            } else {
+                None
+            }
+        }
+        "macos" => {
+            if name_lower.ends_with(".dmg") {
+                Some(30)
+            } else {
+                None
+            }
+        }
+        "linux" => {
+            if name_lower.ends_with(".appimage") {
+                Some(30)
+            } else if name_lower.ends_with(".deb") {
+                Some(25)
+            } else if name_lower.ends_with(".rpm") {
+                Some(24)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn select_release_asset(
+    assets: &[ReleaseAsset],
+    target_os: &str,
+    target_arch: &str,
+) -> Option<ReleaseAsset> {
+    assets
+        .iter()
+        .filter_map(|asset| {
+            let name_lower = asset.name.to_ascii_lowercase();
+            if name_lower.ends_with(".sig") {
+                return None;
+            }
+
+            let mut score = installer_extension_score(&name_lower, target_os)?;
+            match asset_matches_target_arch(&name_lower, target_arch) {
+                Some(true) => score += 10,
+                Some(false) => return None,
+                None => score += 1,
+            }
+
+            Some((score, asset.size, asset.clone()))
+        })
+        .max_by_key(|(score, size, _)| (*score, *size))
+        .map(|(_, _, asset)| asset)
+}
+
+fn fetch_latest_release() -> Result<GitHubRelease, String> {
+    let client = build_http_client(20)?;
+    let resp = client
+        .get(GITHUB_LATEST_RELEASE_API)
+        .send()
+        .map_err(|e| format!("GitHub API error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("GitHub API returned {}", resp.status()));
+    }
+
+    let body = resp
+        .text()
+        .map_err(|e| format!("Response read error: {}", e))?;
+
+    serde_json::from_str::<GitHubRelease>(&body).map_err(|e| {
+        let preview: String = body.chars().take(180).collect();
+        format!("JSON parse error: {} | body: {}", e, preview)
+    })
+}
+
+fn open_with_system(target: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", target])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        #[cfg(target_os = "macos")]
+        let cmd = "open";
+        #[cfg(not(target_os = "macos"))]
+        let cmd = "xdg-open";
+
+        std::process::Command::new(cmd)
+            .arg(target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 fn chrono_now() -> String {
@@ -2611,6 +3117,229 @@ mod tests {
         assert!(!has_key, "ANTHROPIC_AUTH_KEY should be removed and converted to TOKEN");
         assert_eq!(token_value, Some("new-key"));
         assert_eq!(selected, "ANTHROPIC_AUTH_TOKEN");
+    }
+
+    #[test]
+    fn app_settings_defaults_keep_usage_guide_enabled() {
+        let settings = AppSettings::default();
+
+        assert_eq!(settings.language, "zh");
+        assert_eq!(settings.theme, "light");
+        assert!(!settings.auto_start);
+        assert!(!settings.silent_startup);
+        assert!(settings.minimize_to_tray);
+        assert!(
+            !settings.never_show_usage_guide,
+            "usage guide should show by default until the user disables it"
+        );
+    }
+
+    #[test]
+    fn app_settings_deserialize_old_files_without_usage_guide_field() {
+        let settings: AppSettings = serde_json::from_value(json!({
+            "language": "en",
+            "theme": "dark",
+            "autoStart": true,
+            "silentStartup": true,
+            "minimizeToTray": false
+        }))
+        .expect("old settings json should still deserialize");
+
+        assert_eq!(settings.language, "en");
+        assert_eq!(settings.theme, "dark");
+        assert!(settings.auto_start);
+        assert!(settings.silent_startup);
+        assert!(!settings.minimize_to_tray);
+        assert!(!settings.never_show_usage_guide);
+        assert!(
+            settings.editor_paths.is_empty(),
+            "old settings json should default editor path overrides to empty"
+        );
+    }
+
+    #[test]
+    fn known_editors_include_vscodium() {
+        assert!(
+            KNOWN_EDITORS.iter().any(|editor| editor.id == "vscodium"),
+            "VSCodium should be part of the built-in supported editor list"
+        );
+    }
+
+    #[test]
+    fn normalize_editor_path_value_appends_settings_json_for_directory_paths() {
+        let normalized =
+            normalize_editor_path_value(r"C:\Editors\Cursor\User").expect("path should normalize");
+
+        assert!(
+            normalized.ends_with(r"Cursor\User\settings.json"),
+            "directory overrides should resolve to settings.json, got {}",
+            normalized
+        );
+    }
+
+    #[test]
+    fn normalize_editor_path_value_preserves_explicit_settings_file_path() {
+        let normalized = normalize_editor_path_value(r"C:\Editors\Cursor\User\settings.json")
+            .expect("path should normalize");
+
+        assert_eq!(normalized, r"C:\Editors\Cursor\User\settings.json");
+    }
+
+    #[test]
+    fn resolved_editor_settings_path_prefers_saved_override() {
+        let editor = KNOWN_EDITORS
+            .iter()
+            .find(|candidate| candidate.id == "vscode")
+            .expect("vscode should be supported");
+        let mut settings = AppSettings::default();
+        settings.editor_paths.insert(
+            editor.id.to_string(),
+            r"C:\Custom\VSCode\User".to_string(),
+        );
+
+        let resolved = resolved_editor_settings_path(editor, &settings);
+
+        assert_eq!(
+            resolved,
+            PathBuf::from(r"C:\Custom\VSCode\User\settings.json")
+        );
+    }
+
+    #[test]
+    fn detect_installed_editors_includes_manual_override_even_without_default_install_path() {
+        let mut settings = AppSettings::default();
+        settings.editor_paths.insert(
+            "cursor".to_string(),
+            r"C:\PortableApps\Cursor\User".to_string(),
+        );
+
+        let detected = detect_installed_editors(&settings);
+
+        assert!(
+            detected.iter().any(|editor| editor.id == "cursor"),
+            "manual editor path overrides should count as detected editors"
+        );
+    }
+
+    #[test]
+    fn is_remote_version_newer_handles_optional_v_prefix() {
+        assert!(is_remote_version_newer("v1.2.0", "1.1.9"));
+        assert!(is_remote_version_newer("1.0.1", "v1.0.0"));
+        assert!(!is_remote_version_newer("v1.0.0", "1.0.0"));
+        assert!(!is_remote_version_newer("v0.9.9", "1.0.0"));
+    }
+
+    #[test]
+    fn select_release_asset_for_windows_prefers_installer_extensions() {
+        let assets = vec![
+            ReleaseAsset {
+                name: "VarSwitch_1.2.0_x64-setup.nsis.zip.sig".into(),
+                browser_download_url: "https://example.test/app.sig".into(),
+                size: 1,
+            },
+            ReleaseAsset {
+                name: "VarSwitch_1.2.0_x64_en-US.msi".into(),
+                browser_download_url: "https://example.test/app.msi".into(),
+                size: 2,
+            },
+            ReleaseAsset {
+                name: "VarSwitch_1.2.0_x64-setup.exe".into(),
+                browser_download_url: "https://example.test/app.exe".into(),
+                size: 3,
+            },
+        ];
+
+        let selected = select_release_asset(&assets, "windows", "x86_64")
+            .expect("should pick a Windows installer");
+
+        assert!(
+            selected.name.ends_with(".msi") || selected.name.ends_with(".exe"),
+            "selected asset should be an installer, got {}",
+            selected.name
+        );
+    }
+
+    #[test]
+    fn select_release_asset_for_macos_prefers_matching_architecture() {
+        let assets = vec![
+            ReleaseAsset {
+                name: "VarSwitch_1.2.0_x64.dmg".into(),
+                browser_download_url: "https://example.test/app-x64.dmg".into(),
+                size: 2,
+            },
+            ReleaseAsset {
+                name: "VarSwitch_1.2.0_aarch64.dmg".into(),
+                browser_download_url: "https://example.test/app-arm64.dmg".into(),
+                size: 3,
+            },
+        ];
+
+        let selected = select_release_asset(&assets, "macos", "aarch64")
+            .expect("should pick a macOS dmg");
+
+        assert_eq!(selected.name, "VarSwitch_1.2.0_aarch64.dmg");
+    }
+
+    #[test]
+    fn resolve_proxy_url_ignores_disabled_loopback_proxy() {
+        let proxy = resolve_proxy_url_from_values(&[
+            Some("http://127.0.0.1:9"),
+            Some("http://127.0.0.1:9"),
+            None,
+            None,
+        ]);
+
+        assert_eq!(
+            proxy, None,
+            "discard-style loopback proxy should be ignored instead of breaking GitHub requests"
+        );
+    }
+
+    #[test]
+    fn resolve_proxy_url_keeps_real_proxy_values() {
+        let proxy = resolve_proxy_url_from_values(&[
+            Some("http://proxy.example.com:8080"),
+            None,
+            None,
+            None,
+        ]);
+
+        assert_eq!(proxy.as_deref(), Some("http://proxy.example.com:8080"));
+    }
+
+    #[test]
+    fn github_release_struct_deserializes_snake_case_payload() {
+        let release: GitHubRelease = serde_json::from_value(json!({
+            "tag_name": "v1.0.2",
+            "html_url": "https://github.com/ConcertoNotes/variable-switching/releases/tag/v1.0.2",
+            "body": "notes",
+            "published_at": "2026-02-25T06:03:09Z",
+            "assets": [{
+                "name": "VarSwitch_1.0.2_x64_en-US.msi",
+                "browser_download_url": "https://example.test/VarSwitch_1.0.2_x64_en-US.msi",
+                "size": 12345
+            }]
+        }))
+        .expect("GitHub release JSON should deserialize");
+
+        assert_eq!(release.tag_name, "v1.0.2");
+        assert_eq!(
+            release.assets[0].browser_download_url,
+            "https://example.test/VarSwitch_1.0.2_x64_en-US.msi"
+        );
+    }
+
+    #[test]
+    fn tauri_config_does_not_define_static_tray_icon_when_tray_is_built_in_setup() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid tauri.conf.json");
+
+        let static_tray_icon = config.get("app").and_then(|app| app.get("trayIcon"));
+
+        assert!(
+            static_tray_icon.is_none(),
+            "tauri.conf.json should not also define app.trayIcon when setup() builds the tray icon"
+        );
     }
 }
 
@@ -2708,6 +3437,9 @@ pub fn run() {
             save_app_settings,
             get_app_paths,
             open_folder,
+            open_external_target,
+            check_app_update,
+            download_and_open_update,
             export_profiles,
             import_profiles,
             get_skills,

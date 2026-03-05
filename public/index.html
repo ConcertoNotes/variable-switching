@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -65,6 +65,26 @@
   </header>
 
   <div class="app">
+    <section class="support-section">
+      <div class="support-card">
+        <div class="support-copy">
+          <h2 class="section-title" id="supportSectionTitle">Quick Actions</h2>
+          <p class="support-hint" id="supportHint">Open the usage guide, check GitHub Releases for updates, or jump to the repository.</p>
+        </div>
+        <div class="support-actions">
+          <button class="btn btn-secondary" id="usageGuideBtn" type="button">
+            <span id="usageGuideBtnText">Usage Guide</span>
+          </button>
+          <button class="btn btn-secondary" id="updateBtn" type="button">
+            <span id="updateBtnText">Check for Updates</span>
+          </button>
+          <button class="btn btn-secondary" id="githubRepoBtn" type="button">
+            <span id="githubRepoBtnText">GitHub Repo</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
     <section class="status-section">
       <h2 class="section-title" id="statusSectionTitle">Current Status</h2>
       <div class="status-grid" id="statusGrid"></div>
@@ -111,6 +131,11 @@
         <div class="form-group">
           <label id="profileBaseUrlLabel" for="profileBaseUrl">Base URL</label>
           <input type="text" id="profileBaseUrl" required placeholder="https://api.example.com">
+        </div>
+        <div class="form-group">
+          <label id="profileModelIdLabel" for="profileModelId">Model ID</label>
+          <input type="text" id="profileModelId" placeholder="e.g. opus, sonnet">
+          <small id="profileModelIdHint" class="form-hint" style="color:#888;font-size:12px;margin-top:2px;">Optional. Sets claudeCode.selectedModel in editor settings.</small>
         </div>
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
@@ -413,7 +438,57 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="usageGuideOverlay">
+    <div class="guide-modal">
+      <div class="guide-header">
+        <div>
+          <div class="guide-kicker" id="usageGuideKicker">Usage Guide</div>
+          <h2 id="usageGuideTitle">How to use VarSwitch</h2>
+        </div>
+        <button class="modal-close" id="usageGuideCloseIcon" type="button">&times;</button>
+      </div>
+      <div class="guide-body">
+        <p class="guide-intro" id="usageGuideIntro">Follow these steps to switch API environments safely.</p>
+        <div class="guide-steps">
+          <div class="guide-step-card">
+            <div class="guide-step-index">1</div>
+            <div>
+              <div class="guide-step-title" id="usageGuideStep1Title">Add or import a config</div>
+              <div class="guide-step-desc" id="usageGuideStep1Desc">Use Add Config or Import Current to prepare your API key and base URL.</div>
+            </div>
+          </div>
+          <div class="guide-step-card">
+            <div class="guide-step-index">2</div>
+            <div>
+              <div class="guide-step-title" id="usageGuideStep2Title">Switch the active config</div>
+              <div class="guide-step-desc" id="usageGuideStep2Desc">Click Switch on a config card and wait for System, Editors, and Claude to finish syncing.</div>
+            </div>
+          </div>
+          <div class="guide-step-card">
+            <div class="guide-step-index">3</div>
+            <div>
+              <div class="guide-step-title" id="usageGuideStep3Title">Restart terminals and editors</div>
+              <div class="guide-step-desc" id="usageGuideStep3Desc">After switching, restart your terminal and editor windows so the new environment variables take effect.</div>
+            </div>
+          </div>
+          <div class="guide-step-card">
+            <div class="guide-step-index">4</div>
+            <div>
+              <div class="guide-step-title" id="usageGuideStep4Title">Manage Claude-related files</div>
+              <div class="guide-step-desc" id="usageGuideStep4Desc">The toolbar lets you manage Skills, Prompts, MCP servers, and app settings in one place.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" id="usageGuideCloseBtn">Close</button>
+        <button type="button" class="btn btn-primary" id="usageGuideNeverBtn">Never remind again</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast-container" id="toastContainer"></div>
+  <script src="app-helpers.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

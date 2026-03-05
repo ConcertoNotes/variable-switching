@@ -1,5 +1,6 @@
-﻿const $ = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 const tauriApi = window.__TAURI__;
+const helpers = window.VarSwitchHelpers || {};
 
 if (!tauriApi?.core?.invoke || !tauriApi?.event?.listen) {
   document.body.innerHTML = `
@@ -17,6 +18,7 @@ const { listen } = tauriApi.event;
 
 const LANG_STORAGE_KEY = "varswitch.lang";
 const THEME_STORAGE_KEY = "varswitch.theme";
+const APP_REPOSITORY_URL = "https://github.com/ConcertoNotes/variable-switching";
 
 const I18N = {
   en: {
@@ -82,6 +84,9 @@ const I18N = {
     placeholderName: "e.g. Production",
     placeholderApiKey: "sk-...",
     placeholderBaseUrl: "https://api.example.com",
+    modelIdLabel: "Model ID",
+    placeholderModelId: "e.g. opus, sonnet",
+    modelIdHint: "Optional. Sets model in editor and Claude settings.",
     skillsManage: "Skills",
     skillsTitle: "Skills Management",
     addSkill: "+ Add Skill",
@@ -178,16 +183,61 @@ const I18N = {
     settingsConfigDir: "Config directory",
     settingsClaudePath: "Claude settings",
     settingsOpen: "Open",
+    settingsBrowse: "Browse",
+    settingsSavePath: "Save Path",
+    settingsReset: "Reset",
+    settingsPathPlaceholder: "Paste a settings directory or settings.json path",
+    settingsPathEmpty: "Enter an editor settings path first",
+    settingsCurrentPath: "Current path",
+    settingsDefaultPathLabel: "Built-in default",
+    settingsEditorStatusCustom: "Manual path",
+    settingsEditorStatusDetected: "Auto-detected",
+    settingsEditorStatusDefault: "Default path",
+    settingsEditorHintCustom: "Uses your saved path for detection and environment sync.",
+    settingsEditorHintDetected: "Using the built-in path detected on this device.",
+    settingsEditorHintDefault: "Not detected yet. Save a path here if this editor is installed elsewhere.",
+    settingsDefaultPath: "Default: {path}",
     settingsExport: "Export Profiles",
     settingsImport: "Import Profiles",
     toastSettingsSaved: "Settings saved",
+    toastEditorPathSaved: "{name} path saved",
+    toastEditorPathReset: "{name} path reset",
+    toastEditorPathBrowseCancelled: "Path selection cancelled",
     toastExported: "Profiles exported",
     toastImported2: "{count} profile(s) imported",
     toastImportNone: "No new profiles to import",
     settingsSilentStart: "Silent startup",
     settingsSilentStartDesc: "Start minimized to system tray",
     settingsLang: "Language",
-    settingsTheme: "Theme"
+    settingsTheme: "Theme",
+    supportSectionTitle: "Quick Actions",
+    supportHintDefault: "Open the usage guide, check GitHub Releases for updates, or jump to the repository.",
+    supportHintUpdateAvailable: "{version} is available. Click again to open the GitHub release page.",
+    supportHintUpToDate: "You're already on the latest version: {version}.",
+    usageGuideBtn: "Usage Guide",
+    updateCheckBtn: "Check for Updates",
+    updateReleaseBtn: "Open Release Page {version}",
+    githubRepoBtn: "GitHub Repo",
+    usageGuideKicker: "Usage Guide",
+    usageGuideTitle: "How to use VarSwitch",
+    usageGuideIntro: "Follow these steps to switch API environments safely and keep Claude-related settings in sync.",
+    usageGuideStep1Title: "Add or import a config",
+    usageGuideStep1Desc: "Use Add Config or Import Current to prepare your API key and base URL.",
+    usageGuideStep2Title: "Switch the active config",
+    usageGuideStep2Desc: "Click Switch on a config card and wait for System, Editors, and Claude to finish syncing.",
+    usageGuideStep3Title: "Restart terminals and editors",
+    usageGuideStep3Desc: "After switching, restart your terminal and editor windows so the new environment variables take effect.",
+    usageGuideStep4Title: "Manage Claude-related files",
+    usageGuideStep4Desc: "The toolbar lets you manage Skills, Prompts, MCP servers, and app settings in one place.",
+    usageGuideClose: "Close",
+    usageGuideNever: "Never remind again",
+    toastGuideDisabled: "Usage guide disabled",
+    checkingUpdates: "Checking for Updates...",
+    openingReleasePage: "Opening Release Page...",
+    toastUpdateAvailable: "Update available: {version}",
+    toastAlreadyLatest: "You're already on the latest version",
+    toastReleaseOpened: "Release page opened",
+    toastRepoOpened: "Repository opened"
   },
   zh: {
     appTitle: "VarSwitch",
@@ -252,6 +302,9 @@ const I18N = {
     placeholderName: "例如：生产环境",
     placeholderApiKey: "sk-...",
     placeholderBaseUrl: "https://api.example.com",
+    modelIdLabel: "模型 ID",
+    placeholderModelId: "如 opus, sonnet",
+    modelIdHint: "可选。设置编辑器和 Claude 系统设置中的模型。",
     skillsManage: "技能",
     skillsTitle: "技能管理",
     addSkill: "+ 添加技能",
@@ -346,16 +399,61 @@ const I18N = {
     settingsConfigDir: "配置目录",
     settingsClaudePath: "Claude 设置",
     settingsOpen: "打开",
+    settingsBrowse: "浏览",
+    settingsSavePath: "保存路径",
+    settingsReset: "重置",
+    settingsPathPlaceholder: "粘贴 settings 目录或 settings.json 路径",
+    settingsPathEmpty: "请先输入编辑器设置路径",
+    settingsCurrentPath: "当前使用路径",
+    settingsDefaultPathLabel: "内置默认路径",
+    settingsEditorStatusCustom: "手动路径",
+    settingsEditorStatusDetected: "已自动识别",
+    settingsEditorStatusDefault: "默认路径",
+    settingsEditorHintCustom: "当前使用你保存的路径进行环境识别和同步。",
+    settingsEditorHintDetected: "当前使用此设备上自动识别到的内置路径。",
+    settingsEditorHintDefault: "暂未识别到该编辑器；如果装在其他位置，可以在这里手动指定。",
+    settingsDefaultPath: "默认路径：{path}",
     settingsExport: "导出配置",
     settingsImport: "导入配置",
     toastSettingsSaved: "设置已保存",
+    toastEditorPathSaved: "已保存 {name} 路径",
+    toastEditorPathReset: "已重置 {name} 路径",
+    toastEditorPathBrowseCancelled: "已取消选择路径",
     toastExported: "配置已导出",
     toastImported2: "已导入 {count} 个配置",
     toastImportNone: "没有新配置可导入",
     settingsSilentStart: "静默启动",
     settingsSilentStartDesc: "启动时最小化到系统托盘",
     settingsLang: "语言",
-    settingsTheme: "主题"
+    settingsTheme: "主题",
+    supportSectionTitle: "快捷操作",
+    supportHintDefault: "打开使用说明、检查 GitHub Releases 更新，或直接访问仓库。",
+    supportHintUpdateAvailable: "发现新版本 {version}，再次点击即可打开 GitHub 发布页。",
+    supportHintUpToDate: "当前已经是最新版本：{version}。",
+    usageGuideBtn: "使用说明",
+    updateCheckBtn: "检查更新",
+    updateReleaseBtn: "打开发布页 {version}",
+    githubRepoBtn: "GitHub 仓库",
+    usageGuideKicker: "使用说明",
+    usageGuideTitle: "VarSwitch 使用说明",
+    usageGuideIntro: "按照下面的步骤使用 VarSwitch，可以安全切换 API 环境并同步 Claude 相关配置。",
+    usageGuideStep1Title: "添加或导入配置",
+    usageGuideStep1Desc: "使用“添加配置”或“导入当前配置”，准备好 API Key 和 Base URL。",
+    usageGuideStep2Title: "切换当前配置",
+    usageGuideStep2Desc: "在配置卡片上点击“切换使用”，等待系统环境变量、编辑器和 Claude 同步完成。",
+    usageGuideStep3Title: "重启终端和编辑器",
+    usageGuideStep3Desc: "切换完成后，请重启终端和编辑器窗口，让新的环境变量生效。",
+    usageGuideStep4Title: "管理 Claude 相关内容",
+    usageGuideStep4Desc: "顶部工具栏可以统一管理 Skills、Prompts、MCP 服务器和应用设置。",
+    usageGuideClose: "关闭",
+    usageGuideNever: "永不提醒",
+    toastGuideDisabled: "已关闭使用说明提醒",
+    checkingUpdates: "正在检查更新...",
+    openingReleasePage: "正在打开发布页...",
+    toastUpdateAvailable: "发现新版本：{version}",
+    toastAlreadyLatest: "当前已经是最新版本",
+    toastReleaseOpened: "已打开发布页",
+    toastRepoOpened: "已打开仓库地址"
   }
 };
 
@@ -389,6 +487,12 @@ let isDiscovering = false;
 let promptTemplates = [];
 let activePromptTab = "editor";
 let isShowingGithubSkills = false;
+let updateInfo = null;
+let updateBusy = false;
+let updateBusyAction = null;
+let appSettings = null;
+let appPaths = null;
+let usageGuideAutoHandled = false;
 
 function t(key, params) {
   const dict = I18N[currentLang] || I18N.en;
@@ -418,6 +522,203 @@ function maskKey(key) {
 function truncUrl(url, max = 40) {
   if (!url) return "--";
   return url.length > max ? `${url.slice(0, max)}...` : url;
+}
+
+function shouldAutoOpenUsageGuide(settings) {
+  if (typeof helpers.shouldAutoOpenUsageGuide === "function") {
+    return helpers.shouldAutoOpenUsageGuide(settings);
+  }
+  return !settings || settings.neverShowUsageGuide !== true;
+}
+
+function getUpdateActionMode() {
+  if (typeof helpers.getUpdateActionMode === "function") {
+    return helpers.getUpdateActionMode(updateInfo, updateBusy);
+  }
+  if (updateBusy) return "busy";
+  if (updateInfo?.hasUpdate) return "release";
+  return "check";
+}
+
+function formatVersionTag(version) {
+  if (typeof helpers.formatVersionTag === "function") {
+    return helpers.formatVersionTag(version);
+  }
+  if (!version) return "";
+  return version.startsWith("v") ? version : `v${version}`;
+}
+
+function getEditorPathMode(editorInfo) {
+  if (typeof helpers.getEditorPathMode === "function") {
+    return helpers.getEditorPathMode(editorInfo);
+  }
+  if (editorInfo?.customized) return "custom";
+  if (editorInfo?.detected) return "detected";
+  return "default";
+}
+
+function validateEditorPathInput(value) {
+  if (typeof helpers.validateEditorPathInput === "function") {
+    return helpers.validateEditorPathInput(value);
+  }
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    return { valid: false, reason: "empty" };
+  }
+  return { valid: true, value: normalized };
+}
+
+function syncAppSettingsAppearance() {
+  if (!appSettings) return;
+  appSettings.language = currentLang;
+  appSettings.theme = currentTheme;
+}
+
+function currentSupportHint() {
+  if (updateBusy) {
+    return t("checkingUpdates");
+  }
+  if (updateInfo?.hasUpdate) {
+    return t("supportHintUpdateAvailable", {
+      version: formatVersionTag(updateInfo.latestVersion)
+    });
+  }
+  if (updateInfo && !updateInfo.hasUpdate) {
+    return t("supportHintUpToDate", {
+      version: formatVersionTag(updateInfo.currentVersion || updateInfo.latestVersion)
+    });
+  }
+  return t("supportHintDefault");
+}
+
+function renderUpdateButton() {
+  const btn = $("updateBtn");
+  const textEl = $("updateBtnText");
+  const hintEl = $("supportHint");
+  if (!btn || !textEl || !hintEl) return;
+
+  const mode = getUpdateActionMode();
+  if (mode === "busy") {
+    btn.disabled = true;
+    textEl.textContent = t("checkingUpdates");
+  } else if (mode === "release" && updateInfo?.latestVersion) {
+    btn.disabled = false;
+    textEl.textContent = t("updateReleaseBtn", {
+      version: formatVersionTag(updateInfo.latestVersion)
+    });
+  } else {
+    btn.disabled = false;
+    textEl.textContent = t("updateCheckBtn");
+  }
+
+  hintEl.textContent = currentSupportHint();
+}
+
+function openUsageGuide() {
+  $("usageGuideOverlay").classList.add("open");
+}
+
+function closeUsageGuide() {
+  $("usageGuideOverlay").classList.remove("open");
+}
+
+async function loadAppSettings() {
+  try {
+    appSettings = await invoke("get_app_settings");
+  } catch (error) {
+    console.error("Failed to load app settings:", error);
+    appSettings = appSettings || { neverShowUsageGuide: false };
+  }
+  appSettings = appSettings || {};
+  appSettings.editorPaths = appSettings.editorPaths || {};
+  syncAppSettingsAppearance();
+  return appSettings;
+}
+
+async function persistAppSettings() {
+  if (!appSettings) {
+    await loadAppSettings();
+  }
+  appSettings.editorPaths = appSettings.editorPaths || {};
+  syncAppSettingsAppearance();
+  await invoke("save_app_settings", { settings: appSettings });
+}
+
+async function handleNeverShowUsageGuide() {
+  try {
+    if (!appSettings) {
+      await loadAppSettings();
+    }
+    appSettings.neverShowUsageGuide = true;
+    await persistAppSettings();
+    closeUsageGuide();
+    showToast(t("toastGuideDisabled"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function maybeOpenUsageGuide() {
+  if (usageGuideAutoHandled) return;
+  usageGuideAutoHandled = true;
+  if (shouldAutoOpenUsageGuide(appSettings)) {
+    openUsageGuide();
+  }
+}
+
+async function checkForUpdates() {
+  updateBusy = true;
+  updateBusyAction = "check";
+  renderUpdateButton();
+
+  try {
+    updateInfo = await invoke("check_app_update");
+    if (updateInfo?.hasUpdate) {
+      showToast(
+        t("toastUpdateAvailable", {
+          version: formatVersionTag(updateInfo.latestVersion)
+        }),
+        "success"
+      );
+    } else {
+      showToast(t("toastAlreadyLatest"), "success");
+    }
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    updateBusy = false;
+    updateBusyAction = null;
+    renderUpdateButton();
+  }
+}
+
+async function openUpdateReleasePage() {
+  try {
+    const target = updateInfo?.releaseUrl || `${APP_REPOSITORY_URL}/releases`;
+    await invoke("open_external_target", { target });
+    showToast(t("toastReleaseOpened"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleUpdateButton() {
+  const mode = getUpdateActionMode();
+  if (mode === "busy") return;
+  if (mode === "release") {
+    await openUpdateReleasePage();
+    return;
+  }
+  await checkForUpdates();
+}
+
+async function openGitHubRepo() {
+  try {
+    await invoke("open_external_target", { target: APP_REPOSITORY_URL });
+    showToast(t("toastRepoOpened"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
 }
 
 function updateThemeSegControl() {
@@ -459,6 +760,9 @@ function applyLanguage() {
   $("appSubtitle").textContent = t("appSubtitle");
   $("importBtnText").textContent = t("importBtn");
   $("addBtn").textContent = t("addBtn");
+  $("supportSectionTitle").textContent = t("supportSectionTitle");
+  $("usageGuideBtnText").textContent = t("usageGuideBtn");
+  $("githubRepoBtnText").textContent = t("githubRepoBtn");
   $("statusSectionTitle").textContent = t("statusTitle");
   $("statusHint").textContent = t("statusHint");
   $("profilesSectionTitle").textContent = t("profilesTitle");
@@ -475,10 +779,26 @@ function applyLanguage() {
   $("switchStepLabel").textContent = t("preparing");
   $("activeConfigLabel").textContent = t("activeConfigLabel");
   $("syncNowBtnText").textContent = t("syncNow");
+  $("usageGuideKicker").textContent = t("usageGuideKicker");
+  $("usageGuideTitle").textContent = t("usageGuideTitle");
+  $("usageGuideIntro").textContent = t("usageGuideIntro");
+  $("usageGuideStep1Title").textContent = t("usageGuideStep1Title");
+  $("usageGuideStep1Desc").textContent = t("usageGuideStep1Desc");
+  $("usageGuideStep2Title").textContent = t("usageGuideStep2Title");
+  $("usageGuideStep2Desc").textContent = t("usageGuideStep2Desc");
+  $("usageGuideStep3Title").textContent = t("usageGuideStep3Title");
+  $("usageGuideStep3Desc").textContent = t("usageGuideStep3Desc");
+  $("usageGuideStep4Title").textContent = t("usageGuideStep4Title");
+  $("usageGuideStep4Desc").textContent = t("usageGuideStep4Desc");
+  $("usageGuideCloseBtn").textContent = t("usageGuideClose");
+  $("usageGuideNeverBtn").textContent = t("usageGuideNever");
 
   $("profileName").placeholder = t("placeholderName");
   $("profileApiKey").placeholder = t("placeholderApiKey");
   $("profileBaseUrl").placeholder = t("placeholderBaseUrl");
+  $("profileModelIdLabel").textContent = t("modelIdLabel");
+  $("profileModelId").placeholder = t("placeholderModelId");
+  $("profileModelIdHint").textContent = t("modelIdHint");
 
   // Management panel labels
   $("skillsBtn").title = t("skillsManage");
@@ -558,9 +878,13 @@ function applyLanguage() {
   $("settingsImportBtn").textContent = t("settingsImport");
   $("settingsSilentStartLabel").textContent = t("settingsSilentStart");
   $("settingsSilentStartDesc").textContent = t("settingsSilentStartDesc");
+  if ($("settingsOverlay").classList.contains("open")) {
+    renderSettingsEditorPaths(getSettingsEditorPathInfos());
+  }
 
   updateLangSegControl();
   updateThemeSegControl();
+  renderUpdateButton();
 
   if ($("modalOverlay").classList.contains("open")) {
     $("modalTitle").textContent = editingId ? t("editConfig") : t("addConfig");
@@ -570,6 +894,7 @@ function applyLanguage() {
 function setLanguage(lang) {
   currentLang = lang;
   localStorage.setItem(LANG_STORAGE_KEY, currentLang);
+  syncAppSettingsAppearance();
   applyLanguage();
   renderProfiles();
   loadStatus();
@@ -578,6 +903,7 @@ function setLanguage(lang) {
 function setTheme(theme) {
   currentTheme = theme;
   localStorage.setItem(THEME_STORAGE_KEY, currentTheme);
+  syncAppSettingsAppearance();
   applyTheme();
 }
 
@@ -836,6 +1162,10 @@ function renderProfiles() {
           <span class="field-label">${t("urlLabel")}</span>
           <span class="field-value">${truncUrl(profile.baseUrl, 50)}</span>
         </div>
+        ${profile.modelId ? `<div class="profile-field">
+          <span class="field-label">${t("modelIdLabel")}</span>
+          <span class="field-value">${esc(profile.modelId)}</span>
+        </div>` : ""}
       </div>
       <div class="profile-actions">
         ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
@@ -887,6 +1217,7 @@ function openModal(profile) {
   $("profileName").value = profile ? profile.name : "";
   $("profileApiKey").value = profile ? profile.apiKey : "";
   $("profileBaseUrl").value = profile ? profile.baseUrl : "";
+  $("profileModelId").value = profile ? (profile.modelId || "") : "";
   $("modalOverlay").classList.add("open");
   $("profileName").focus();
 }
@@ -902,13 +1233,14 @@ async function handleSubmit(event) {
   const name = $("profileName").value.trim();
   const apiKey = $("profileApiKey").value.trim();
   const baseUrl = $("profileBaseUrl").value.trim();
+  const modelId = $("profileModelId").value.trim();
 
   try {
     if (editingId) {
-      await invoke("update_profile", { id: editingId, name, apiKey, baseUrl });
+      await invoke("update_profile", { id: editingId, name, apiKey, baseUrl, modelId: modelId || null });
       showToast(t("toastUpdated"), "success");
     } else {
-      await invoke("add_profile", { name, apiKey, baseUrl });
+      await invoke("add_profile", { name, apiKey, baseUrl, modelId: modelId || null });
       showToast(t("toastAdded"), "success");
     }
 
@@ -1895,49 +2227,272 @@ $("mcpPresetSearch").addEventListener("keydown", (e) => {
   }
 });
 
+$("usageGuideBtn").addEventListener("click", openUsageGuide);
+$("updateBtn").addEventListener("click", handleUpdateButton);
+$("githubRepoBtn").addEventListener("click", openGitHubRepo);
+$("usageGuideCloseBtn").addEventListener("click", closeUsageGuide);
+$("usageGuideCloseIcon").addEventListener("click", closeUsageGuide);
+$("usageGuideNeverBtn").addEventListener("click", handleNeverShowUsageGuide);
+$("usageGuideOverlay").addEventListener("click", (event) => {
+  if (event.target === $("usageGuideOverlay")) closeUsageGuide();
+});
+
 // ── Settings Panel ──────────────────────────────────
 
-let appSettings = null;
-let appPaths = null;
+function getSettingsEditorPathInfos() {
+  return Array.isArray(appPaths?.editorSettings) ? appPaths.editorSettings : [];
+}
+
+function editorPathInputId(editorId) {
+  return `settingsEditorPathInput-${editorId}`;
+}
+
+function getEditorPathInput(editorId) {
+  return $(editorPathInputId(editorId));
+}
+
+function getEditorPathInfo(editorId) {
+  return getSettingsEditorPathInfos().find((editorInfo) => editorInfo.id === editorId) || null;
+}
+
+function getEditorPathStatusLabel(mode) {
+  if (mode === "custom") return t("settingsEditorStatusCustom");
+  if (mode === "detected") return t("settingsEditorStatusDetected");
+  return t("settingsEditorStatusDefault");
+}
+
+function getEditorPathStatusHint(mode) {
+  if (mode === "custom") return t("settingsEditorHintCustom");
+  if (mode === "detected") return t("settingsEditorHintDetected");
+  return t("settingsEditorHintDefault");
+}
+
+function createEditorPathButton(labelKey, className, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = t(labelKey);
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function createEditorPathRow(editorInfo) {
+  const mode = getEditorPathMode(editorInfo);
+  const row = document.createElement("div");
+  row.className = "settings-row settings-row-editor";
+
+  const card = document.createElement("div");
+  card.className = "settings-editor-card";
+
+  const header = document.createElement("div");
+  header.className = "settings-editor-header";
+
+  const titleBlock = document.createElement("div");
+  titleBlock.className = "settings-editor-title-block";
+
+  const label = document.createElement("div");
+  label.className = "settings-row-label";
+  label.textContent =
+    currentLang === "zh"
+      ? `${editorInfo.displayName} 设置`
+      : `${editorInfo.displayName} settings`;
+
+  const badge = document.createElement("span");
+  badge.className = `settings-path-badge settings-path-badge-${mode}`;
+  badge.textContent = getEditorPathStatusLabel(mode);
+
+  const desc = document.createElement("div");
+  desc.className = "settings-row-desc";
+  desc.textContent = getEditorPathStatusHint(mode);
+
+  titleBlock.appendChild(label);
+  titleBlock.appendChild(desc);
+
+  header.appendChild(titleBlock);
+  header.appendChild(badge);
+
+  const layout = document.createElement("div");
+  layout.className = "settings-editor-layout";
+
+  const currentPanel = document.createElement("div");
+  currentPanel.className = "settings-path-panel settings-path-panel-current";
+
+  const currentLabel = document.createElement("div");
+  currentLabel.className = "settings-path-field-label";
+  currentLabel.textContent = t("settingsCurrentPath");
+
+  const input = document.createElement("input");
+  input.className = "settings-path-input";
+  input.type = "text";
+  input.id = editorPathInputId(editorInfo.id);
+  input.placeholder = t("settingsPathPlaceholder");
+  input.value = editorInfo.settingsPath || "";
+  input.spellcheck = false;
+  input.autocomplete = "off";
+
+  const actions = document.createElement("div");
+  actions.className = "settings-editor-actions";
+  actions.appendChild(
+    createEditorPathButton("settingsBrowse", "btn btn-secondary btn-sm", () =>
+      handleBrowseEditorPath(editorInfo.id)
+    )
+  );
+  actions.appendChild(
+    createEditorPathButton("settingsSavePath", "btn btn-primary btn-sm", () =>
+      handleSaveEditorPath(editorInfo.id)
+    )
+  );
+  actions.appendChild(
+    createEditorPathButton("settingsReset", "btn btn-secondary btn-sm", () =>
+      handleResetEditorPath(editorInfo.id)
+    )
+  );
+  actions.appendChild(
+    createEditorPathButton("settingsOpen", "btn btn-secondary btn-sm", () =>
+      handleOpenEditorPath(editorInfo.id)
+    )
+  );
+
+  currentPanel.appendChild(currentLabel);
+  currentPanel.appendChild(input);
+  currentPanel.appendChild(actions);
+
+  const defaultPanel = document.createElement("div");
+  defaultPanel.className = "settings-path-panel settings-path-panel-default";
+
+  const defaultLabel = document.createElement("div");
+  defaultLabel.className = "settings-path-field-label";
+  defaultLabel.textContent = t("settingsDefaultPathLabel");
+
+  const meta = document.createElement("div");
+  meta.className = "settings-path-meta";
+  meta.textContent = editorInfo.defaultPath || "--";
+
+  defaultPanel.appendChild(defaultLabel);
+  defaultPanel.appendChild(meta);
+
+  layout.appendChild(currentPanel);
+  layout.appendChild(defaultPanel);
+
+  card.appendChild(header);
+  card.appendChild(layout);
+  row.appendChild(card);
+  return row;
+}
+
+function renderSettingsEditorPaths(editorInfos) {
+  const editorPathsContainer = $("settingsEditorPaths");
+  editorPathsContainer.innerHTML = "";
+  for (const editorInfo of editorInfos) {
+    editorPathsContainer.appendChild(createEditorPathRow(editorInfo));
+  }
+}
+
+async function refreshSettingsPanelData() {
+  const [settings, paths] = await Promise.all([
+    invoke("get_app_settings"),
+    invoke("get_app_paths"),
+  ]);
+
+  appSettings = settings || {};
+  appSettings.editorPaths = appSettings.editorPaths || {};
+  appPaths = paths || {};
+
+  $("settingsAutoStart").checked = !!appSettings.autoStart;
+  $("settingsMinTray").checked = !!appSettings.minimizeToTray;
+  $("settingsSilentStart").checked = !!appSettings.silentStartup;
+  $("settingsConfigDirValue").textContent = appPaths.configDir || "--";
+  $("settingsClaudePathValue").textContent = appPaths.claudeSettings || "--";
+  renderSettingsEditorPaths(getSettingsEditorPathInfos());
+}
+
+async function handleBrowseEditorPath(editorId) {
+  try {
+    const dialog = window.__TAURI_PLUGIN_DIALOG__;
+    const editorInfo = getEditorPathInfo(editorId);
+    const input = getEditorPathInput(editorId);
+    const rawDefaultPath = (input?.value || editorInfo?.settingsPath || editorInfo?.defaultPath || "")
+      .trim()
+      .replace(/[\\/]settings\.json$/i, "");
+    const selectedPath = await dialog.open({
+      directory: true,
+      multiple: false,
+      defaultPath: rawDefaultPath || undefined,
+    });
+    if (!selectedPath || Array.isArray(selectedPath)) return;
+    if (input) {
+      input.value = selectedPath;
+    }
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleSaveEditorPath(editorId) {
+  try {
+    if (!appSettings) {
+      await loadAppSettings();
+    }
+    const editorInfo = getEditorPathInfo(editorId);
+    const input = getEditorPathInput(editorId);
+    const draftValue = input ? input.value : "";
+    const result = validateEditorPathInput(draftValue);
+    if (!result.valid) {
+      showToast(t("settingsPathEmpty"), "warning");
+      input?.focus();
+      return;
+    }
+
+    appSettings.editorPaths = appSettings.editorPaths || {};
+    appSettings.editorPaths[editorId] = result.value;
+    await persistAppSettings();
+    await Promise.all([refreshSettingsPanelData(), loadStatus()]);
+    showToast(
+      t("toastEditorPathSaved", {
+        name: editorInfo?.displayName || editorId,
+      }),
+      "success"
+    );
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleResetEditorPath(editorId) {
+  try {
+    if (!appSettings) {
+      await loadAppSettings();
+    }
+    const editorInfo = getEditorPathInfo(editorId);
+    appSettings.editorPaths = appSettings.editorPaths || {};
+    delete appSettings.editorPaths[editorId];
+    await persistAppSettings();
+    await Promise.all([refreshSettingsPanelData(), loadStatus()]);
+    showToast(
+      t("toastEditorPathReset", {
+        name: editorInfo?.displayName || editorId,
+      }),
+      "success"
+    );
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+function handleOpenEditorPath(editorId) {
+  const input = getEditorPathInput(editorId);
+  const editorInfo = getEditorPathInfo(editorId);
+  const target = (input?.value || "").trim() || editorInfo?.settingsPath;
+  if (!target) return;
+  invoke("open_folder", { path: target }).catch((error) => {
+    showToast(String(error), "error");
+  });
+}
 
 async function openSettingsPanel() {
   $("settingsOverlay").classList.add("open");
-  // 加载设置和路径
   try {
-    const [settings, paths] = await Promise.all([
-      invoke("get_app_settings"),
-      invoke("get_app_paths"),
-    ]);
-    appSettings = settings;
-    appPaths = paths;
-    $("settingsAutoStart").checked = settings.autoStart;
-    $("settingsMinTray").checked = settings.minimizeToTray;
-    $("settingsSilentStart").checked = settings.silentStartup;
-    $("settingsConfigDirValue").textContent = paths.configDir;
-    $("settingsClaudePathValue").textContent = paths.claudeSettings;
-    // 动态渲染编辑器路径
-    const editorPathsContainer = $("settingsEditorPaths");
-    editorPathsContainer.innerHTML = "";
-    for (const [editorId, editorPath] of Object.entries(paths.editorSettings || {})) {
-      const displayName = detectedEditors[editorId] || editorId;
-      const row = document.createElement("div");
-      row.className = "settings-row";
-      row.innerHTML = `
-        <div class="settings-row-info">
-          <div class="settings-row-label">${displayName} settings</div>
-          <div class="settings-row-value">${editorPath}</div>
-        </div>
-        <div class="settings-row-action">
-          <button class="btn btn-secondary btn-sm editor-open-btn" type="button" data-path="${editorPath}">${t("settingsOpen")}</button>
-        </div>`;
-      editorPathsContainer.appendChild(row);
-    }
-    // 绑定编辑器打开按钮事件
-    editorPathsContainer.querySelectorAll(".editor-open-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        invoke("open_folder", { path: btn.getAttribute("data-path") });
-      });
-    });
+    await refreshSettingsPanelData();
   } catch (e) {
     console.error("加载设置失败:", e);
   }
@@ -1952,8 +2507,7 @@ async function handleSettingsToggle() {
   appSettings.autoStart = $("settingsAutoStart").checked;
   appSettings.minimizeToTray = $("settingsMinTray").checked;
   appSettings.silentStartup = $("settingsSilentStart").checked;
-  appSettings.language = currentLang;
-  appSettings.theme = currentTheme;
+  syncAppSettingsAppearance();
   try {
     await invoke("save_app_settings", { settings: appSettings });
     showToast(t("toastSettingsSaved"), "success");
@@ -2025,7 +2579,8 @@ $("settingsImportBtn").addEventListener("click", handleImportProfiles);
   if (toolbar) toolbar.classList.add('app-hidden');
   if (appEl) appEl.classList.add('app-hidden');
 
-  await Promise.all([loadStatus(), loadProfiles()]);
+  await Promise.all([loadStatus(), loadProfiles(), loadAppSettings()]);
+  renderUpdateButton();
 
   // 启动动画：等加载条填满后淡出
   const splash = $('splashScreen');
@@ -2043,8 +2598,13 @@ $("settingsImportBtn").addEventListener("click", handleImportProfiles);
         appEl.classList.remove('app-hidden');
         appEl.classList.add('app-reveal');
       }
+      setTimeout(() => {
+        maybeOpenUsageGuide();
+      }, 220);
     }, 150);
     // 完全移除 splash DOM
     setTimeout(() => splash.remove(), 600);
+  } else {
+    await maybeOpenUsageGuide();
   }
 })();
