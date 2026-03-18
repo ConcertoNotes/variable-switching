@@ -932,9 +932,7 @@ fn update_profile(
     if !base_url.is_empty() {
         p.base_url = base_url.trim().trim_end_matches('/').to_string();
     }
-    if let Some(mid) = model_id {
-        p.model_id = mid.trim().to_string();
-    }
+    p.model_id = model_id.map(|m| m.trim().to_string()).unwrap_or_default();
     let updated = p.clone();
     write_profiles(&app, &data)?;
     Ok(updated)

@@ -1210,6 +1210,19 @@ function handleSyncNow() {
   }
 }
 
+// 剪贴板自动检测填写 URL / Key
+async function tryClipboardAutoFill(field) {
+  try {
+    const text = (await navigator.clipboard.readText() || "").trim();
+    if (!text) return;
+    if (field === "url" && !$("profileBaseUrl").value.trim()) {
+      if (/^https?:\/\//i.test(text)) $("profileBaseUrl").value = text;
+    } else if (field === "key" && !$("profileApiKey").value.trim()) {
+      if (!/^https?:\/\//i.test(text) && text.length >= 8) $("profileApiKey").value = text;
+    }
+  } catch (_) { /* 剪贴板不可用时静默忽略 */ }
+}
+
 function openModal(profile) {
   editingId = profile ? profile.id : null;
   $("modalTitle").textContent = profile ? t("editConfig") : t("addConfig");
@@ -1237,7 +1250,7 @@ async function handleSubmit(event) {
 
   try {
     if (editingId) {
-      await invoke("update_profile", { id: editingId, name, apiKey, baseUrl, modelId: modelId || null });
+      await invoke("update_profile", { id: editingId, name, apiKey, baseUrl, modelId });
       showToast(t("toastUpdated"), "success");
     } else {
       await invoke("add_profile", { name, apiKey, baseUrl, modelId: modelId || null });
@@ -2127,6 +2140,8 @@ $("cancelBtn").addEventListener("click", closeModal);
 $("modalClose").addEventListener("click", closeModal);
 $("switchCancelBtn").addEventListener("click", handleCancelSwitch);
 $("profileForm").addEventListener("submit", handleSubmit);
+$("profileBaseUrl").addEventListener("focus", () => tryClipboardAutoFill("url"));
+$("profileApiKey").addEventListener("focus", () => tryClipboardAutoFill("key"));
 $("syncNowBtn").addEventListener("click", handleSyncNow);
 $("modalOverlay").addEventListener("click", (event) => {
   if (event.target === $("modalOverlay")) {
