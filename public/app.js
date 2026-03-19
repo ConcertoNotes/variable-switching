@@ -51,6 +51,27 @@ const I18N = {
     progressCancelling: "Cancelling...",
     statusSystemEnv: "System Environment",
     statusClaude: "Claude Settings",
+    codexPageTab: "Codex CLI",
+    codexStatusTitle: "Codex Status",
+    codexProfilesTitle: "Codex Config List",
+    codexAddConfig: "Add Codex Config",
+    codexEditConfig: "Edit Codex Config",
+    codexNameLabel: "Config Name",
+    codexApiKeyLabel: "Codex API Key",
+    codexBaseUrlLabel: "Codex Base URL",
+    codexModelLabel: "Codex Model",
+    codexProviderLabel: "Codex Provider",
+    codexActiveConfigLabel: "Active Codex Config",
+    codexSwitchedTo: "Codex switched to {name}",
+    codexImportPrompt: "Name for the imported Codex config:",
+    codexImportDefaultName: "Current Codex Config",
+    codexToastImported: "Current Codex config imported",
+    codexToastAdded: "Codex config added",
+    codexToastUpdated: "Codex config updated",
+    codexToastDeleted: "Codex config deleted",
+    codexNoConfigsTitle: "No Codex configs yet",
+    codexNoConfigsDesc: "Create a config to sync Codex CLI settings in one click.",
+    codexAddFirstConfig: "Add your first Codex config",
     readFailed: "Read failed",
     synced: "Synced",
     unsynced: "Not Synced",
@@ -269,6 +290,27 @@ const I18N = {
     progressCancelling: "正在取消...",
     statusSystemEnv: "系统环境变量",
     statusClaude: "Claude 设置",
+    codexPageTab: "Codex CLI",
+    codexStatusTitle: "Codex 状态",
+    codexProfilesTitle: "Codex 配置列表",
+    codexAddConfig: "添加 Codex 配置",
+    codexEditConfig: "编辑 Codex 配置",
+    codexNameLabel: "配置名称",
+    codexApiKeyLabel: "Codex API Key",
+    codexBaseUrlLabel: "Codex Base URL",
+    codexModelLabel: "Codex 模型",
+    codexProviderLabel: "Codex 供应商",
+    codexActiveConfigLabel: "当前 Codex 配置",
+    codexSwitchedTo: "Codex 已切换到 {name}",
+    codexImportPrompt: "请输入导入的 Codex 配置名称：",
+    codexImportDefaultName: "当前 Codex 配置",
+    codexToastImported: "当前 Codex 配置已导入",
+    codexToastAdded: "Codex 配置已添加",
+    codexToastUpdated: "Codex 配置已更新",
+    codexToastDeleted: "Codex 配置已删除",
+    codexNoConfigsTitle: "暂无 Codex 配置",
+    codexNoConfigsDesc: "创建一个配置，一键同步 Codex CLI 设置。",
+    codexAddFirstConfig: "添加第一个 Codex 配置",
     readFailed: "读取失败",
     synced: "已同步",
     unsynced: "未同步",
@@ -468,6 +510,8 @@ if (currentTheme !== "light" && currentTheme !== "dark") {
 }
 
 let profiles = [];
+let codexProfiles = [];
+let currentPage = "claude";
 let detectedEditors = {}; // { id: displayName }
 let editingId = null;
 let switchingSnapshot = null;
@@ -800,6 +844,19 @@ function applyLanguage() {
   $("profileModelId").placeholder = t("placeholderModelId");
   $("profileModelIdHint").textContent = t("modelIdHint");
 
+  // Codex page labels
+  $("codexStatusSectionTitle").textContent = t("codexStatusTitle");
+  $("codexProfilesSectionTitle").textContent = t("codexProfilesTitle");
+  $("codexActiveConfigLabel").textContent = t("codexActiveConfigLabel");
+  $("codexSyncNowBtnText").textContent = t("syncNow");
+  $("codexNameLabel").textContent = t("codexNameLabel");
+  $("codexApiKeyLabel").textContent = t("codexApiKeyLabel");
+  $("codexBaseUrlLabel").textContent = t("codexBaseUrlLabel");
+  $("codexModelLabel").textContent = t("codexModelLabel");
+  $("codexProviderLabel").textContent = t("codexProviderLabel");
+  $("codexCancelBtn").textContent = t("cancel");
+  $("codexSubmitBtn").textContent = t("save");
+
   // Management panel labels
   $("skillsBtn").title = t("skillsManage");
   $("promptsBtn").title = t("promptsManage");
@@ -898,6 +955,10 @@ function setLanguage(lang) {
   applyLanguage();
   renderProfiles();
   loadStatus();
+  if (currentPage === "codex") {
+    renderCodexProfiles();
+    loadCodexStatus();
+  }
 }
 
 function setTheme(theme) {
@@ -1388,6 +1449,253 @@ async function handleImport() {
     showToast(t("toastImported"), "success");
     await loadProfiles();
     await loadStatus();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+// ── Page Switching ──────────────────────────────────
+
+function switchPage(page) {
+  currentPage = page;
+  document.querySelectorAll(".page-tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.getAttribute("data-page") === page);
+  });
+  document.querySelectorAll(".page-content").forEach((content) => {
+    content.classList.remove("active");
+  });
+  if (page === "claude") {
+    $("pageClaudeCode").classList.add("active");
+  } else {
+    $("pageCodex").classList.add("active");
+    loadCodexProfiles();
+    loadCodexStatus();
+  }
+}
+
+// ── Codex Profile Management ────────────────────────
+
+let editingCodexId = null;
+
+async function loadCodexProfiles() {
+  try {
+    const data = await invoke("get_codex_profiles");
+    codexProfiles = data.profiles || [];
+    renderCodexProfiles();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+function renderCodexProfiles() {
+  const grid = $("codexProfilesGrid");
+  if (!grid) return;
+
+  if (codexProfiles.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="18" x2="12" y2="12"/>
+          <line x1="9" y1="15" x2="15" y2="15"/>
+        </svg>
+        <div class="empty-state-title">${t("codexNoConfigsTitle")}</div>
+        <p>${t("codexNoConfigsDesc")}</p>
+        <div class="empty-state-actions">
+          <button class="btn btn-primary" id="codexAddFirstBtn" type="button">${t("codexAddFirstConfig")}</button>
+        </div>
+      </div>`;
+    const btn = $("codexAddFirstBtn");
+    if (btn) btn.addEventListener("click", () => openCodexModal(null));
+    updateCodexActiveConfigBar();
+    return;
+  }
+
+  grid.innerHTML = codexProfiles.map((profile) => `
+    <div class="profile-card ${profile.isActive ? "active" : ""}">
+      <div class="profile-header">
+        <span class="profile-name">${esc(profile.name)}</span>
+        ${profile.isActive ? `<span class="active-badge">${t("inUse")}</span>` : ""}
+      </div>
+      <div class="profile-body">
+        <div class="profile-field">
+          <span class="field-label">${t("codexApiKeyLabel")}</span>
+          <span class="field-value">${maskKey(profile.apiKey)}</span>
+        </div>
+        <div class="profile-field">
+          <span class="field-label">${t("codexBaseUrlLabel")}</span>
+          <span class="field-value">${truncUrl(profile.baseUrl, 50)}</span>
+        </div>
+        ${profile.model ? `<div class="profile-field">
+          <span class="field-label">${t("codexModelLabel")}</span>
+          <span class="field-value">${esc(profile.model)}</span>
+        </div>` : ""}
+        ${profile.providerName ? `<div class="profile-field">
+          <span class="field-label">${t("codexProviderLabel")}</span>
+          <span class="field-value">${esc(profile.providerName)}</span>
+        </div>` : ""}
+      </div>
+      <div class="profile-actions">
+        ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="codex-switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
+        <button class="btn btn-secondary btn-sm" data-action="codex-edit" data-id="${profile.id}" type="button">${t("edit")}</button>
+        <button class="btn btn-danger btn-sm" data-action="codex-delete" data-id="${profile.id}" type="button">${t("delete")}</button>
+      </div>
+    </div>
+  `).join("");
+
+  grid.querySelectorAll("button[data-action]").forEach((btn) => {
+    const action = btn.getAttribute("data-action");
+    const id = btn.getAttribute("data-id");
+    if (!id) return;
+    btn.addEventListener("click", () => {
+      if (action === "codex-switch") handleCodexSwitch(id);
+      if (action === "codex-edit") {
+        const p = codexProfiles.find((x) => x.id === id);
+        if (p) openCodexModal(p);
+      }
+      if (action === "codex-delete") handleCodexDelete(id);
+    });
+  });
+
+  updateCodexActiveConfigBar();
+}
+
+function updateCodexActiveConfigBar() {
+  const section = $("codexActiveConfigSection");
+  const nameEl = $("codexActiveConfigName");
+  const active = codexProfiles.find((p) => p.isActive);
+  if (active) {
+    nameEl.textContent = active.name;
+    section.style.display = "";
+  } else {
+    section.style.display = "none";
+  }
+}
+
+async function loadCodexStatus() {
+  try {
+    const status = await invoke("get_codex_status");
+    const grid = $("codexStatusGrid");
+    if (!status || !status.apiKey) {
+      grid.innerHTML = `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">Codex: --</div>`;
+      return;
+    }
+    const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+    grid.innerHTML = `
+      <div class="status-card">
+        <div class="status-card-title">
+          <span class="status-card-title-text">Codex CLI</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("codexApiKeyLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${maskKey(status.apiKey)}</span>
+            <button class="copy-btn" type="button" data-copy="${esc(status.apiKey || "")}" title="Copy">${COPY_ICON}</button>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("codexBaseUrlLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value has-tooltip" data-tooltip="${esc(status.baseUrl || "")}">${truncUrl(status.baseUrl)}</span>
+            <button class="copy-btn" type="button" data-copy="${esc(status.baseUrl || "")}" title="Copy">${COPY_ICON}</button>
+          </div>
+        </div>
+      </div>`;
+    grid.querySelectorAll(".copy-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const text = btn.getAttribute("data-copy");
+        if (text) navigator.clipboard.writeText(text).then(() => showToast(t("toastCopied"), "success"));
+      });
+    });
+  } catch (error) {
+    console.error("Failed to load codex status:", error);
+  }
+}
+
+function openCodexModal(profile) {
+  editingCodexId = profile ? profile.id : null;
+  $("codexModalTitle").textContent = profile ? t("codexEditConfig") : t("codexAddConfig");
+  $("codexProfileId").value = editingCodexId || "";
+  $("codexProfileName").value = profile ? profile.name : "";
+  $("codexApiKey").value = profile ? profile.apiKey : "";
+  $("codexBaseUrl").value = profile ? profile.baseUrl : "";
+  $("codexModel").value = profile ? (profile.model || "") : "";
+  $("codexProvider").value = profile ? (profile.providerName || "") : "";
+  $("codexModalOverlay").classList.add("open");
+  $("codexProfileName").focus();
+}
+
+function closeCodexModal() {
+  $("codexModalOverlay").classList.remove("open");
+  editingCodexId = null;
+}
+
+async function handleCodexSubmit(event) {
+  event.preventDefault();
+  const name = $("codexProfileName").value.trim();
+  const apiKey = $("codexApiKey").value.trim();
+  const baseUrl = $("codexBaseUrl").value.trim();
+  const model = $("codexModel").value.trim();
+  const providerName = $("codexProvider").value.trim();
+
+  try {
+    if (editingCodexId) {
+      await invoke("update_codex_profile", { id: editingCodexId, name, apiKey, baseUrl, model: model || null, providerName: providerName || null });
+      showToast(t("codexToastUpdated"), "success");
+    } else {
+      await invoke("add_codex_profile", { name, apiKey, baseUrl, model: model || null, providerName: providerName || null });
+      showToast(t("codexToastAdded"), "success");
+    }
+    closeCodexModal();
+    await loadCodexProfiles();
+    await loadCodexStatus();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleCodexSwitch(id) {
+  try {
+    await invoke("switch_codex_profile", { id });
+    const profile = codexProfiles.find((x) => x.id === id);
+    showToast(t("codexSwitchedTo", { name: profile?.name || "" }), "success");
+    await loadCodexProfiles();
+    await loadCodexStatus();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleCodexDelete(id) {
+  const profile = codexProfiles.find((x) => x.id === id);
+  if (!profile) return;
+  const dialog = window.__TAURI_PLUGIN_DIALOG__;
+  const confirmed = await dialog.ask(t("confirmDelete", { name: profile.name }), {
+    title: t("delete"),
+    kind: "warning",
+  });
+  if (!confirmed) return;
+  try {
+    await invoke("delete_codex_profile", { id });
+    showToast(t("codexToastDeleted"), "success");
+    await loadCodexProfiles();
+    await loadCodexStatus();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleCodexImport() {
+  const input = window.prompt(t("codexImportPrompt"), t("codexImportDefaultName"));
+  if (input === null) return;
+  const name = input.trim() || t("codexImportDefaultName");
+  try {
+    await invoke("import_codex_current", { name });
+    showToast(t("codexToastImported"), "success");
+    await loadCodexProfiles();
+    await loadCodexStatus();
   } catch (error) {
     showToast(String(error), "error");
   }
@@ -2130,8 +2438,14 @@ function showToast(message, type = "success") {
   }, 3200);
 }
 
-$("addBtn").addEventListener("click", () => openModal(null));
-$("importBtn").addEventListener("click", handleImport);
+$("addBtn").addEventListener("click", () => {
+  if (currentPage === "codex") openCodexModal(null);
+  else openModal(null);
+});
+$("importBtn").addEventListener("click", () => {
+  if (currentPage === "codex") handleCodexImport();
+  else handleImport();
+});
 $("langZhBtn").addEventListener("click", () => setLanguage("zh"));
 $("langEnBtn").addEventListener("click", () => setLanguage("en"));
 $("themeLightBtn").addEventListener("click", () => setTheme("light"));
@@ -2147,6 +2461,27 @@ $("modalOverlay").addEventListener("click", (event) => {
   if (event.target === $("modalOverlay")) {
     closeModal();
   }
+});
+
+// ── Page Tabs Event Listeners ───────────────────────
+
+document.querySelectorAll(".page-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    switchPage(tab.getAttribute("data-page"));
+  });
+});
+
+// ── Codex Modal Event Listeners ─────────────────────
+
+$("codexCancelBtn").addEventListener("click", closeCodexModal);
+$("codexModalClose").addEventListener("click", closeCodexModal);
+$("codexProfileForm").addEventListener("submit", handleCodexSubmit);
+$("codexModalOverlay").addEventListener("click", (event) => {
+  if (event.target === $("codexModalOverlay")) closeCodexModal();
+});
+$("codexSyncNowBtn").addEventListener("click", () => {
+  const active = codexProfiles.find((p) => p.isActive);
+  if (active) handleCodexSwitch(active.id);
 });
 
 // ── Management Panel Event Listeners ────────────────

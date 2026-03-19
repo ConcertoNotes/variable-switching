@@ -64,6 +64,12 @@
     </div>
   </header>
 
+  <div class="page-tabs" id="pageTabs">
+    <button class="page-tab active" data-page="claude" type="button">Claude Code</button>
+    <button class="page-tab" data-page="codex" type="button">Codex CLI</button>
+  </div>
+
+  <div class="page-content active" id="pageClaudeCode">
   <div class="app">
     <section class="support-section">
       <div class="support-card">
@@ -111,6 +117,36 @@
       <div class="profiles-grid" id="profilesGrid"></div>
     </section>
   </div>
+  </div><!-- end pageClaudeCode -->
+
+  <div class="page-content" id="pageCodex">
+  <div class="app">
+    <section class="status-section">
+      <h2 class="section-title" id="codexStatusSectionTitle">Current Status</h2>
+      <div class="status-grid" id="codexStatusGrid"></div>
+    </section>
+
+    <section class="active-config-section" id="codexActiveConfigSection" style="display:none;">
+      <div class="active-config-bar">
+        <div class="active-config-info">
+          <span class="active-config-label" id="codexActiveConfigLabel">Active Config</span>
+          <span class="active-config-name" id="codexActiveConfigName">--</span>
+        </div>
+        <div class="active-config-actions">
+          <button class="btn btn-primary btn-sm" id="codexSyncNowBtn" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <span id="codexSyncNowBtnText">Sync Now</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="profiles-section">
+      <h2 class="section-title" id="codexProfilesSectionTitle">Config List</h2>
+      <div class="profiles-grid" id="codexProfilesGrid"></div>
+    </section>
+  </div>
+  </div><!-- end pageCodex -->
 
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal">
@@ -140,6 +176,42 @@
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
           <button type="submit" class="btn btn-primary" id="submitBtn">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="codexModalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="codexModalTitle">Add Codex Config</h2>
+        <button class="modal-close" id="codexModalClose" type="button">&times;</button>
+      </div>
+      <form id="codexProfileForm">
+        <input type="hidden" id="codexProfileId">
+        <div class="form-group">
+          <label id="codexNameLabel" for="codexProfileName">Config Name</label>
+          <input type="text" id="codexProfileName" required placeholder="e.g. Production">
+        </div>
+        <div class="form-group">
+          <label id="codexApiKeyLabel" for="codexApiKey">API Key</label>
+          <input type="text" id="codexApiKey" required placeholder="sk-...">
+        </div>
+        <div class="form-group">
+          <label id="codexBaseUrlLabel" for="codexBaseUrl">Base URL</label>
+          <input type="text" id="codexBaseUrl" required placeholder="https://api.example.com">
+        </div>
+        <div class="form-group">
+          <label id="codexModelLabel" for="codexModel">Model</label>
+          <input type="text" id="codexModel" placeholder="e.g. gpt-4o">
+        </div>
+        <div class="form-group">
+          <label id="codexProviderLabel" for="codexProvider">Provider</label>
+          <input type="text" id="codexProvider" placeholder="e.g. custom">
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" id="codexCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="codexSubmitBtn">Save</button>
         </div>
       </form>
     </div>

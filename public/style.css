@@ -115,6 +115,52 @@ body::before {
   z-index: 1;
 }
 
+/* ======================== PAGE TABS ======================== */
+
+.page-tabs {
+  display: flex;
+  background: var(--surface);
+  backdrop-filter: var(--glass-saturate) blur(var(--glass-blur));
+  -webkit-backdrop-filter: var(--glass-saturate) blur(var(--glass-blur));
+  border-bottom: 1px solid var(--line);
+  padding: 0 32px;
+  max-width: 1060px;
+  margin: 0 auto;
+  position: sticky;
+  top: 52px;
+  z-index: 99;
+}
+
+.page-tab {
+  padding: 10px 24px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  transition: color 0.2s, border-bottom-color 0.2s;
+  font-family: inherit;
+}
+
+.page-tab:hover {
+  color: var(--text-secondary);
+}
+
+.page-tab.active {
+  border-bottom-color: var(--brand);
+  color: var(--brand);
+}
+
+.page-content {
+  display: none;
+}
+
+.page-content.active {
+  display: block;
+}
+
 /* ======================== TOOLBAR ======================== */
 
 .toolbar {
@@ -1100,6 +1146,8 @@ body::before {
   justify-content: flex-end;
   margin-top: 24px;
 }
+
+/* ======================== CODEX SECTION ======================== */
 
 /* ======================== TOAST ======================== */
 

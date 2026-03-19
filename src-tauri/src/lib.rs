@@ -44,6 +44,26 @@ struct ProfilesData {
     profiles: Vec<Profile>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CodexProfile {
+    id: String,
+    name: String,
+    api_key: String,
+    base_url: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    provider_name: String,
+    is_active: bool,
+    created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct CodexProfilesData {
+    profiles: Vec<CodexProfile>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SwitchResult {
@@ -260,6 +280,27 @@ fn write_profiles(app: &tauri::AppHandle, data: &ProfilesData) -> Result<(), Str
     write_profiles_to_path(&path, data)
 }
 
+fn codex_profiles_path(app: &tauri::AppHandle) -> PathBuf {
+    data_dir(app).join("codex_profiles.json")
+}
+
+fn read_codex_profiles(app: &tauri::AppHandle) -> CodexProfilesData {
+    let path = codex_profiles_path(app);
+    if !path.exists() {
+        return CodexProfilesData::default();
+    }
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_codex_profiles(app: &tauri::AppHandle, data: &CodexProfilesData) -> Result<(), String> {
+    let path = codex_profiles_path(app);
+    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
 fn home_dir() -> PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
@@ -269,6 +310,86 @@ fn home_dir() -> PathBuf {
 
 fn claude_settings_path() -> PathBuf {
     home_dir().join(".claude").join("settings.json")
+}
+
+fn codex_config_dir() -> PathBuf {
+    home_dir().join(".codex")
+}
+
+fn codex_auth_path() -> PathBuf {
+    codex_config_dir().join("auth.json")
+}
+
+fn codex_config_path() -> PathBuf {
+    codex_config_dir().join("config.toml")
+}
+
+/// 写入 Codex 配置文件 (~/.codex/auth.json 和 ~/.codex/config.toml)
+fn write_codex_config(profile: &CodexProfile) -> Result<(), String> {
+    let dir = codex_config_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("创建 ~/.codex 目录失败: {}", e))?;
+
+    // 写入 auth.json
+    let auth = serde_json::json!({
+        "OPENAI_API_KEY": profile.api_key
+    });
+    let auth_str = serde_json::to_string_pretty(&auth).map_err(|e| e.to_string())?;
+    fs::write(codex_auth_path(), auth_str)
+        .map_err(|e| format!("写入 codex auth.json 失败: {}", e))?;
+
+    // 写入 config.toml
+    let provider = if profile.provider_name.is_empty() {
+        "custom".to_string()
+    } else {
+        profile.provider_name.clone()
+    };
+    let model = if profile.model.is_empty() {
+        "default".to_string()
+    } else {
+        profile.model.clone()
+    };
+    let base_url = &profile.base_url;
+
+    let toml_content = format!(
+        r#"model_provider = "{provider}"
+model = "{model}"
+
+[model_providers.{provider}]
+name = "{provider}"
+base_url = "{base_url}"
+wire_api = "responses"
+requires_openai_auth = true
+"#,
+        provider = provider,
+        model = model,
+        base_url = base_url,
+    );
+    fs::write(codex_config_path(), toml_content)
+        .map_err(|e| format!("写入 codex config.toml 失败: {}", e))?;
+
+    Ok(())
+}
+
+/// 读取当前 Codex 配置状态
+fn read_codex_status() -> Option<LocationStatus> {
+    let auth: serde_json::Value = fs::read_to_string(codex_auth_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())?;
+    let api_key = auth
+        .get("OPENAI_API_KEY")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let config_str = fs::read_to_string(codex_config_path()).unwrap_or_default();
+    let base_url = config_str
+        .lines()
+        .find(|l| l.trim().starts_with("base_url"))
+        .and_then(|l| l.split('=').nth(1))
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .unwrap_or_default();
+
+    Some(LocationStatus { api_key, base_url })
 }
 
 /// 编辑器信息
@@ -1165,7 +1286,6 @@ fn get_status(app: tauri::AppHandle) -> StatusResult {
         api_key: read_auth_from_system_env(),
         base_url: reg_get_env(BASE_URL_ENV),
     });
-    let mut editors: HashMap<String, LocationStatus> = HashMap::new();
 
     // 动态检测已安装的编辑器并读取状态
     let mut editors = HashMap::new();
@@ -1297,6 +1417,143 @@ fn import_current(app: tauri::AppHandle, name: String) -> Result<Profile, String
     data.profiles.push(profile.clone());
     write_profiles(&app, &data)?;
     Ok(profile)
+}
+
+// ── Codex Profile Commands ──────────────────────────
+
+#[tauri::command]
+fn get_codex_profiles(app: tauri::AppHandle) -> CodexProfilesData {
+    read_codex_profiles(&app)
+}
+
+#[tauri::command]
+fn add_codex_profile(
+    app: tauri::AppHandle,
+    name: String,
+    api_key: String,
+    base_url: String,
+    model: Option<String>,
+    provider_name: Option<String>,
+) -> Result<CodexProfile, String> {
+    if name.is_empty() || api_key.is_empty() || base_url.is_empty() {
+        return Err("所有字段都必须填写".into());
+    }
+    let mut data = read_codex_profiles(&app);
+    let profile = CodexProfile {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: name.trim().to_string(),
+        api_key: api_key.trim().to_string(),
+        base_url: base_url.trim().trim_end_matches('/').to_string(),
+        model: model.unwrap_or_default().trim().to_string(),
+        provider_name: provider_name.unwrap_or_default().trim().to_string(),
+        is_active: false,
+        created_at: chrono_now(),
+    };
+    data.profiles.push(profile.clone());
+    write_codex_profiles(&app, &data)?;
+    Ok(profile)
+}
+
+#[tauri::command]
+fn update_codex_profile(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+    api_key: String,
+    base_url: String,
+    model: Option<String>,
+    provider_name: Option<String>,
+) -> Result<CodexProfile, String> {
+    let mut data = read_codex_profiles(&app);
+    let p = data
+        .profiles
+        .iter_mut()
+        .find(|x| x.id == id)
+        .ok_or("配置未找到")?;
+    if !name.is_empty() {
+        p.name = name.trim().to_string();
+    }
+    if !api_key.is_empty() {
+        p.api_key = api_key.trim().to_string();
+    }
+    if !base_url.is_empty() {
+        p.base_url = base_url.trim().trim_end_matches('/').to_string();
+    }
+    p.model = model.unwrap_or_default().trim().to_string();
+    p.provider_name = provider_name.unwrap_or_default().trim().to_string();
+    let updated = p.clone();
+    write_codex_profiles(&app, &data)?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn delete_codex_profile(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let mut data = read_codex_profiles(&app);
+    data.profiles.retain(|x| x.id != id);
+    write_codex_profiles(&app, &data)
+}
+
+#[tauri::command]
+fn switch_codex_profile(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let mut data = read_codex_profiles(&app);
+    let profile = data
+        .profiles
+        .iter()
+        .find(|x| x.id == id)
+        .ok_or("配置未找到")?
+        .clone();
+
+    write_codex_config(&profile)?;
+
+    for p in data.profiles.iter_mut() {
+        p.is_active = p.id == profile.id;
+    }
+    write_codex_profiles(&app, &data)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn import_codex_current(app: tauri::AppHandle, name: String) -> Result<CodexProfile, String> {
+    let status = read_codex_status().ok_or("未检测到当前 Codex 配置")?;
+    if status.api_key.is_empty() {
+        return Err("未检测到当前 Codex 配置".into());
+    }
+
+    let mut data = read_codex_profiles(&app);
+    if data
+        .profiles
+        .iter()
+        .any(|x| x.api_key == status.api_key && x.base_url == status.base_url)
+    {
+        return Err("该配置已存在".into());
+    }
+
+    let profile = CodexProfile {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: if name.is_empty() {
+            "导入的 Codex 配置".into()
+        } else {
+            name
+        },
+        api_key: status.api_key,
+        base_url: status.base_url,
+        model: String::new(),
+        provider_name: String::new(),
+        is_active: true,
+        created_at: chrono_now(),
+    };
+
+    for p in data.profiles.iter_mut() {
+        p.is_active = false;
+    }
+    data.profiles.push(profile.clone());
+    write_codex_profiles(&app, &data)?;
+    Ok(profile)
+}
+
+#[tauri::command]
+fn get_codex_status() -> Option<LocationStatus> {
+    read_codex_status()
 }
 
 // ── Skills Commands ──────────────────────────────────
@@ -3431,6 +3688,13 @@ pub fn run() {
             snapshot_config,
             restore_config,
             cancel_switch,
+            get_codex_profiles,
+            add_codex_profile,
+            update_codex_profile,
+            delete_codex_profile,
+            switch_codex_profile,
+            import_codex_current,
+            get_codex_status,
             get_app_settings,
             save_app_settings,
             get_app_paths,
