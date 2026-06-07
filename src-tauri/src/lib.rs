@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use tauri::{
     Emitter, Manager, State,
     menu::{MenuBuilder, MenuItemBuilder},
@@ -23,6 +24,9 @@ const SWITCH_TOTAL_STEPS: u32 = 6;
 const GITHUB_REPO_URL: &str = "https://github.com/ConcertoNotes/variable-switching";
 const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/ConcertoNotes/variable-switching/releases/latest";
+const ENDPOINT_TEST_DEFAULT_TIMEOUT_SECS: u64 = 8;
+const ENDPOINT_TEST_MIN_TIMEOUT_SECS: u64 = 2;
+const ENDPOINT_TEST_MAX_TIMEOUT_SECS: u64 = 30;
 
 // ── Data Structures ─────────────────────────────────
 
@@ -199,6 +203,15 @@ struct UpdateDownloadResult {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+struct EndpointLatency {
+    url: String,
+    latency: Option<u128>,
+    status: Option<u16>,
+    error: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct EditorPathInfo {
     id: String,
     display_name: String,
@@ -326,6 +339,10 @@ fn codex_config_path() -> PathBuf {
 
 /// 写入 Codex 配置文件 (~/.codex/auth.json 和 ~/.codex/config.toml)
 fn write_codex_config(profile: &CodexProfile) -> Result<(), String> {
+    write_codex_config_with_base_url(profile, &profile.base_url)
+}
+
+fn write_codex_config_with_base_url(profile: &CodexProfile, base_url: &str) -> Result<(), String> {
     let dir = codex_config_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("创建 ~/.codex 目录失败: {}", e))?;
 
@@ -348,8 +365,6 @@ fn write_codex_config(profile: &CodexProfile) -> Result<(), String> {
     } else {
         profile.model.clone()
     };
-    let base_url = &profile.base_url;
-
     let toml_content = format!(
         r#"model_provider = "{provider}"
 model = "{model}"
@@ -996,11 +1011,126 @@ fn emit_switch_progress(app: &tauri::AppHandle, step: u32, label: &str) {
     );
 }
 
+fn sanitize_endpoint_timeout(timeout_secs: Option<u64>) -> u64 {
+    timeout_secs
+        .unwrap_or(ENDPOINT_TEST_DEFAULT_TIMEOUT_SECS)
+        .clamp(
+            ENDPOINT_TEST_MIN_TIMEOUT_SECS,
+            ENDPOINT_TEST_MAX_TIMEOUT_SECS,
+        )
+}
+
+fn normalize_endpoint_url(raw_url: &str) -> Result<String, String> {
+    let trimmed = raw_url.trim().trim_end_matches('/').to_string();
+    if trimmed.is_empty() {
+        return Err("URL 不能为空".to_string());
+    }
+
+    let parsed = reqwest::Url::parse(&trimmed).map_err(|e| format!("URL 无效: {}", e))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("仅支持 http 或 https URL".to_string());
+    }
+
+    Ok(trimmed)
+}
+
+fn measure_endpoint_latency(
+    client: reqwest::blocking::Client,
+    url: String,
+    timeout: Duration,
+) -> EndpointLatency {
+    let parsed = match reqwest::Url::parse(&url) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            return EndpointLatency {
+                url,
+                latency: None,
+                status: None,
+                error: Some(format!("URL 无效: {}", e)),
+            };
+        }
+    };
+
+    let _ = client
+        .get(parsed.clone())
+        .timeout(timeout)
+        .send()
+        .ok();
+
+    let start = Instant::now();
+    match client.get(parsed).timeout(timeout).send() {
+        Ok(resp) => EndpointLatency {
+            url,
+            latency: Some(start.elapsed().as_millis()),
+            status: Some(resp.status().as_u16()),
+            error: None,
+        },
+        Err(e) => EndpointLatency {
+            url,
+            latency: None,
+            status: e.status().map(|status| status.as_u16()),
+            error: Some(if e.is_timeout() {
+                "请求超时".to_string()
+            } else if e.is_connect() {
+                "连接失败".to_string()
+            } else {
+                e.to_string()
+            }),
+        },
+    }
+}
+
 // ── Tauri Commands ──────────────────────────────────
 
 #[tauri::command]
 fn get_profiles(app: tauri::AppHandle) -> ProfilesData {
     read_profiles(&app)
+}
+
+#[tauri::command]
+fn test_api_endpoints(
+    urls: Vec<String>,
+    timeout_secs: Option<u64>,
+) -> Result<Vec<EndpointLatency>, String> {
+    if urls.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let timeout = Duration::from_secs(sanitize_endpoint_timeout(timeout_secs));
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("VarSwitch endpoint speed test")
+        .timeout(timeout)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut results: Vec<Option<EndpointLatency>> = vec![None; urls.len()];
+    let mut handles = Vec::new();
+
+    for (idx, raw_url) in urls.into_iter().enumerate() {
+        match normalize_endpoint_url(&raw_url) {
+            Ok(url) => {
+                let client = client.clone();
+                handles.push((
+                    idx,
+                    std::thread::spawn(move || measure_endpoint_latency(client, url, timeout)),
+                ));
+            }
+            Err(error) => {
+                results[idx] = Some(EndpointLatency {
+                    url: raw_url,
+                    latency: None,
+                    status: None,
+                    error: Some(error),
+                });
+            }
+        }
+    }
+
+    for (idx, handle) in handles {
+        results[idx] = Some(handle.join().map_err(|_| "测速线程异常退出".to_string())?);
+    }
+
+    Ok(results.into_iter().flatten().collect())
 }
 
 #[tauri::command]
@@ -2370,6 +2500,72 @@ fn build_catalog() -> Vec<CatalogSkill> {
             stars: 0,
             repo_url: String::new(),
         },
+        CatalogSkill {
+            name: "codebase-explorer".into(),
+            description: "Map unfamiliar repositories, identify entry points, data flow, and high-risk modules".into(),
+            description_zh: "快速梳理陌生仓库，识别入口、数据流和高风险模块".into(),
+            download_url: "".into(),
+            source: "recommended".into(),
+            category: "development".into(),
+            installed: false,
+            stars: 0,
+            repo_url: String::new(),
+        },
+        CatalogSkill {
+            name: "bug-root-cause".into(),
+            description: "Debug production bugs with reproduction steps, fault isolation, and regression tests".into(),
+            description_zh: "按复现、隔离、回归测试的流程定位生产 Bug 根因".into(),
+            download_url: "".into(),
+            source: "recommended".into(),
+            category: "debugging".into(),
+            installed: false,
+            stars: 0,
+            repo_url: String::new(),
+        },
+        CatalogSkill {
+            name: "migration-planner".into(),
+            description: "Plan framework, database, or API migrations with compatibility and rollback checks".into(),
+            description_zh: "规划框架、数据库或 API 迁移，包含兼容性和回滚检查".into(),
+            download_url: "".into(),
+            source: "recommended".into(),
+            category: "architecture".into(),
+            installed: false,
+            stars: 0,
+            repo_url: String::new(),
+        },
+        CatalogSkill {
+            name: "performance-profiler".into(),
+            description: "Find bottlenecks, propose measurable optimizations, and define before/after benchmarks".into(),
+            description_zh: "定位性能瓶颈，提出可度量优化，并定义优化前后基准".into(),
+            download_url: "".into(),
+            source: "recommended".into(),
+            category: "performance".into(),
+            installed: false,
+            stars: 0,
+            repo_url: String::new(),
+        },
+        CatalogSkill {
+            name: "api-integration".into(),
+            description: "Integrate third-party APIs with auth, retries, error mapping, and test fixtures".into(),
+            description_zh: "集成第三方 API，覆盖认证、重试、错误映射和测试夹具".into(),
+            download_url: "".into(),
+            source: "recommended".into(),
+            category: "development".into(),
+            installed: false,
+            stars: 0,
+            repo_url: String::new(),
+        },
+        CatalogSkill {
+            name: "tauri-rust-desktop".into(),
+            description: "Build and debug Tauri desktop features across Rust commands, frontend state, and packaging".into(),
+            description_zh: "开发和调试 Tauri 桌面功能，覆盖 Rust 命令、前端状态和打包".into(),
+            download_url: "".into(),
+            source: "recommended".into(),
+            category: "desktop".into(),
+            installed: false,
+            stars: 0,
+            repo_url: String::new(),
+        },
     ];
 
     // Mark installed skills
@@ -2477,6 +2673,43 @@ fn download_with_fallback(client: &reqwest::blocking::Client, url: &str) -> Resu
     Err(format!("Download failed: {}", url))
 }
 
+fn recommended_skill_content(name: &str) -> String {
+    let (description, body) = match name {
+        "codebase-explorer" => (
+            "Map unfamiliar repositories and identify high-risk areas",
+            "Use this skill when entering an unfamiliar repository. Start by identifying the app type, package manager, entry points, config files, persistence layer, and test commands. Summarize the architecture, then list the files most likely to matter for the requested change. Prefer evidence from local files over assumptions.",
+        ),
+        "bug-root-cause" => (
+            "Debug bugs with reproduction, isolation, and regression tests",
+            "Use this skill for failures, crashes, incorrect behavior, or flaky tests. Capture the observed symptom, expected behavior, likely execution path, and the smallest reproduction. Inspect logs and call sites before editing. Fix the narrow cause, then add or update a regression test when practical.",
+        ),
+        "migration-planner" => (
+            "Plan framework, database, or API migrations safely",
+            "Use this skill before migrations or compatibility upgrades. Inventory current versions and integration points, identify breaking changes, plan staged rollout and rollback, and separate mechanical edits from behavior changes. Validate with focused tests after each stage.",
+        ),
+        "performance-profiler" => (
+            "Find bottlenecks and define measurable optimizations",
+            "Use this skill for slow UI, slow commands, expensive queries, high memory use, or request latency. Establish a baseline, identify the hot path, avoid speculative rewrites, and propose changes that can be measured before and after.",
+        ),
+        "api-integration" => (
+            "Integrate third-party APIs with robust error handling",
+            "Use this skill when adding or debugging external API integrations. Verify current docs, model authentication and rate limits, handle retries and timeouts explicitly, normalize provider errors, and add fixtures or mocks for tests.",
+        ),
+        "tauri-rust-desktop" => (
+            "Build and debug Tauri desktop features across Rust and frontend",
+            "Use this skill for Tauri commands, file system access, tray behavior, frontend invoke calls, packaging, and Windows/macOS/Linux path issues. Keep Rust command contracts stable, validate frontend payload names, and test both JS behavior and Rust command registration.",
+        ),
+        _ => (
+            "Installed from catalog",
+            "Use this skill as a starting point. Edit this file to add project-specific instructions, examples, and constraints.",
+        ),
+    };
+
+    format!(
+        "---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n\n{body}\n"
+    )
+}
+
 /// Download a skill from a URL and install it to ~/.claude/skills/
 #[tauri::command]
 async fn install_skill_from_url(name: String, url: String) -> Result<(), String> {
@@ -2486,7 +2719,7 @@ async fn install_skill_from_url(name: String, url: String) -> Result<(), String>
 
     let content = if url.is_empty() {
         // No URL — create a placeholder skill
-        format!("---\nname: {}\ndescription: Installed from catalog\n---\n\n# {}\n\nThis skill was installed from the catalog. Edit this file to customize it.\n", name, name)
+        recommended_skill_content(&name)
     } else {
         let url_clone = url.clone();
         tauri::async_runtime::spawn_blocking(move || {
@@ -3413,6 +3646,38 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_endpoint_timeout_clamps_values() {
+        assert_eq!(
+            sanitize_endpoint_timeout(Some(1)),
+            ENDPOINT_TEST_MIN_TIMEOUT_SECS
+        );
+        assert_eq!(
+            sanitize_endpoint_timeout(Some(999)),
+            ENDPOINT_TEST_MAX_TIMEOUT_SECS
+        );
+        assert_eq!(sanitize_endpoint_timeout(Some(10)), 10);
+        assert_eq!(
+            sanitize_endpoint_timeout(None),
+            ENDPOINT_TEST_DEFAULT_TIMEOUT_SECS
+        );
+    }
+
+    #[test]
+    fn normalize_endpoint_url_trims_and_removes_trailing_slashes() {
+        let normalized = normalize_endpoint_url(" https://api.example.com/v1/// ")
+            .expect("valid endpoint should normalize");
+
+        assert_eq!(normalized, "https://api.example.com/v1");
+    }
+
+    #[test]
+    fn normalize_endpoint_url_rejects_invalid_values() {
+        assert!(normalize_endpoint_url("").is_err());
+        assert!(normalize_endpoint_url("not a url").is_err());
+        assert!(normalize_endpoint_url("file:///tmp/config.json").is_err());
+    }
+
+    #[test]
     fn known_editors_include_vscodium() {
         assert!(
             KNOWN_EDITORS.iter().any(|editor| editor.id == "vscodium"),
@@ -3678,6 +3943,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_profiles,
+            test_api_endpoints,
             add_profile,
             update_profile,
             delete_profile,

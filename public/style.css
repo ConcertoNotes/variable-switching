@@ -1115,7 +1115,41 @@ body::before {
   color: var(--text-secondary);
 }
 
-.form-group input {
+.form-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 5px;
+}
+
+.form-label-row label {
+  margin-bottom: 0;
+}
+
+.link-button {
+  border: none;
+  background: transparent;
+  color: var(--brand);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.link-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  text-decoration: none;
+}
+
+.form-group input,
+.form-select {
   width: 100%;
   padding: 9px 12px;
   border: 0.5px solid var(--line);
@@ -1129,15 +1163,32 @@ body::before {
   color: var(--text);
 }
 
+.form-select {
+  appearance: none;
+}
+
 .form-group input::placeholder {
   color: var(--text-muted);
   opacity: 0.6;
 }
 
-.form-group input:focus {
+.form-group input:focus,
+.form-select:focus {
   outline: none;
   border-color: var(--brand);
   box-shadow: 0 0 0 3.5px var(--brand-subtle);
+}
+
+.form-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.form-hint.warning {
+  color: var(--warning-text);
 }
 
 .form-actions {
@@ -1145,6 +1196,63 @@ body::before {
   gap: 8px;
   justify-content: flex-end;
   margin-top: 24px;
+}
+
+.endpoint-results {
+  display: none;
+  margin-top: 8px;
+  border: 0.5px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-soft);
+}
+
+.endpoint-results.open {
+  display: block;
+}
+
+.endpoint-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 0.5px solid var(--line);
+  font-size: 12px;
+}
+
+.endpoint-row:first-child {
+  border-top: none;
+}
+
+.endpoint-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.endpoint-meta {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.endpoint-meta.fast {
+  color: var(--success-text);
+}
+
+.endpoint-meta.slow {
+  color: var(--warning-text);
+}
+
+.endpoint-meta.failed {
+  color: var(--error-text);
+}
+
+.endpoint-use-btn {
+  min-width: 48px;
 }
 
 /* ======================== CODEX SECTION ======================== */

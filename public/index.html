@@ -165,8 +165,12 @@
           <input type="text" id="profileApiKey" required placeholder="sk-...">
         </div>
         <div class="form-group">
-          <label id="profileBaseUrlLabel" for="profileBaseUrl">Base URL</label>
+          <div class="form-label-row">
+            <label id="profileBaseUrlLabel" for="profileBaseUrl">Base URL</label>
+            <button class="link-button" id="profileEndpointTestBtn" type="button">Test Speed</button>
+          </div>
           <input type="text" id="profileBaseUrl" required placeholder="https://api.example.com">
+          <div class="endpoint-results" id="profileEndpointResults"></div>
         </div>
         <div class="form-group">
           <label id="profileModelIdLabel" for="profileModelId">Model ID</label>
@@ -190,6 +194,13 @@
       <form id="codexProfileForm">
         <input type="hidden" id="codexProfileId">
         <div class="form-group">
+          <label id="codexPresetLabel" for="codexPresetSelect">Preset</label>
+          <select class="form-select" id="codexPresetSelect">
+            <option value="">Custom</option>
+          </select>
+          <small id="codexPresetHint" class="form-hint"></small>
+        </div>
+        <div class="form-group">
           <label id="codexNameLabel" for="codexProfileName">Config Name</label>
           <input type="text" id="codexProfileName" required placeholder="e.g. Production">
         </div>
@@ -198,8 +209,12 @@
           <input type="text" id="codexApiKey" required placeholder="sk-...">
         </div>
         <div class="form-group">
-          <label id="codexBaseUrlLabel" for="codexBaseUrl">Base URL</label>
+          <div class="form-label-row">
+            <label id="codexBaseUrlLabel" for="codexBaseUrl">Base URL</label>
+            <button class="link-button" id="codexEndpointTestBtn" type="button">Test Speed</button>
+          </div>
           <input type="text" id="codexBaseUrl" required placeholder="https://api.example.com">
+          <div class="endpoint-results" id="codexEndpointResults"></div>
         </div>
         <div class="form-group">
           <label id="codexModelLabel" for="codexModel">Model</label>

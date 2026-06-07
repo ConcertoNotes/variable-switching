@@ -19,6 +19,57 @@ const { listen } = tauriApi.event;
 const LANG_STORAGE_KEY = "varswitch.lang";
 const THEME_STORAGE_KEY = "varswitch.theme";
 const APP_REPOSITORY_URL = "https://github.com/ConcertoNotes/variable-switching";
+const CODEX_PRESETS = [
+  {
+    id: "openai",
+    name: "OpenAI Responses",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-5.5",
+    providerName: "custom",
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-v4-flash",
+    providerName: "deepseek",
+  },
+  {
+    id: "kimi",
+    name: "Kimi",
+    baseUrl: "https://api.moonshot.cn/v1",
+    model: "kimi-k2.6",
+    providerName: "kimi",
+  },
+  {
+    id: "zhipu_glm",
+    name: "Zhipu GLM",
+    baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+    model: "glm-5.1",
+    providerName: "zhipu_glm",
+  },
+  {
+    id: "minimax",
+    name: "MiniMax",
+    baseUrl: "https://api.minimaxi.com/v1",
+    model: "MiniMax-M2.7",
+    providerName: "minimax",
+  },
+  {
+    id: "siliconflow",
+    name: "SiliconFlow",
+    baseUrl: "https://api.siliconflow.cn/v1",
+    model: "Pro/MiniMaxAI/MiniMax-M2.7",
+    providerName: "siliconflow",
+  },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "openai/gpt-5.3-codex",
+    providerName: "openrouter",
+  },
+];
 
 const I18N = {
   en: {
@@ -57,6 +108,9 @@ const I18N = {
     codexAddConfig: "Add Codex Config",
     codexEditConfig: "Edit Codex Config",
     codexNameLabel: "Config Name",
+    codexPresetLabel: "Preset",
+    codexPresetCustom: "Custom",
+    codexPresetHintDefault: "Choose a preset to fill common Codex provider settings.",
     codexApiKeyLabel: "Codex API Key",
     codexBaseUrlLabel: "Codex Base URL",
     codexModelLabel: "Codex Model",
@@ -108,6 +162,13 @@ const I18N = {
     modelIdLabel: "Model ID",
     placeholderModelId: "e.g. opus, sonnet",
     modelIdHint: "Optional. Sets model in editor and Claude settings.",
+    endpointTest: "Test Speed",
+    endpointTesting: "Testing...",
+    endpointUse: "Use",
+    endpointEmpty: "Enter a Base URL first.",
+    endpointFailed: "Failed",
+    endpointNoResults: "No endpoint results",
+    endpointSelected: "Endpoint selected",
     skillsManage: "Skills",
     skillsTitle: "Skills Management",
     addSkill: "+ Add Skill",
@@ -296,6 +357,9 @@ const I18N = {
     codexAddConfig: "添加 Codex 配置",
     codexEditConfig: "编辑 Codex 配置",
     codexNameLabel: "配置名称",
+    codexPresetLabel: "预设",
+    codexPresetCustom: "自定义",
+    codexPresetHintDefault: "选择预设可自动填充常用 Codex 供应商配置。",
     codexApiKeyLabel: "Codex API Key",
     codexBaseUrlLabel: "Codex Base URL",
     codexModelLabel: "Codex 模型",
@@ -347,6 +411,13 @@ const I18N = {
     modelIdLabel: "模型 ID",
     placeholderModelId: "如 opus, sonnet",
     modelIdHint: "可选。设置编辑器和 Claude 系统设置中的模型。",
+    endpointTest: "测速",
+    endpointTesting: "测速中...",
+    endpointUse: "使用",
+    endpointEmpty: "请先输入 Base URL。",
+    endpointFailed: "失败",
+    endpointNoResults: "暂无测速结果",
+    endpointSelected: "已选择端点",
     skillsManage: "技能",
     skillsTitle: "技能管理",
     addSkill: "+ 添加技能",
@@ -813,6 +884,7 @@ function applyLanguage() {
   $("profileNameLabel").textContent = t("nameLabel");
   $("profileApiKeyLabel").textContent = t("tokenLabel");
   $("profileBaseUrlLabel").textContent = t("urlLabel");
+  $("profileEndpointTestBtn").textContent = t("endpointTest");
   $("cancelBtn").textContent = t("cancel");
   $("submitBtn").textContent = t("save");
   $("switchPanelTitle").textContent = t("switchingTo");
@@ -849,13 +921,17 @@ function applyLanguage() {
   $("codexProfilesSectionTitle").textContent = t("codexProfilesTitle");
   $("codexActiveConfigLabel").textContent = t("codexActiveConfigLabel");
   $("codexSyncNowBtnText").textContent = t("syncNow");
+  $("codexPresetLabel").textContent = t("codexPresetLabel");
   $("codexNameLabel").textContent = t("codexNameLabel");
   $("codexApiKeyLabel").textContent = t("codexApiKeyLabel");
   $("codexBaseUrlLabel").textContent = t("codexBaseUrlLabel");
+  $("codexEndpointTestBtn").textContent = t("endpointTest");
   $("codexModelLabel").textContent = t("codexModelLabel");
   $("codexProviderLabel").textContent = t("codexProviderLabel");
   $("codexCancelBtn").textContent = t("cancel");
   $("codexSubmitBtn").textContent = t("save");
+  renderCodexPresetOptions();
+  updateCodexPresetHint();
 
   // Management panel labels
   $("skillsBtn").title = t("skillsManage");
@@ -1272,16 +1348,122 @@ function handleSyncNow() {
 }
 
 // 剪贴板自动检测填写 URL / Key
-async function tryClipboardAutoFill(field) {
+async function tryClipboardAutoFill(field, targetId) {
   try {
+    const target = $(targetId);
+    if (!target || target.value.trim()) return;
+
     const text = (await navigator.clipboard.readText() || "").trim();
     if (!text) return;
-    if (field === "url" && !$("profileBaseUrl").value.trim()) {
-      if (/^https?:\/\//i.test(text)) $("profileBaseUrl").value = text;
-    } else if (field === "key" && !$("profileApiKey").value.trim()) {
-      if (!/^https?:\/\//i.test(text) && text.length >= 8) $("profileApiKey").value = text;
+    if (field === "url") {
+      if (/^https?:\/\//i.test(text)) target.value = text;
+    } else if (field === "key") {
+      if (!/^https?:\/\//i.test(text) && text.length >= 8) target.value = text;
     }
   } catch (_) { /* 剪贴板不可用时静默忽略 */ }
+}
+
+function normalizeEndpointCandidate(url) {
+  return String(url || "").trim().replace(/\/+$/, "");
+}
+
+function uniqueEndpointCandidates(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const normalized = normalizeEndpointCandidate(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function getEndpointCandidates(kind) {
+  const inputId = kind === "codex" ? "codexBaseUrl" : "profileBaseUrl";
+  return uniqueEndpointCandidates([$(inputId)?.value]);
+}
+
+function endpointLatencyClass(result) {
+  if (typeof result.latency !== "number") return "failed";
+  if (result.latency < 400) return "fast";
+  if (result.latency >= 1000) return "slow";
+  return "";
+}
+
+function endpointMetaText(result) {
+  if (typeof result.latency === "number") {
+    return `${Math.round(result.latency)}ms${result.status ? ` · ${result.status}` : ""}`;
+  }
+  return result.error || t("endpointFailed");
+}
+
+function renderEndpointResults(kind, results) {
+  const inputId = kind === "codex" ? "codexBaseUrl" : "profileBaseUrl";
+  const resultsId = kind === "codex" ? "codexEndpointResults" : "profileEndpointResults";
+  const container = $(resultsId);
+  if (!container) return;
+
+  const sorted = results.slice().sort((a, b) => {
+    const left = typeof a.latency === "number" ? a.latency : Number.POSITIVE_INFINITY;
+    const right = typeof b.latency === "number" ? b.latency : Number.POSITIVE_INFINITY;
+    return left === right ? a.url.localeCompare(b.url) : left - right;
+  });
+
+  if (sorted.length === 0) {
+    container.innerHTML = `<div class="endpoint-row"><span class="endpoint-url">${t("endpointNoResults")}</span></div>`;
+    container.classList.add("open");
+    return;
+  }
+
+  container.innerHTML = sorted.map((result) => `
+    <div class="endpoint-row">
+      <span class="endpoint-url" title="${esc(result.url)}">${esc(result.url)}</span>
+      <span class="endpoint-meta ${endpointLatencyClass(result)}">${esc(endpointMetaText(result))}</span>
+      <button class="btn btn-secondary btn-sm endpoint-use-btn" data-url="${esc(result.url)}" type="button">${t("endpointUse")}</button>
+    </div>
+  `).join("");
+  container.classList.add("open");
+
+  container.querySelectorAll(".endpoint-use-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      const url = button.getAttribute("data-url");
+      if (!url) return;
+      $(inputId).value = url;
+      showToast(t("endpointSelected"), "success");
+    });
+  });
+}
+
+function clearEndpointResults(kind) {
+  const resultsId = kind === "codex" ? "codexEndpointResults" : "profileEndpointResults";
+  const container = $(resultsId);
+  if (!container) return;
+  container.innerHTML = "";
+  container.classList.remove("open");
+}
+
+async function handleEndpointTest(kind) {
+  const buttonId = kind === "codex" ? "codexEndpointTestBtn" : "profileEndpointTestBtn";
+  const button = $(buttonId);
+  const urls = getEndpointCandidates(kind);
+  if (urls.length === 0) {
+    showToast(t("endpointEmpty"), "warning");
+    return;
+  }
+
+  const previousText = button.textContent;
+  button.disabled = true;
+  button.textContent = t("endpointTesting");
+  try {
+    const results = await invoke("test_api_endpoints", { urls, timeoutSecs: 8 });
+    renderEndpointResults(kind, results || []);
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = previousText || t("endpointTest");
+  }
 }
 
 function openModal(profile) {
@@ -1292,6 +1474,7 @@ function openModal(profile) {
   $("profileApiKey").value = profile ? profile.apiKey : "";
   $("profileBaseUrl").value = profile ? profile.baseUrl : "";
   $("profileModelId").value = profile ? (profile.modelId || "") : "";
+  clearEndpointResults("claude");
   $("modalOverlay").classList.add("open");
   $("profileName").focus();
 }
@@ -1477,6 +1660,44 @@ function switchPage(page) {
 
 let editingCodexId = null;
 
+function getSelectedCodexPreset() {
+  const presetId = $("codexPresetSelect")?.value || "";
+  return CODEX_PRESETS.find((preset) => preset.id === presetId) || null;
+}
+
+function renderCodexPresetOptions() {
+  const select = $("codexPresetSelect");
+  if (!select) return;
+  const currentValue = select.value;
+  select.innerHTML = [
+    `<option value="">${t("codexPresetCustom")}</option>`,
+    ...CODEX_PRESETS.map((preset) => `<option value="${esc(preset.id)}">${esc(preset.name)}</option>`),
+  ].join("");
+  select.value = CODEX_PRESETS.some((preset) => preset.id === currentValue) ? currentValue : "";
+}
+
+function updateCodexPresetHint() {
+  const hint = $("codexPresetHint");
+  if (!hint) return;
+  hint.classList.remove("warning");
+  hint.textContent = t("codexPresetHintDefault");
+}
+
+function applyCodexPreset(preset) {
+  if (!preset) {
+    updateCodexPresetHint();
+    return;
+  }
+  if (!$("codexProfileName").value.trim()) {
+    $("codexProfileName").value = preset.name;
+  }
+  $("codexBaseUrl").value = preset.baseUrl;
+  $("codexModel").value = preset.model;
+  $("codexProvider").value = preset.providerName;
+  clearEndpointResults("codex");
+  updateCodexPresetHint();
+}
+
 async function loadCodexProfiles() {
   try {
     const data = await invoke("get_codex_profiles");
@@ -1618,11 +1839,14 @@ function openCodexModal(profile) {
   editingCodexId = profile ? profile.id : null;
   $("codexModalTitle").textContent = profile ? t("codexEditConfig") : t("codexAddConfig");
   $("codexProfileId").value = editingCodexId || "";
+  $("codexPresetSelect").value = "";
   $("codexProfileName").value = profile ? profile.name : "";
   $("codexApiKey").value = profile ? profile.apiKey : "";
   $("codexBaseUrl").value = profile ? profile.baseUrl : "";
   $("codexModel").value = profile ? (profile.model || "") : "";
   $("codexProvider").value = profile ? (profile.providerName || "") : "";
+  updateCodexPresetHint();
+  clearEndpointResults("codex");
   $("codexModalOverlay").classList.add("open");
   $("codexProfileName").focus();
 }
@@ -2454,8 +2678,9 @@ $("cancelBtn").addEventListener("click", closeModal);
 $("modalClose").addEventListener("click", closeModal);
 $("switchCancelBtn").addEventListener("click", handleCancelSwitch);
 $("profileForm").addEventListener("submit", handleSubmit);
-$("profileBaseUrl").addEventListener("focus", () => tryClipboardAutoFill("url"));
-$("profileApiKey").addEventListener("focus", () => tryClipboardAutoFill("key"));
+$("profileBaseUrl").addEventListener("focus", () => tryClipboardAutoFill("url", "profileBaseUrl"));
+$("profileApiKey").addEventListener("focus", () => tryClipboardAutoFill("key", "profileApiKey"));
+$("profileEndpointTestBtn").addEventListener("click", () => handleEndpointTest("claude"));
 $("syncNowBtn").addEventListener("click", handleSyncNow);
 $("modalOverlay").addEventListener("click", (event) => {
   if (event.target === $("modalOverlay")) {
@@ -2476,6 +2701,10 @@ document.querySelectorAll(".page-tab").forEach((tab) => {
 $("codexCancelBtn").addEventListener("click", closeCodexModal);
 $("codexModalClose").addEventListener("click", closeCodexModal);
 $("codexProfileForm").addEventListener("submit", handleCodexSubmit);
+$("codexPresetSelect").addEventListener("change", () => applyCodexPreset(getSelectedCodexPreset()));
+$("codexBaseUrl").addEventListener("focus", () => tryClipboardAutoFill("url", "codexBaseUrl"));
+$("codexApiKey").addEventListener("focus", () => tryClipboardAutoFill("key", "codexApiKey"));
+$("codexEndpointTestBtn").addEventListener("click", () => handleEndpointTest("codex"));
 $("codexModalOverlay").addEventListener("click", (event) => {
   if (event.target === $("codexModalOverlay")) closeCodexModal();
 });
@@ -2929,7 +3158,13 @@ $("settingsImportBtn").addEventListener("click", handleImportProfiles);
   if (toolbar) toolbar.classList.add('app-hidden');
   if (appEl) appEl.classList.add('app-hidden');
 
-  await Promise.all([loadStatus(), loadProfiles(), loadAppSettings()]);
+  await Promise.all([
+    loadStatus(),
+    loadProfiles(),
+    loadCodexProfiles(),
+    loadCodexStatus(),
+    loadAppSettings(),
+  ]);
   renderUpdateButton();
 
   // 启动动画：等加载条填满后淡出
