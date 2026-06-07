@@ -62,6 +62,25 @@ npm run tauri build
 - macOS (aarch64 + x86_64)
 - Windows (x86_64)
 
+### macOS 发布签名
+
+macOS 从浏览器下载的 `.dmg` 如果没有做 Apple Developer 签名和 notarization，Gatekeeper 很容易把它拦成“已损坏”或“无法验证开发者”。当前发布工作流已经按 Tauri 官方推荐流程，要求在 GitHub Actions 中配置以下 secrets：
+
+- `APPLE_CERTIFICATE`：`Developer ID Application` 证书导出的 `.p12` 文件内容，需先转成 base64
+- `APPLE_CERTIFICATE_PASSWORD`：导出 `.p12` 时设置的密码
+- `APPLE_ID`：用于 notarization 的 Apple ID 邮箱
+- `APPLE_PASSWORD`：上述 Apple ID 的 app-specific password
+- `APPLE_TEAM_ID`：Apple Developer Team ID
+- `KEYCHAIN_PASSWORD`：CI 临时 keychain 的密码，可自行生成一个随机强密码
+
+获取 `APPLE_CERTIFICATE` 的方式示例：
+
+```bash
+openssl base64 -A -in certificate.p12 -out certificate-base64.txt
+```
+
+发布时，macOS job 会先校验这些 secrets，再导入证书并执行签名/公证；如果缺失，macOS 构建会直接失败并给出明确提示，避免继续发布未签名的 `.dmg`。
+
 ## 项目结构
 
 ```
