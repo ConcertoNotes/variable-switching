@@ -115,6 +115,13 @@ const I18N = {
     codexBaseUrlLabel: "Codex Base URL",
     codexModelLabel: "Codex Model",
     codexProviderLabel: "Codex Provider",
+    codexAuthModeLabel: "Write Mode",
+    codexAuthModeDefaultTitle: "Default write",
+    codexAuthModeDefaultHint: "~/.codex/auth.json + ~/.codex/config.toml",
+    codexAuthModeOfficialTitle: "Official account login, API quota",
+    codexAuthModeOfficialHint: "Only write ~/.codex/config.toml",
+    codexOfficialConfigLabel: "Official account API quota config",
+    copy: "Copy",
     codexActiveConfigLabel: "Active Codex Config",
     codexSwitchedTo: "Codex switched to {name}",
     codexImportPrompt: "Name for the imported Codex config:",
@@ -364,6 +371,13 @@ const I18N = {
     codexBaseUrlLabel: "Codex Base URL",
     codexModelLabel: "Codex 模型",
     codexProviderLabel: "Codex 供应商",
+    codexAuthModeLabel: "写入方式",
+    codexAuthModeDefaultTitle: "默认写入",
+    codexAuthModeDefaultHint: "~/.codex/auth.json + ~/.codex/config.toml",
+    codexAuthModeOfficialTitle: "官方账号登录，api额度消耗",
+    codexAuthModeOfficialHint: "只写 ~/.codex/config.toml",
+    codexOfficialConfigLabel: "官方账号登录，api额度消耗配置",
+    copy: "复制",
     codexActiveConfigLabel: "当前 Codex 配置",
     codexSwitchedTo: "Codex 已切换到 {name}",
     codexImportPrompt: "请输入导入的 Codex 配置名称：",
@@ -928,6 +942,13 @@ function applyLanguage() {
   $("codexEndpointTestBtn").textContent = t("endpointTest");
   $("codexModelLabel").textContent = t("codexModelLabel");
   $("codexProviderLabel").textContent = t("codexProviderLabel");
+  $("codexAuthModeLabel").textContent = t("codexAuthModeLabel");
+  $("codexAuthModeDefaultTitle").textContent = t("codexAuthModeDefaultTitle");
+  $("codexAuthModeDefaultHint").textContent = t("codexAuthModeDefaultHint");
+  $("codexAuthModeOfficialTitle").textContent = t("codexAuthModeOfficialTitle");
+  $("codexAuthModeOfficialHint").textContent = t("codexAuthModeOfficialHint");
+  $("codexOfficialConfigLabel").textContent = t("codexOfficialConfigLabel");
+  $("codexCopyOfficialConfigBtn").textContent = t("copy");
   $("codexCancelBtn").textContent = t("cancel");
   $("codexSubmitBtn").textContent = t("save");
   renderCodexPresetOptions();
@@ -1696,6 +1717,57 @@ function applyCodexPreset(preset) {
   $("codexProvider").value = preset.providerName;
   clearEndpointResults("codex");
   updateCodexPresetHint();
+  updateCodexOfficialConfigPreview();
+}
+
+function getCodexAuthMode() {
+  return $("codexAuthModeOfficial")?.checked ? "official_account_api_quota" : "auth_json";
+}
+
+function setCodexAuthMode(mode) {
+  const official = mode === "official_account_api_quota";
+  $("codexAuthModeOfficial").checked = official;
+  $("codexAuthModeDefault").checked = !official;
+  updateCodexAuthModeUi();
+}
+
+function buildCodexOfficialConfig() {
+  const baseUrl = $("codexBaseUrl").value.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const apiKey = $("codexApiKey").value.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `model_provider = "customer"
+model = "gpt-5.5"
+review_model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+disable_response_storage = true
+preferred_auth_method = "apikey"
+
+[model_providers.customer]
+name = "customer"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "${baseUrl}"
+experimental_bearer_token = "${apiKey}"`;
+}
+
+function updateCodexOfficialConfigPreview() {
+  const preview = $("codexOfficialConfig");
+  if (preview) preview.value = buildCodexOfficialConfig();
+}
+
+function updateCodexAuthModeUi() {
+  const isOfficialMode = getCodexAuthMode() === "official_account_api_quota";
+  $("codexOfficialConfigGroup").style.display = isOfficialMode ? "block" : "none";
+  updateCodexOfficialConfigPreview();
+}
+
+async function copyCodexOfficialConfig() {
+  updateCodexOfficialConfigPreview();
+  try {
+    await navigator.clipboard.writeText($("codexOfficialConfig").value);
+    showToast(t("toastCopied"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
 }
 
 async function loadCodexProfiles() {
@@ -1845,14 +1917,17 @@ function openCodexModal(profile) {
   $("codexBaseUrl").value = profile ? profile.baseUrl : "";
   $("codexModel").value = profile ? (profile.model || "") : "";
   $("codexProvider").value = profile ? (profile.providerName || "") : "";
+  setCodexAuthMode(profile ? (profile.authMode || "auth_json") : "auth_json");
   updateCodexPresetHint();
   clearEndpointResults("codex");
   $("codexModalOverlay").classList.add("open");
+  document.body.classList.add("modal-open");
   $("codexProfileName").focus();
 }
 
 function closeCodexModal() {
   $("codexModalOverlay").classList.remove("open");
+  document.body.classList.remove("modal-open");
   editingCodexId = null;
 }
 
@@ -1863,13 +1938,14 @@ async function handleCodexSubmit(event) {
   const baseUrl = $("codexBaseUrl").value.trim();
   const model = $("codexModel").value.trim();
   const providerName = $("codexProvider").value.trim();
+  const authMode = getCodexAuthMode();
 
   try {
     if (editingCodexId) {
-      await invoke("update_codex_profile", { id: editingCodexId, name, apiKey, baseUrl, model: model || null, providerName: providerName || null });
+      await invoke("update_codex_profile", { id: editingCodexId, name, apiKey, baseUrl, model: model || null, providerName: providerName || null, authMode });
       showToast(t("codexToastUpdated"), "success");
     } else {
-      await invoke("add_codex_profile", { name, apiKey, baseUrl, model: model || null, providerName: providerName || null });
+      await invoke("add_codex_profile", { name, apiKey, baseUrl, model: model || null, providerName: providerName || null, authMode });
       showToast(t("codexToastAdded"), "success");
     }
     closeCodexModal();
@@ -2704,6 +2780,11 @@ $("codexProfileForm").addEventListener("submit", handleCodexSubmit);
 $("codexPresetSelect").addEventListener("change", () => applyCodexPreset(getSelectedCodexPreset()));
 $("codexBaseUrl").addEventListener("focus", () => tryClipboardAutoFill("url", "codexBaseUrl"));
 $("codexApiKey").addEventListener("focus", () => tryClipboardAutoFill("key", "codexApiKey"));
+$("codexBaseUrl").addEventListener("input", updateCodexOfficialConfigPreview);
+$("codexApiKey").addEventListener("input", updateCodexOfficialConfigPreview);
+$("codexAuthModeDefault").addEventListener("change", updateCodexAuthModeUi);
+$("codexAuthModeOfficial").addEventListener("change", updateCodexAuthModeUi);
+$("codexCopyOfficialConfigBtn").addEventListener("click", copyCodexOfficialConfig);
 $("codexEndpointTestBtn").addEventListener("click", () => handleEndpointTest("codex"));
 $("codexModalOverlay").addEventListener("click", (event) => {
   if (event.target === $("codexModalOverlay")) closeCodexModal();

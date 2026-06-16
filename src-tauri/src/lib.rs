@@ -6,9 +6,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{
-    Emitter, Manager, State,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager, State,
 };
 
 #[cfg(target_os = "windows")]
@@ -55,6 +55,8 @@ struct CodexProfile {
     name: String,
     api_key: String,
     base_url: String,
+    #[serde(default = "default_codex_auth_mode")]
+    auth_mode: String,
     #[serde(default)]
     model: String,
     #[serde(default)]
@@ -66,6 +68,14 @@ struct CodexProfile {
 #[derive(Serialize, Deserialize, Default)]
 struct CodexProfilesData {
     profiles: Vec<CodexProfile>,
+}
+
+fn default_codex_auth_mode() -> String {
+    "auth_json".to_string()
+}
+
+fn is_codex_official_account_api_quota(auth_mode: &str) -> bool {
+    auth_mode == "official_account_api_quota"
 }
 
 #[derive(Serialize)]
@@ -337,7 +347,9 @@ fn codex_config_path() -> PathBuf {
     codex_config_dir().join("config.toml")
 }
 
-/// 写入 Codex 配置文件 (~/.codex/auth.json 和 ~/.codex/config.toml)
+/// 写入 Codex 配置文件。
+/// 默认写入 ~/.codex/auth.json 和 ~/.codex/config.toml；
+/// 官方账号登录/API 额度模式只写 ~/.codex/config.toml。
 fn write_codex_config(profile: &CodexProfile) -> Result<(), String> {
     write_codex_config_with_base_url(profile, &profile.base_url)
 }
@@ -346,27 +358,68 @@ fn write_codex_config_with_base_url(profile: &CodexProfile, base_url: &str) -> R
     let dir = codex_config_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("创建 ~/.codex 目录失败: {}", e))?;
 
-    // 写入 auth.json
-    let auth = serde_json::json!({
-        "OPENAI_API_KEY": profile.api_key
-    });
-    let auth_str = serde_json::to_string_pretty(&auth).map_err(|e| e.to_string())?;
-    fs::write(codex_auth_path(), auth_str)
-        .map_err(|e| format!("写入 codex auth.json 失败: {}", e))?;
-
     // 写入 config.toml
-    let provider = if profile.provider_name.is_empty() {
+    let official_account_mode = is_codex_official_account_api_quota(&profile.auth_mode);
+    let provider = if official_account_mode {
+        "customer".to_string()
+    } else if profile.provider_name.is_empty() {
         "custom".to_string()
     } else {
         profile.provider_name.clone()
     };
-    let model = if profile.model.is_empty() {
+    let model = if official_account_mode {
+        "gpt-5.5".to_string()
+    } else if profile.model.is_empty() {
         "default".to_string()
     } else {
         profile.model.clone()
     };
-    let toml_content = format!(
-        r#"model_provider = "{provider}"
+    let toml_content = if official_account_mode {
+        let auth_path = codex_auth_path();
+        if auth_path.exists() {
+            fs::remove_file(&auth_path).map_err(|e| format!("删除 codex auth.json 失败: {}", e))?;
+        }
+
+        format!(
+            r#"model_provider = "customer"
+model = "gpt-5.5"
+review_model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+disable_response_storage = true
+preferred_auth_method = "apikey"
+
+[model_providers.customer]
+name = "customer"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "{base_url}"
+experimental_bearer_token = "{api_key}"
+"#,
+            base_url = base_url,
+            api_key = profile.api_key,
+        )
+    } else {
+        let auth_path = codex_auth_path();
+        let mut auth = if auth_path.exists() {
+            fs::read_to_string(&auth_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .filter(|value| value.is_object())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+        if let Some(obj) = auth.as_object_mut() {
+            obj.insert(
+                "OPENAI_API_KEY".to_string(),
+                serde_json::Value::String(profile.api_key.clone()),
+            );
+        }
+        let auth_str = serde_json::to_string_pretty(&auth).map_err(|e| e.to_string())?;
+        fs::write(&auth_path, auth_str).map_err(|e| format!("写入 codex auth.json 失败: {}", e))?;
+
+        format!(
+            r#"model_provider = "{provider}"
 model = "{model}"
 
 [model_providers.{provider}]
@@ -375,10 +428,11 @@ base_url = "{base_url}"
 wire_api = "responses"
 requires_openai_auth = true
 "#,
-        provider = provider,
-        model = model,
-        base_url = base_url,
-    );
+            provider = provider,
+            model = model,
+            base_url = base_url,
+        )
+    };
     fs::write(codex_config_path(), toml_content)
         .map_err(|e| format!("写入 codex config.toml 失败: {}", e))?;
 
@@ -387,16 +441,28 @@ requires_openai_auth = true
 
 /// 读取当前 Codex 配置状态
 fn read_codex_status() -> Option<LocationStatus> {
-    let auth: serde_json::Value = fs::read_to_string(codex_auth_path())
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())?;
-    let api_key = auth
-        .get("OPENAI_API_KEY")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
     let config_str = fs::read_to_string(codex_config_path()).unwrap_or_default();
+    let auth_api_key = fs::read_to_string(codex_auth_path())
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|auth| {
+            auth.get("OPENAI_API_KEY")
+                .and_then(|v| v.as_str())
+                .map(|value| value.to_string())
+        })
+        .unwrap_or_default();
+    let bearer_token = config_str
+        .lines()
+        .find(|l| l.trim().starts_with("experimental_bearer_token"))
+        .and_then(|l| l.split('=').nth(1))
+        .map(|v| v.trim().trim_matches('"').to_string())
+        .unwrap_or_default();
+    let api_key = if auth_api_key.is_empty() {
+        bearer_token
+    } else {
+        auth_api_key
+    };
+
     let base_url = config_str
         .lines()
         .find(|l| l.trim().starts_with("base_url"))
@@ -429,32 +495,110 @@ struct EditorDef {
 /// 所有支持的编辑器定义
 #[cfg(target_os = "windows")]
 const KNOWN_EDITORS: &[EditorDef] = &[
-    EditorDef { id: "vscode", display_name: "VS Code", win_appdata_dir: "Code", win_program_dirs: &["Microsoft VS Code"] },
-    EditorDef { id: "vscode-insiders", display_name: "VS Code Insiders", win_appdata_dir: "Code - Insiders", win_program_dirs: &["Microsoft VS Code Insiders"] },
-    EditorDef { id: "cursor", display_name: "Cursor", win_appdata_dir: "Cursor", win_program_dirs: &["Cursor"] },
-    EditorDef { id: "windsurf", display_name: "Windsurf", win_appdata_dir: "Windsurf", win_program_dirs: &["Windsurf"] },
-    EditorDef { id: "trae", display_name: "Trae", win_appdata_dir: "Trae", win_program_dirs: &["Trae"] },
-    EditorDef { id: "vscodium", display_name: "VSCodium", win_appdata_dir: "VSCodium", win_program_dirs: &["VSCodium"] },
+    EditorDef {
+        id: "vscode",
+        display_name: "VS Code",
+        win_appdata_dir: "Code",
+        win_program_dirs: &["Microsoft VS Code"],
+    },
+    EditorDef {
+        id: "vscode-insiders",
+        display_name: "VS Code Insiders",
+        win_appdata_dir: "Code - Insiders",
+        win_program_dirs: &["Microsoft VS Code Insiders"],
+    },
+    EditorDef {
+        id: "cursor",
+        display_name: "Cursor",
+        win_appdata_dir: "Cursor",
+        win_program_dirs: &["Cursor"],
+    },
+    EditorDef {
+        id: "windsurf",
+        display_name: "Windsurf",
+        win_appdata_dir: "Windsurf",
+        win_program_dirs: &["Windsurf"],
+    },
+    EditorDef {
+        id: "trae",
+        display_name: "Trae",
+        win_appdata_dir: "Trae",
+        win_program_dirs: &["Trae"],
+    },
+    EditorDef {
+        id: "vscodium",
+        display_name: "VSCodium",
+        win_appdata_dir: "VSCodium",
+        win_program_dirs: &["VSCodium"],
+    },
 ];
 
 #[cfg(target_os = "macos")]
 const KNOWN_EDITORS: &[EditorDef] = &[
-    EditorDef { id: "vscode", display_name: "VS Code", mac_app_support_dir: "Code" },
-    EditorDef { id: "vscode-insiders", display_name: "VS Code Insiders", mac_app_support_dir: "Code - Insiders" },
-    EditorDef { id: "cursor", display_name: "Cursor", mac_app_support_dir: "Cursor" },
-    EditorDef { id: "windsurf", display_name: "Windsurf", mac_app_support_dir: "Windsurf" },
-    EditorDef { id: "trae", display_name: "Trae", mac_app_support_dir: "Trae" },
-    EditorDef { id: "vscodium", display_name: "VSCodium", mac_app_support_dir: "VSCodium" },
+    EditorDef {
+        id: "vscode",
+        display_name: "VS Code",
+        mac_app_support_dir: "Code",
+    },
+    EditorDef {
+        id: "vscode-insiders",
+        display_name: "VS Code Insiders",
+        mac_app_support_dir: "Code - Insiders",
+    },
+    EditorDef {
+        id: "cursor",
+        display_name: "Cursor",
+        mac_app_support_dir: "Cursor",
+    },
+    EditorDef {
+        id: "windsurf",
+        display_name: "Windsurf",
+        mac_app_support_dir: "Windsurf",
+    },
+    EditorDef {
+        id: "trae",
+        display_name: "Trae",
+        mac_app_support_dir: "Trae",
+    },
+    EditorDef {
+        id: "vscodium",
+        display_name: "VSCodium",
+        mac_app_support_dir: "VSCodium",
+    },
 ];
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 const KNOWN_EDITORS: &[EditorDef] = &[
-    EditorDef { id: "vscode", display_name: "VS Code", linux_config_dir: "Code" },
-    EditorDef { id: "vscode-insiders", display_name: "VS Code Insiders", linux_config_dir: "Code - Insiders" },
-    EditorDef { id: "cursor", display_name: "Cursor", linux_config_dir: "Cursor" },
-    EditorDef { id: "windsurf", display_name: "Windsurf", linux_config_dir: "Windsurf" },
-    EditorDef { id: "trae", display_name: "Trae", linux_config_dir: "Trae" },
-    EditorDef { id: "vscodium", display_name: "VSCodium", linux_config_dir: "VSCodium" },
+    EditorDef {
+        id: "vscode",
+        display_name: "VS Code",
+        linux_config_dir: "Code",
+    },
+    EditorDef {
+        id: "vscode-insiders",
+        display_name: "VS Code Insiders",
+        linux_config_dir: "Code - Insiders",
+    },
+    EditorDef {
+        id: "cursor",
+        display_name: "Cursor",
+        linux_config_dir: "Cursor",
+    },
+    EditorDef {
+        id: "windsurf",
+        display_name: "Windsurf",
+        linux_config_dir: "Windsurf",
+    },
+    EditorDef {
+        id: "trae",
+        display_name: "Trae",
+        linux_config_dir: "Trae",
+    },
+    EditorDef {
+        id: "vscodium",
+        display_name: "VSCodium",
+        linux_config_dir: "VSCodium",
+    },
 ];
 
 /// 获取编辑器 settings.json 的路径
@@ -553,12 +697,10 @@ fn editor_install_markers(editor: &EditorDef) -> Vec<PathBuf> {
     }
     #[cfg(target_os = "macos")]
     {
-        vec![
-            home_dir()
-                .join("Library")
-                .join("Application Support")
-                .join(editor.mac_app_support_dir),
-        ]
+        vec![home_dir()
+            .join("Library")
+            .join("Application Support")
+            .join(editor.mac_app_support_dir)]
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
@@ -576,7 +718,11 @@ fn editor_is_detected(editor: &EditorDef, settings: &AppSettings) -> bool {
         return true;
     }
 
-    if default_path.parent().map(|parent| parent.exists()).unwrap_or(false) {
+    if default_path
+        .parent()
+        .map(|parent| parent.exists())
+        .unwrap_or(false)
+    {
         return true;
     }
 
@@ -940,7 +1086,10 @@ fn apply_auth_to_env_object(
     api_key: &str,
     base_url: &str,
 ) -> &'static str {
-    let auth_name = pick_auth_name(env.contains_key(AUTH_TOKEN_ENV), env.contains_key(AUTH_KEY_ENV));
+    let auth_name = pick_auth_name(
+        env.contains_key(AUTH_TOKEN_ENV),
+        env.contains_key(AUTH_KEY_ENV),
+    );
     env.insert(
         auth_name.to_string(),
         serde_json::Value::String(api_key.to_string()),
@@ -1051,11 +1200,7 @@ fn measure_endpoint_latency(
         }
     };
 
-    let _ = client
-        .get(parsed.clone())
-        .timeout(timeout)
-        .send()
-        .ok();
+    let _ = client.get(parsed.clone()).timeout(timeout).send().ok();
 
     let start = Instant::now();
     match client.get(parsed).timeout(timeout).send() {
@@ -1331,7 +1476,9 @@ fn switch_profile(
             settings["claudeCode.selectedModel"] = serde_json::json!(profile.model_id);
         }
         match write_json(&path, &settings) {
-            Ok(_) => { details.editors.insert(editor.id.to_string(), true); }
+            Ok(_) => {
+                details.editors.insert(editor.id.to_string(), true);
+            }
             Err(e) => {
                 details.editors.insert(editor.id.to_string(), false);
                 errors.push(format!("{}: {}", editor.display_name, e));
@@ -1352,21 +1499,20 @@ fn switch_profile(
     emit_switch_progress(&app, 4, "claude");
     let cp = claude_settings_path();
     // 文件不存在时自动创建默认配置
-    let mut settings = read_json_or_default(&cp, serde_json::json!({
-        "permissions": {
-            "allow": [],
-            "deny": []
-        },
-        "env": {}
-    }));
+    let mut settings = read_json_or_default(
+        &cp,
+        serde_json::json!({
+            "permissions": {
+                "allow": [],
+                "deny": []
+            },
+            "env": {}
+        }),
+    );
     if !settings.is_object() {
         settings = serde_json::json!({});
     }
-    if !settings
-        .get("env")
-        .map(|v| v.is_object())
-        .unwrap_or(false)
-    {
+    if !settings.get("env").map(|v| v.is_object()).unwrap_or(false) {
         settings["env"] = serde_json::json!({});
     }
     if let Some(env) = settings.get_mut("env").and_then(|v| v.as_object_mut()) {
@@ -1562,6 +1708,7 @@ fn add_codex_profile(
     name: String,
     api_key: String,
     base_url: String,
+    auth_mode: Option<String>,
     model: Option<String>,
     provider_name: Option<String>,
 ) -> Result<CodexProfile, String> {
@@ -1574,6 +1721,7 @@ fn add_codex_profile(
         name: name.trim().to_string(),
         api_key: api_key.trim().to_string(),
         base_url: base_url.trim().trim_end_matches('/').to_string(),
+        auth_mode: auth_mode.unwrap_or_else(default_codex_auth_mode),
         model: model.unwrap_or_default().trim().to_string(),
         provider_name: provider_name.unwrap_or_default().trim().to_string(),
         is_active: false,
@@ -1591,6 +1739,7 @@ fn update_codex_profile(
     name: String,
     api_key: String,
     base_url: String,
+    auth_mode: Option<String>,
     model: Option<String>,
     provider_name: Option<String>,
 ) -> Result<CodexProfile, String> {
@@ -1608,6 +1757,11 @@ fn update_codex_profile(
     }
     if !base_url.is_empty() {
         p.base_url = base_url.trim().trim_end_matches('/').to_string();
+    }
+    if let Some(mode) = auth_mode {
+        if !mode.trim().is_empty() {
+            p.auth_mode = mode.trim().to_string();
+        }
     }
     p.model = model.unwrap_or_default().trim().to_string();
     p.provider_name = provider_name.unwrap_or_default().trim().to_string();
@@ -1648,6 +1802,15 @@ fn import_codex_current(app: tauri::AppHandle, name: String) -> Result<CodexProf
     if status.api_key.is_empty() {
         return Err("未检测到当前 Codex 配置".into());
     }
+    let config_str = fs::read_to_string(codex_config_path()).unwrap_or_default();
+    let auth_mode = if config_str
+        .lines()
+        .any(|l| l.trim().starts_with("experimental_bearer_token"))
+    {
+        "official_account_api_quota".to_string()
+    } else {
+        default_codex_auth_mode()
+    };
 
     let mut data = read_codex_profiles(&app);
     if data
@@ -1667,6 +1830,7 @@ fn import_codex_current(app: tauri::AppHandle, name: String) -> Result<CodexProf
         },
         api_key: status.api_key,
         base_url: status.base_url,
+        auth_mode,
         model: String::new(),
         provider_name: String::new(),
         is_active: true,
@@ -1701,9 +1865,9 @@ fn read_app_settings(app: &tauri::AppHandle) -> AppSettings {
     }
     normalize_app_settings(
         fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default(),
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
     )
 }
 
@@ -1859,8 +2023,11 @@ async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateCheckResult, St
 
     tauri::async_runtime::spawn_blocking(move || {
         let release = fetch_latest_release()?;
-        let asset =
-            select_release_asset(&release.assets, std::env::consts::OS, std::env::consts::ARCH);
+        let asset = select_release_asset(
+            &release.assets,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        );
 
         Ok(UpdateCheckResult {
             current_version: current_version.clone(),
@@ -1892,9 +2059,12 @@ async fn download_and_open_update(app: tauri::AppHandle) -> Result<UpdateDownloa
             return Err("Already on the latest version".into());
         }
 
-        let asset =
-            select_release_asset(&release.assets, std::env::consts::OS, std::env::consts::ARCH)
-                .ok_or_else(|| "No installer found for the current platform".to_string())?;
+        let asset = select_release_asset(
+            &release.assets,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        )
+        .ok_or_else(|| "No installer found for the current platform".to_string())?;
 
         let client = build_http_client(120)?;
         let resp = client
@@ -1994,7 +2164,11 @@ fn collect_skills_recursive(base: &PathBuf, current: &PathBuf, skills: &mut Vec<
         if path.is_dir() {
             collect_skills_recursive(base, &path, skills);
         } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
             // Build relative prefix from base dir (e.g. "subfolder:command")
             let parent = path.parent().unwrap_or(base);
             let name = if parent != base.as_path() {
@@ -2162,7 +2336,11 @@ fn collect_skill_names_recursive(base: &PathBuf, current: &PathBuf, names: &mut 
         if path.is_dir() {
             collect_skill_names_recursive(base, &path, names);
         } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
             let parent = path.parent().unwrap_or(base);
             let name = if parent != base.as_path() {
                 if let Ok(rel) = parent.strip_prefix(base) {
@@ -2591,12 +2769,20 @@ fn get_skill_repos(app: tauri::AppHandle) -> Vec<SkillRepo> {
 #[tauri::command]
 fn add_skill_repo(app: tauri::AppHandle, url: String, branch: String) -> Result<(), String> {
     let url = url.trim().to_string();
-    let branch = if branch.trim().is_empty() { "main".to_string() } else { branch.trim().to_string() };
+    let branch = if branch.trim().is_empty() {
+        "main".to_string()
+    } else {
+        branch.trim().to_string()
+    };
     let mut data = read_skill_repos(&app);
     if data.repos.iter().any(|r| r.url == url) {
         return Err("Repository already exists".into());
     }
-    data.repos.push(SkillRepo { url, branch, enabled: true });
+    data.repos.push(SkillRepo {
+        url,
+        branch,
+        enabled: true,
+    });
     write_skill_repos(&app, &data)
 }
 
@@ -2608,24 +2794,33 @@ fn remove_skill_repo(app: tauri::AppHandle, url: String) -> Result<(), String> {
 }
 
 /// 通过 GitHub Tree API 查找仓库中 SKILL.md 的实际路径
-fn find_skill_md_in_repo(client: &reqwest::blocking::Client, full_name: &str, branch: &str) -> Result<String, String> {
+fn find_skill_md_in_repo(
+    client: &reqwest::blocking::Client,
+    full_name: &str,
+    branch: &str,
+) -> Result<String, String> {
     let tree_url = format!(
         "https://api.github.com/repos/{}/git/trees/{}?recursive=1",
         full_name, branch
     );
-    let resp = client.get(&tree_url).send()
+    let resp = client
+        .get(&tree_url)
+        .send()
         .map_err(|e| format!("GitHub Tree API error: {}", e))?;
     if !resp.status().is_success() {
         return Err(format!("GitHub Tree API returned {}", resp.status()));
     }
-    let body: serde_json::Value = resp.json()
+    let body: serde_json::Value = resp
+        .json()
         .map_err(|e| format!("JSON parse error: {}", e))?;
 
     let mut skill_paths: Vec<String> = Vec::new();
     if let Some(tree) = body.get("tree").and_then(|v| v.as_array()) {
         for item in tree {
             if let Some(path) = item.get("path").and_then(|v| v.as_str()) {
-                if path.ends_with("SKILL.md") && item.get("type").and_then(|v| v.as_str()) == Some("blob") {
+                if path.ends_with("SKILL.md")
+                    && item.get("type").and_then(|v| v.as_str()) == Some("blob")
+                {
                     skill_paths.push(path.to_string());
                 }
             }
@@ -2705,9 +2900,7 @@ fn recommended_skill_content(name: &str) -> String {
         ),
     };
 
-    format!(
-        "---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n\n{body}\n"
-    )
+    format!("---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n\n{body}\n")
 }
 
 /// Download a skill from a URL and install it to ~/.claude/skills/
@@ -2780,25 +2973,36 @@ async fn search_github_mcp(query: String) -> Result<Vec<serde_json::Value>, Stri
             search_query
         );
 
-        let resp = client.get(&url).send()
+        let resp = client
+            .get(&url)
+            .send()
             .map_err(|e| format!("GitHub API error: {}", e))?;
 
         if !resp.status().is_success() {
             return Err(format!("GitHub API returned {}", resp.status()));
         }
 
-        let body: serde_json::Value = resp.json::<serde_json::Value>()
+        let body: serde_json::Value = resp
+            .json::<serde_json::Value>()
             .map_err(|e| format!("JSON parse error: {}", e))?;
 
         let mut results = Vec::new();
         if let Some(items) = body.get("items").and_then(|v| v.as_array()) {
             for item in items {
                 let full_name = item.get("full_name").and_then(|v| v.as_str()).unwrap_or("");
-                let desc = item.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                let stars = item.get("stargazers_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                let desc = item
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let stars = item
+                    .get("stargazers_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 let html_url = item.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
 
-                if full_name.is_empty() { continue; }
+                if full_name.is_empty() {
+                    continue;
+                }
 
                 let name = full_name.split('/').last().unwrap_or(full_name);
 
@@ -2847,29 +3051,55 @@ async fn search_github_skills(query: String) -> Result<Vec<CatalogSkill>, String
             search_query
         );
 
-        let resp = client.get(&url).send()
+        let resp = client
+            .get(&url)
+            .send()
             .map_err(|e| format!("GitHub API error: {}", e))?;
 
         if !resp.status().is_success() {
             return Err(format!("GitHub API returned {}", resp.status()));
         }
 
-        let body: serde_json::Value = resp.json::<serde_json::Value>()
+        let body: serde_json::Value = resp
+            .json::<serde_json::Value>()
             .map_err(|e| format!("JSON parse error: {}", e))?;
 
         let mut skills = Vec::new();
-        if let Some(items) = body.get("items").and_then(|v: &serde_json::Value| v.as_array()) {
+        if let Some(items) = body
+            .get("items")
+            .and_then(|v: &serde_json::Value| v.as_array())
+        {
             for item in items {
-                let full_name = item.get("full_name").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("");
-                let desc = item.get("description").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("");
-                let stars = item.get("stargazers_count").and_then(|v: &serde_json::Value| v.as_u64()).unwrap_or(0);
-                let default_branch = item.get("default_branch").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("main");
+                let full_name = item
+                    .get("full_name")
+                    .and_then(|v: &serde_json::Value| v.as_str())
+                    .unwrap_or("");
+                let desc = item
+                    .get("description")
+                    .and_then(|v: &serde_json::Value| v.as_str())
+                    .unwrap_or("");
+                let stars = item
+                    .get("stargazers_count")
+                    .and_then(|v: &serde_json::Value| v.as_u64())
+                    .unwrap_or(0);
+                let default_branch = item
+                    .get("default_branch")
+                    .and_then(|v: &serde_json::Value| v.as_str())
+                    .unwrap_or("main");
 
-                if full_name.is_empty() { continue; }
+                if full_name.is_empty() {
+                    continue;
+                }
 
-                let html_url = item.get("html_url").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("");
+                let html_url = item
+                    .get("html_url")
+                    .and_then(|v: &serde_json::Value| v.as_str())
+                    .unwrap_or("");
                 // 使用 raw.githubusercontent.com 直接下载 SKILL.md
-                let raw_url = format!("https://raw.githubusercontent.com/{}/{}/SKILL.md", full_name, default_branch);
+                let raw_url = format!(
+                    "https://raw.githubusercontent.com/{}/{}/SKILL.md",
+                    full_name, default_branch
+                );
                 skills.push(CatalogSkill {
                     name: full_name.split('/').last().unwrap_or(full_name).to_string(),
                     description: format!("{} ({}★)", desc, stars),
@@ -3361,7 +3591,9 @@ fn build_http_client(timeout_secs: u64) -> Result<reqwest::blocking::Client, Str
         }
     }
 
-    builder.build().map_err(|e| format!("HTTP client error: {}", e))
+    builder
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))
 }
 
 fn normalize_version_parts(version: &str) -> Vec<u64> {
@@ -3400,16 +3632,9 @@ fn is_remote_version_newer(remote: &str, local: &str) -> bool {
 }
 
 fn asset_has_known_arch_marker(name_lower: &str) -> bool {
-    [
-        "x64",
-        "x86_64",
-        "amd64",
-        "arm64",
-        "aarch64",
-        "universal",
-    ]
-    .iter()
-    .any(|token| name_lower.contains(token))
+    ["x64", "x86_64", "amd64", "arm64", "aarch64", "universal"]
+        .iter()
+        .any(|token| name_lower.contains(token))
 }
 
 fn asset_matches_target_arch(name_lower: &str, target_arch: &str) -> Option<bool> {
@@ -3564,9 +3789,7 @@ mod tests {
 
         let count = arr
             .iter()
-            .filter(|v| {
-                v.get("name").and_then(|n| n.as_str()) == Some("ANTHROPIC_AUTH_TOKEN")
-            })
+            .filter(|v| v.get("name").and_then(|n| n.as_str()) == Some("ANTHROPIC_AUTH_TOKEN"))
             .count();
         assert_eq!(count, 1, "should keep only one ANTHROPIC_AUTH_TOKEN");
     }
@@ -3583,7 +3806,10 @@ mod tests {
         let has_key = arr
             .iter()
             .any(|v| v.get("name").and_then(|n| n.as_str()) == Some("ANTHROPIC_AUTH_KEY"));
-        assert!(!has_key, "ANTHROPIC_AUTH_KEY should be removed when token is used");
+        assert!(
+            !has_key,
+            "ANTHROPIC_AUTH_KEY should be removed when token is used"
+        );
         assert_eq!(selected, "ANTHROPIC_AUTH_TOKEN");
     }
 
@@ -3602,7 +3828,10 @@ mod tests {
             .and_then(|v| v.get("value"))
             .and_then(|v| v.as_str());
 
-        assert!(!has_key, "ANTHROPIC_AUTH_KEY should be removed and converted to TOKEN");
+        assert!(
+            !has_key,
+            "ANTHROPIC_AUTH_KEY should be removed and converted to TOKEN"
+        );
         assert_eq!(token_value, Some("new-key"));
         assert_eq!(selected, "ANTHROPIC_AUTH_TOKEN");
     }
@@ -3712,10 +3941,9 @@ mod tests {
             .find(|candidate| candidate.id == "vscode")
             .expect("vscode should be supported");
         let mut settings = AppSettings::default();
-        settings.editor_paths.insert(
-            editor.id.to_string(),
-            r"C:\Custom\VSCode\User".to_string(),
-        );
+        settings
+            .editor_paths
+            .insert(editor.id.to_string(), r"C:\Custom\VSCode\User".to_string());
 
         let resolved = resolved_editor_settings_path(editor, &settings);
 
@@ -3794,8 +4022,8 @@ mod tests {
             },
         ];
 
-        let selected = select_release_asset(&assets, "macos", "aarch64")
-            .expect("should pick a macOS dmg");
+        let selected =
+            select_release_asset(&assets, "macos", "aarch64").expect("should pick a macOS dmg");
 
         assert_eq!(selected.name, "VarSwitch_1.2.0_aarch64.dmg");
     }
@@ -3851,8 +4079,8 @@ mod tests {
 
     #[test]
     fn tauri_config_does_not_define_static_tray_icon_when_tray_is_built_in_setup() {
-        let config: serde_json::Value =
-            serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid tauri.conf.json");
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("valid tauri.conf.json");
 
         let static_tray_icon = config.get("app").and_then(|app| app.get("trayIcon"));
 

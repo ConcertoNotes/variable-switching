@@ -205,6 +205,25 @@
           <input type="text" id="codexProfileName" required placeholder="e.g. Production">
         </div>
         <div class="form-group">
+          <label id="codexAuthModeLabel">Write Mode</label>
+          <div class="radio-card-grid">
+            <label class="radio-card">
+              <input type="radio" name="codexAuthMode" id="codexAuthModeDefault" value="auth_json" checked>
+              <span>
+                <strong id="codexAuthModeDefaultTitle">Default write</strong>
+                <small id="codexAuthModeDefaultHint">~/.codex/auth.json + ~/.codex/config.toml</small>
+              </span>
+            </label>
+            <label class="radio-card">
+              <input type="radio" name="codexAuthMode" id="codexAuthModeOfficial" value="official_account_api_quota">
+              <span>
+                <strong id="codexAuthModeOfficialTitle">Official account login, API quota</strong>
+                <small id="codexAuthModeOfficialHint">Only write ~/.codex/config.toml</small>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
           <label id="codexApiKeyLabel" for="codexApiKey">API Key</label>
           <input type="text" id="codexApiKey" required placeholder="sk-...">
         </div>
@@ -223,6 +242,13 @@
         <div class="form-group">
           <label id="codexProviderLabel" for="codexProvider">Provider</label>
           <input type="text" id="codexProvider" placeholder="e.g. custom">
+        </div>
+        <div class="form-group" id="codexOfficialConfigGroup" style="display:none;">
+          <div class="form-label-row">
+            <label id="codexOfficialConfigLabel" for="codexOfficialConfig">Official account API quota config</label>
+            <button class="link-button" id="codexCopyOfficialConfigBtn" type="button">Copy</button>
+          </div>
+          <textarea class="config-preview" id="codexOfficialConfig" rows="12" readonly></textarea>
         </div>
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" id="codexCancelBtn">Cancel</button>
