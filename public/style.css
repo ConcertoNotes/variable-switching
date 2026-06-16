@@ -81,6 +81,10 @@ body {
   overflow-x: hidden;
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
 /* Vibrant mesh gradient background — muted, edge-focused */
 body::before {
   content: '';
@@ -951,6 +955,8 @@ body::before {
   z-index: 1000;
   backdrop-filter: saturate(120%) blur(20px);
   -webkit-backdrop-filter: saturate(120%) blur(20px);
+  overflow: hidden;
+  padding: 24px;
 }
 
 :root[data-theme="dark"] .modal-overlay {
@@ -973,6 +979,9 @@ body::before {
   padding: 28px;
   width: 90%;
   max-width: 440px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.12), 0 0 0 0.5px var(--line);
   animation: modalIn 0.28s cubic-bezier(0.32, 0.72, 0, 1);
   border: none;
@@ -1189,6 +1198,62 @@ body::before {
 
 .form-hint.warning {
   color: var(--warning-text);
+}
+
+.radio-card-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.radio-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  cursor: pointer;
+}
+
+.radio-card input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.radio-card strong,
+.radio-card small {
+  display: block;
+}
+
+.radio-card strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.radio-card small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.config-preview {
+  width: 100%;
+  min-height: 210px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .form-actions {
