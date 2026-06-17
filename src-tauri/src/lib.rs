@@ -349,7 +349,7 @@ fn codex_config_path() -> PathBuf {
 
 /// 写入 Codex 配置文件。
 /// 默认写入 ~/.codex/auth.json 和 ~/.codex/config.toml；
-/// 官方账号登录/API 额度模式只写 ~/.codex/config.toml。
+/// 官方账号登录/API 额度模式只写 ~/.codex/config.toml，不改动 auth.json。
 fn write_codex_config(profile: &CodexProfile) -> Result<(), String> {
     write_codex_config_with_base_url(profile, &profile.base_url)
 }
@@ -375,11 +375,6 @@ fn write_codex_config_with_base_url(profile: &CodexProfile, base_url: &str) -> R
         profile.model.clone()
     };
     let toml_content = if official_account_mode {
-        let auth_path = codex_auth_path();
-        if auth_path.exists() {
-            fs::remove_file(&auth_path).map_err(|e| format!("删除 codex auth.json 失败: {}", e))?;
-        }
-
         format!(
             r#"model_provider = "customer"
 model = "gpt-5.5"
@@ -407,7 +402,9 @@ experimental_bearer_token = "{api_key}"
                 .filter(|value| value.is_object())
                 .unwrap_or_else(|| serde_json::json!({}))
         } else {
-            serde_json::json!({})
+            serde_json::json!({
+                "OPENAI_API_KEY": profile.api_key
+            })
         };
         if let Some(obj) = auth.as_object_mut() {
             obj.insert(
