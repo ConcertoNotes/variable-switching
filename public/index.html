@@ -67,6 +67,7 @@
   <div class="page-tabs" id="pageTabs">
     <button class="page-tab active" data-page="claude" type="button">Claude Code</button>
     <button class="page-tab" data-page="codex" type="button">Codex CLI</button>
+    <button class="page-tab page-tab-toolbox" id="codexToolboxBtn" type="button">Toolbox</button>
   </div>
 
   <div class="page-content active" id="pageClaudeCode">
@@ -255,6 +256,68 @@
           <button type="submit" class="btn btn-primary" id="codexSubmitBtn">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div class="mgmt-overlay" id="codexToolboxOverlay">
+    <div class="mgmt-panel mgmt-panel-wide codex-toolbox-panel">
+      <div class="mgmt-header">
+        <h2 id="codexToolboxTitle">Codex Toolbox</h2>
+        <button class="modal-close" id="codexToolboxClose" type="button">&times;</button>
+      </div>
+
+      <div class="skills-tabs">
+        <button class="skills-tab active" id="toolboxTabMarket" type="button">Plugin Market</button>
+        <button class="skills-tab" id="toolboxTabSession" type="button">Session Sync</button>
+        <button class="skills-tab" id="toolboxTabRemote" type="button">Mobile Control</button>
+      </div>
+
+      <div class="skills-tab-content" id="toolboxMarketContent">
+        <div class="mgmt-hint" id="toolboxMarketHint">Manage the Codex plugin marketplace source persisted in `~/.codex/config.toml`.</div>
+        <div class="form-group">
+          <label id="toolboxMarketInputLabel" for="toolboxMarketplaceInput">Marketplace Source</label>
+          <input type="text" id="toolboxMarketplaceInput" value="https://gitcode.com/weixin_65003717/codex-plugin.git" readonly>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="toolboxMarketApplyBtn" type="button">Apply to Codex</button>
+        </div>
+      </div>
+
+      <div class="skills-tab-content" id="toolboxSessionContent" style="display:none;">
+        <div class="mgmt-hint" id="toolboxSessionHint">Sync local Codex history records into VarSwitch.</div>
+        <div class="toolbox-sync-bar">
+          <div class="settings-row-value" id="toolboxSessionSummary">--</div>
+          <button class="btn btn-primary btn-sm" id="toolboxSessionSyncBtn" type="button">Sync Now</button>
+        </div>
+        <div class="toolbox-subtitle" id="toolboxSyncedThreadsTitle">Synced Codex Threads</div>
+        <div class="mgmt-body" id="toolboxSyncedThreadsList"></div>
+      </div>
+
+      <div class="skills-tab-content" id="toolboxRemoteContent" style="display:none;">
+        <div class="mgmt-hint" id="toolboxRemoteHint">Choose an app, finish binding, select a Codex conversation, then start listening.</div>
+        <div class="toolbox-mobile-grid">
+          <div class="toolbox-mobile-controls">
+            <div class="form-group">
+              <label id="toolboxMobileAppLabel" for="toolboxMobileAppSelect">Bind App</label>
+              <select id="toolboxMobileAppSelect">
+                <option value="wechat">WeChat</option>
+                <option value="qq">QQ</option>
+                <option value="lark">Feishu</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label id="toolboxMobileThreadLabel" for="toolboxMobileThreadSelect">Conversation</label>
+              <select id="toolboxMobileThreadSelect"></select>
+            </div>
+            <div class="toolbox-mobile-status" id="toolboxRemoteStatusValue">Stopped</div>
+          </div>
+          <div class="toolbox-mobile-bind-panel" id="toolboxMobileBindPanel"></div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-secondary" id="toolboxRemoteStopBtn" type="button">Stop</button>
+          <button class="btn btn-primary" id="toolboxRemoteStartBtn" type="button">Start Platform Link</button>
+        </div>
+      </div>
     </div>
   </div>
 

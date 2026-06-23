@@ -7,6 +7,10 @@ const {
   formatVersionTag,
   getEditorPathMode,
   validateEditorPathInput,
+  normalizeCodexPluginMarketplaceInput,
+  getCodexToolboxLayout,
+  shouldRenderChannelQr,
+  CODEX_PLUGIN_MARKETPLACE_URL,
 } = require("./app-helpers.js");
 
 test("shouldAutoOpenUsageGuide defaults to showing the guide", () => {
@@ -75,4 +79,77 @@ test("validateEditorPathInput rejects empty path drafts", () => {
     valid: true,
     value: "C:/Users/test/AppData/Code/User",
   });
+});
+
+test("normalizeCodexPluginMarketplaceInput falls back to the GitCode marketplace", () => {
+  assert.equal(normalizeCodexPluginMarketplaceInput(""), CODEX_PLUGIN_MARKETPLACE_URL);
+  assert.equal(
+    normalizeCodexPluginMarketplaceInput(" https://gitcode.com/weixin_65003717/codex-plugin.git "),
+    CODEX_PLUGIN_MARKETPLACE_URL
+  );
+});
+
+test("getCodexToolboxLayout keeps channel binding out of session sync", () => {
+  assert.deepEqual(getCodexToolboxLayout("session"), {
+    showMarketplaceList: false,
+    showSessionBindings: false,
+    showRemoteBindings: false,
+  });
+  assert.equal(getCodexToolboxLayout("remote").showRemoteBindings, true);
+});
+
+test("shouldRenderChannelQr rejects stale QQ text QR cache", () => {
+  const now = 1_700_000_000_000;
+  assert.equal(
+    shouldRenderChannelQr(
+      {
+        channel: "qq",
+        qrUrl: "raw-internal-token",
+        qrDataUrl: "data:image/png;base64,abc",
+        qrStartedAt: String(now),
+      },
+      now
+    ),
+    false
+  );
+});
+
+test("shouldRenderChannelQr accepts fresh platform QR images only", () => {
+  const now = 1_700_000_000_000;
+  assert.equal(
+    shouldRenderChannelQr(
+      {
+        channel: "qq",
+        qrUrl: "https://bots.qq.com/connect/abc",
+        qrDataUrl: "data:image/png;base64,abc",
+        qrStartedAt: String(now),
+      },
+      now
+    ),
+    true
+  );
+  assert.equal(
+    shouldRenderChannelQr(
+      {
+        channel: "wechat",
+        qrDeviceCode: "device-code",
+        qrDataUrl: "data:image/svg+xml;base64,abc",
+        qrStartedAt: String(now),
+      },
+      now
+    ),
+    false
+  );
+  assert.equal(
+    shouldRenderChannelQr(
+      {
+        channel: "wechat",
+        qrDeviceCode: "device-code",
+        qrDataUrl: "data:image/png;base64,abc",
+        qrStartedAt: String(now),
+      },
+      now
+    ),
+    true
+  );
 });

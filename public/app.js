@@ -16,6 +16,23 @@ if (!tauriApi?.core?.invoke || !tauriApi?.event?.listen) {
 const invoke = tauriApi.core.invoke;
 const { listen } = tauriApi.event;
 
+function mobileDebug(label, payload = {}) {
+  console.log(`[mobile-control] ${label}`, {
+    selectedMobileChannel,
+    selectedCodexThreadId,
+    ...payload,
+  });
+}
+
+function mobileDebugError(label, error, payload = {}) {
+  console.error(`[mobile-control] ${label}`, {
+    selectedMobileChannel,
+    selectedCodexThreadId,
+    error,
+    ...payload,
+  });
+}
+
 const LANG_STORAGE_KEY = "varswitch.lang";
 const THEME_STORAGE_KEY = "varswitch.theme";
 const APP_REPOSITORY_URL = "https://github.com/ConcertoNotes/variable-switching";
@@ -133,6 +150,77 @@ const I18N = {
     codexNoConfigsTitle: "No Codex configs yet",
     codexNoConfigsDesc: "Create a config to sync Codex CLI settings in one click.",
     codexAddFirstConfig: "Add your first Codex config",
+    codexToolbox: "Toolbox",
+    codexToolboxTitle: "Codex Toolbox",
+    toolboxTabMarket: "Plugin Market",
+    toolboxTabSession: "Session Sync",
+    toolboxTabRemote: "Mobile Control",
+    toolboxMarketHint: "Write the Cooper plugin marketplace source to ~/.codex/config.toml. Other marketplace entries are removed when applying.",
+    toolboxMarketInputLabel: "Marketplace Source",
+    toolboxMarketApply: "Apply to Codex",
+    toolboxCurrentMarket: "Current",
+    toolboxMarketType: "Type",
+    toolboxMarketSource: "Source",
+    toolboxMarketRemove: "Remove",
+    toolboxSessionHint: "Click sync to import local Codex history into VarSwitch. Mobile bindings are managed only in Mobile Control.",
+    toolboxSessionSummaryEmpty: "Not synced yet",
+    toolboxSessionSummary: "Synced {count} conversations · {time}",
+    toolboxSyncedThreadsTitle: "Synced Codex Threads",
+    toolboxThreadsTitle: "Control Conversation",
+    toolboxBindingsTitle: "Mobile Channels",
+    toolboxMobileAppLabel: "Bind App",
+    toolboxMobileThreadLabel: "Control Conversation",
+    toolboxMobileNoThreadOption: "Sync local history first",
+    toolboxBindWechat: "Bind WeChat",
+    toolboxBindLark: "Bind Feishu/Lark",
+    toolboxBindQq: "Bind QQ",
+    toolboxSelectThread: "Switch",
+    toolboxSelectedThread: "Selected",
+    toolboxSyncNow: "Sync Now",
+    toolboxUnbind: "Unbind",
+    toolboxNoThreads: "No synced Codex threads. Sync local history first.",
+    toolboxNoBindings: "No mobile channels are bound yet.",
+    toolboxRemoteHint: "Select a synced conversation, bind Feishu/WeChat/QQ, then start platform-bot listening for mobile control outside your LAN.",
+    toolboxRemoteStatus: "Status",
+    toolboxRemoteAccessUrl: "Active Conversation",
+    toolboxRemoteToken: "Token",
+    toolboxRemoteDevice: "Device",
+    toolboxRemoteRunning: "Platform Listening",
+    toolboxRemoteStopped: "Stopped",
+    toolboxRemoteStart: "Start Platform Link",
+    toolboxRemoteStop: "Stop",
+    toolboxChannelCredentials: "Platform Credentials",
+    toolboxCredentialStatus: "Credential Status",
+    toolboxAppId: "App ID",
+    toolboxAppSecret: "App Secret",
+    toolboxBotToken: "Bot Token",
+    toolboxAccountId: "Account ID",
+    toolboxBaseUrl: "Base URL",
+    toolboxUserId: "User ID",
+    toolboxBotOpenId: "Bot Open ID",
+    toolboxSaveChannel: "Save Channel",
+    toolboxCreateLarkBot: "Create Lark Bot",
+    toolboxRebindLarkBot: "Bind Existing Bot",
+    toolboxUnbindLarkSession: "Unbind Conversation",
+    toolboxStopLarkListen: "Stop Lark Listening",
+    toolboxClearLarkBinding: "Clear Binding",
+    toolboxStartQqQr: "Scan QQ QR",
+    toolboxStartWechatQr: "Bind WeChat",
+    toolboxPollWechatQr: "Check WeChat Scan",
+    toolboxQrOpen: "Open QR Link",
+    toolboxQrStatus: "QR Status",
+    toolboxLastError: "Last Error",
+    toolboxChannelSaved: "Mobile channel saved",
+    toolboxDraftSaved: "Toolbox draft saved",
+    toolboxMarketplaceApplied: "Plugin marketplace applied",
+    toolboxMarketplaceRemoved: "Plugin marketplace removed",
+    toolboxBindingSaved: "Session binding saved",
+    toolboxBindingRemoved: "Session binding removed",
+    toolboxBindingSynced: "Session binding synced",
+    toolboxSessionsSynced: "Local Codex history synced",
+    toolboxThreadSelected: "Control conversation switched",
+    toolboxRemoteStarted: "Mobile platform link is starting",
+    toolboxRemoteStopped: "Mobile control stopped",
     readFailed: "Read failed",
     synced: "Synced",
     unsynced: "Not Synced",
@@ -389,6 +477,77 @@ const I18N = {
     codexNoConfigsTitle: "暂无 Codex 配置",
     codexNoConfigsDesc: "创建一个配置，一键同步 Codex CLI 设置。",
     codexAddFirstConfig: "添加第一个 Codex 配置",
+    codexToolbox: "工具箱",
+    codexToolboxTitle: "Codex 工具箱",
+    toolboxTabMarket: "插件市场",
+    toolboxTabSession: "会话同步",
+    toolboxTabRemote: "手机控制",
+    toolboxMarketHint: "把 Cooper 插件市场地址写入 `~/.codex/config.toml`；写入时会移除其它插件市场源。",
+    toolboxMarketInputLabel: "插件市场地址",
+    toolboxMarketApply: "写入 Codex",
+    toolboxCurrentMarket: "当前",
+    toolboxMarketType: "类型",
+    toolboxMarketSource: "地址",
+    toolboxMarketRemove: "移除",
+    toolboxSessionHint: "点击同步即可把本地 Codex 历史记录同步到这个软件里；飞书/微信/QQ 绑定只在手机控制里管理。",
+    toolboxSessionSummaryEmpty: "尚未同步",
+    toolboxSessionSummary: "已同步 {count} 个对话 · {time}",
+    toolboxSyncedThreadsTitle: "已同步 Codex 对话",
+    toolboxThreadsTitle: "控制对话",
+    toolboxBindingsTitle: "手机通道",
+    toolboxMobileAppLabel: "绑定应用",
+    toolboxMobileThreadLabel: "控制对话",
+    toolboxMobileNoThreadOption: "请先同步本地历史",
+    toolboxBindWechat: "绑定微信",
+    toolboxBindLark: "绑定飞书",
+    toolboxBindQq: "绑定 QQ",
+    toolboxSelectThread: "切换",
+    toolboxSelectedThread: "已选",
+    toolboxSyncNow: "立即同步",
+    toolboxUnbind: "解绑",
+    toolboxNoThreads: "还没有同步 Codex 对话，请先同步本地历史。",
+    toolboxNoBindings: "还没有绑定任何通道。",
+    toolboxRemoteHint: "先选择已同步的对话，再绑定飞书/微信/QQ，最后开启平台机器人监听；手机不需要和电脑在同一局域网。",
+    toolboxRemoteStatus: "状态",
+    toolboxRemoteAccessUrl: "当前控制对话",
+    toolboxRemoteToken: "令牌",
+    toolboxRemoteDevice: "设备",
+    toolboxRemoteRunning: "平台监听中",
+    toolboxRemoteStopped: "未启动",
+    toolboxRemoteStart: "开启平台连接",
+    toolboxRemoteStop: "停止",
+    toolboxChannelCredentials: "平台凭据",
+    toolboxCredentialStatus: "凭据状态",
+    toolboxAppId: "App ID",
+    toolboxAppSecret: "App Secret",
+    toolboxBotToken: "Bot Token",
+    toolboxAccountId: "Account ID",
+    toolboxBaseUrl: "Base URL",
+    toolboxUserId: "User ID",
+    toolboxBotOpenId: "Bot Open ID",
+    toolboxSaveChannel: "保存通道",
+    toolboxCreateLarkBot: "创建新飞书机器人",
+    toolboxRebindLarkBot: "换绑已有机器人",
+    toolboxUnbindLarkSession: "解除会话绑定",
+    toolboxStopLarkListen: "停止飞书监听",
+    toolboxClearLarkBinding: "解除绑定",
+    toolboxStartQqQr: "QQ 扫码绑定",
+    toolboxStartWechatQr: "绑定微信",
+    toolboxPollWechatQr: "检查微信扫码",
+    toolboxQrOpen: "打开二维码链接",
+    toolboxQrStatus: "扫码状态",
+    toolboxLastError: "最近错误",
+    toolboxChannelSaved: "手机通道已保存",
+    toolboxDraftSaved: "工具箱草稿已保存",
+    toolboxMarketplaceApplied: "插件市场已写入",
+    toolboxMarketplaceRemoved: "插件市场已移除",
+    toolboxBindingSaved: "会话绑定已保存",
+    toolboxBindingRemoved: "会话绑定已解除",
+    toolboxBindingSynced: "会话绑定已同步",
+    toolboxSessionsSynced: "本地 Codex 历史已同步",
+    toolboxThreadSelected: "手机控制对话已切换",
+    toolboxRemoteStarted: "手机平台连接正在启动",
+    toolboxRemoteStopped: "手机控制已停止",
     readFailed: "读取失败",
     synced: "已同步",
     unsynced: "未同步",
@@ -596,6 +755,7 @@ if (currentTheme !== "light" && currentTheme !== "dark") {
 
 let profiles = [];
 let codexProfiles = [];
+let codexToolbox = null;
 let currentPage = "claude";
 let detectedEditors = {}; // { id: displayName }
 let editingId = null;
@@ -622,6 +782,13 @@ let updateBusyAction = null;
 let appSettings = null;
 let appPaths = null;
 let usageGuideAutoHandled = false;
+let activeToolboxTab = "market";
+let selectedCodexThreadId = "";
+let selectedMobileChannel = "wechat";
+let toolboxRefreshTimer = null;
+let toolboxRefreshBusy = false;
+let larkCredentialSaveTimer = null;
+let toolboxRemoteBusy = false;
 
 function t(key, params) {
   const dict = I18N[currentLang] || I18N.en;
@@ -951,6 +1118,22 @@ function applyLanguage() {
   $("codexCopyOfficialConfigBtn").textContent = t("copy");
   $("codexCancelBtn").textContent = t("cancel");
   $("codexSubmitBtn").textContent = t("save");
+  $("codexToolboxBtn").textContent = t("codexToolbox");
+  $("codexToolboxTitle").textContent = t("codexToolboxTitle");
+  $("toolboxTabMarket").textContent = t("toolboxTabMarket");
+  $("toolboxTabSession").textContent = t("toolboxTabSession");
+  $("toolboxTabRemote").textContent = t("toolboxTabRemote");
+  $("toolboxMarketHint").textContent = t("toolboxMarketHint");
+  $("toolboxMarketInputLabel").textContent = t("toolboxMarketInputLabel");
+  $("toolboxMarketApplyBtn").textContent = t("toolboxMarketApply");
+  $("toolboxSessionHint").textContent = t("toolboxSessionHint");
+  $("toolboxSessionSyncBtn").textContent = t("toolboxSyncNow");
+  $("toolboxSyncedThreadsTitle").textContent = t("toolboxSyncedThreadsTitle");
+  $("toolboxRemoteHint").textContent = t("toolboxRemoteHint");
+  $("toolboxMobileAppLabel").textContent = t("toolboxMobileAppLabel");
+  $("toolboxMobileThreadLabel").textContent = t("toolboxMobileThreadLabel");
+  $("toolboxRemoteStartBtn").textContent = t("toolboxRemoteStart");
+  $("toolboxRemoteStopBtn").textContent = t("toolboxRemoteStop");
   renderCodexPresetOptions();
   updateCodexPresetHint();
 
@@ -1056,6 +1239,9 @@ function setLanguage(lang) {
     renderCodexProfiles();
     loadCodexStatus();
   }
+  if (codexToolbox) {
+    renderCodexToolbox();
+  }
 }
 
 function setTheme(theme) {
@@ -1063,6 +1249,460 @@ function setTheme(theme) {
   localStorage.setItem(THEME_STORAGE_KEY, currentTheme);
   syncAppSettingsAppearance();
   applyTheme();
+}
+
+async function loadCodexToolbox() {
+  try {
+    codexToolbox = await invoke("get_codex_toolbox");
+    renderCodexToolbox();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+function switchToolboxTab(tab) {
+  activeToolboxTab = tab;
+  $("toolboxTabMarket").classList.toggle("active", tab === "market");
+  $("toolboxTabSession").classList.toggle("active", tab === "session");
+  $("toolboxTabRemote").classList.toggle("active", tab === "remote");
+  $("toolboxMarketContent").style.display = tab === "market" ? "" : "none";
+  $("toolboxSessionContent").style.display = tab === "session" ? "" : "none";
+  $("toolboxRemoteContent").style.display = tab === "remote" ? "" : "none";
+}
+
+function openCodexToolbox() {
+  $("codexToolboxOverlay").classList.add("open");
+  switchToolboxTab(activeToolboxTab);
+  loadCodexToolbox();
+}
+
+function closeCodexToolbox() {
+  $("codexToolboxOverlay").classList.remove("open");
+  stopToolboxRefresh();
+}
+
+function startToolboxRefresh(ticks = 8) {
+  stopToolboxRefresh();
+  let remaining = ticks;
+  toolboxRefreshTimer = setInterval(async () => {
+    if (toolboxRefreshBusy) return;
+    if (!$("codexToolboxOverlay").classList.contains("open") || remaining <= 0) {
+      stopToolboxRefresh();
+      return;
+    }
+    remaining -= 1;
+    toolboxRefreshBusy = true;
+    try {
+      const lark = codexToolbox?.mobileChannels?.find((binding) => binding.channel === "lark");
+      const wechat = codexToolbox?.mobileChannels?.find((binding) => binding.channel === "wechat");
+      if (lark?.qrDeviceCode && (!lark?.appId || !lark?.appSecret)) {
+        codexToolbox = await invoke("poll_lark_bot_registration", {});
+      } else if (wechat?.qrDeviceCode && !wechat?.botToken) {
+        codexToolbox = await invoke("poll_wechat_qr_binding", { verifyCode: "" });
+      } else {
+        codexToolbox = await invoke("get_codex_toolbox");
+      }
+      renderCodexToolbox();
+    } catch (_) {
+      codexToolbox = await invoke("get_codex_toolbox").catch(() => codexToolbox);
+      renderCodexToolbox();
+    } finally {
+      toolboxRefreshBusy = false;
+    }
+  }, 1000);
+}
+
+function stopToolboxRefresh() {
+  if (toolboxRefreshTimer) {
+    clearInterval(toolboxRefreshTimer);
+    toolboxRefreshTimer = null;
+  }
+  toolboxRefreshBusy = false;
+}
+
+function renderCodexToolbox() {
+  if (!codexToolbox) return;
+  $("toolboxMarketplaceInput").value =
+    helpers.normalizeCodexPluginMarketplaceInput?.(codexToolbox.pluginMarketplaceInput) ||
+    helpers.CODEX_PLUGIN_MARKETPLACE_URL ||
+    "https://gitcode.com/weixin_65003717/codex-plugin.git";
+  renderToolboxSessionSync();
+  renderToolboxSyncedThreads();
+  renderToolboxMobileControl();
+  renderToolboxRemote();
+}
+
+function renderToolboxSessionSync() {
+  const summary = $("toolboxSessionSummary");
+  const state = codexToolbox?.sessionSync || {};
+  const count = state.total || (codexToolbox?.syncedCodexThreads || []).length || 0;
+  if (!state.lastSyncedAt && !count) {
+    summary.textContent = t("toolboxSessionSummaryEmpty");
+    return;
+  }
+  summary.textContent = t("toolboxSessionSummary", {
+    count,
+    time: state.lastSyncedAt || "--",
+  });
+}
+
+function renderThreadCard(thread, options = {}) {
+  const isSelected = thread.id === (codexToolbox?.selectedMobileThreadId || selectedCodexThreadId);
+  const actions = [];
+  if (options.selectable) {
+    actions.push(
+      `<button class="btn ${isSelected ? "btn-primary" : "btn-secondary"} btn-sm" data-action="toolbox-select-thread" data-thread-id="${esc(thread.id)}">${isSelected ? t("toolboxSelectedThread") : t("toolboxSelectThread")}</button>`
+    );
+  }
+  if (options.bindable) {
+    actions.push(`<button class="btn btn-secondary btn-sm" data-bind-channel="lark" data-thread-id="${esc(thread.id)}">${t("toolboxBindLark")}</button>`);
+    actions.push(`<button class="btn btn-secondary btn-sm" data-bind-channel="wechat" data-thread-id="${esc(thread.id)}">${t("toolboxBindWechat")}</button>`);
+    actions.push(`<button class="btn btn-secondary btn-sm" data-bind-channel="qq" data-thread-id="${esc(thread.id)}">${t("toolboxBindQq")}</button>`);
+  }
+  return `
+    <div class="toolbox-thread-card ${isSelected ? "selected" : ""}" data-thread-id="${esc(thread.id)}">
+      <div class="toolbox-thread-title">${esc(thread.threadName || thread.id)}</div>
+      <div class="toolbox-thread-meta">${esc(thread.updatedAt || "--")}</div>
+      ${thread.cwd ? `<div class="toolbox-thread-meta">${esc(thread.cwd)}</div>` : ""}
+      ${thread.lastUserMessage ? `<div class="toolbox-thread-preview">${esc(thread.lastUserMessage)}</div>` : ""}
+      ${actions.length ? `<div class="toolbox-thread-actions">${actions.join("")}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderToolboxSyncedThreads() {
+  const list = $("toolboxSyncedThreadsList");
+  const threads = codexToolbox?.syncedCodexThreads || [];
+  if (threads.length === 0) {
+    list.innerHTML = `<div class="mgmt-empty">${t("toolboxNoThreads")}</div>`;
+    return;
+  }
+  list.innerHTML = threads.map((thread) => renderThreadCard(thread)).join("");
+}
+
+function getSelectedMobileBinding() {
+  const bindings = codexToolbox?.mobileChannels || [];
+  return bindings.find((binding) => binding.channel === selectedMobileChannel) || { channel: selectedMobileChannel };
+}
+
+function renderToolboxMobileControl() {
+  const appSelect = $("toolboxMobileAppSelect");
+  const threadSelect = $("toolboxMobileThreadSelect");
+  const threads = codexToolbox?.syncedCodexThreads || [];
+
+  appSelect.innerHTML = [
+    `<option value="wechat">${channelLabel("wechat")}</option>`,
+    `<option value="qq">${channelLabel("qq")}</option>`,
+    `<option value="lark">${channelLabel("lark")}</option>`,
+  ].join("");
+  appSelect.value = selectedMobileChannel;
+
+  if (codexToolbox?.selectedMobileThreadId) {
+    selectedCodexThreadId = codexToolbox.selectedMobileThreadId;
+  } else if (!selectedCodexThreadId && threads[0]) {
+    selectedCodexThreadId = threads[0].id;
+  }
+  threadSelect.innerHTML = threads.length
+    ? threads.map((thread) => `<option value="${esc(thread.id)}">${esc(thread.threadName || thread.lastUserMessage || thread.id)}</option>`).join("")
+    : `<option value="">${t("toolboxMobileNoThreadOption")}</option>`;
+  threadSelect.value = threads.some((thread) => thread.id === selectedCodexThreadId) ? selectedCodexThreadId : "";
+
+  $("toolboxMobileBindPanel").innerHTML = renderSelectedMobileBinding(getSelectedMobileBinding());
+  bindMobileControlEvents();
+}
+
+function bindMobileControlEvents() {
+  $("toolboxMobileAppSelect").onchange = () => {
+    selectedMobileChannel = $("toolboxMobileAppSelect").value || "wechat";
+    renderCodexToolbox();
+  };
+
+  $("toolboxMobileThreadSelect").onchange = async () => {
+    selectedCodexThreadId = $("toolboxMobileThreadSelect").value || "";
+    if (!selectedCodexThreadId) return;
+    try {
+      await bindCurrentMobileSelection();
+      showToast(t("toolboxThreadSelected"), "success");
+      renderCodexToolbox();
+    } catch (error) {
+      showToast(String(error), "error");
+    }
+  };
+
+  $("toolboxMobileBindPanel").querySelectorAll("button[data-action]").forEach((btn) => {
+    btn.addEventListener("click", handleMobileBindAction);
+  });
+  $("toolboxMobileBindPanel").querySelectorAll("[data-channel-field]").forEach((input) => {
+    input.addEventListener("input", scheduleMobileChannelAutoSave);
+    input.addEventListener("change", () => saveSelectedMobileChannelDraft({ render: true }));
+  });
+}
+
+async function bindCurrentMobileSelection() {
+  mobileDebug("bind selection requested");
+  if (!selectedCodexThreadId) {
+    const first = codexToolbox?.syncedCodexThreads?.[0];
+    selectedCodexThreadId = first?.id || "";
+    mobileDebug("bind selection fallback thread", { fallbackThreadId: selectedCodexThreadId });
+  }
+  if (!selectedCodexThreadId) {
+    mobileDebugError("bind selection failed: no thread", t("toolboxNoThreads"));
+    throw new Error(t("toolboxNoThreads"));
+  }
+  mobileDebug("select_mobile_thread invoke:start");
+  codexToolbox = await invoke("select_mobile_thread", { threadId: selectedCodexThreadId });
+  mobileDebug("select_mobile_thread invoke:success", {
+    activeThreadId: codexToolbox?.mobileRemote?.activeThreadId,
+    activeThreadName: codexToolbox?.mobileRemote?.activeThreadName,
+  });
+  mobileDebug("bind_codex_thread invoke:start");
+  codexToolbox = await invoke("bind_codex_thread", {
+    channel: selectedMobileChannel,
+    threadId: selectedCodexThreadId,
+    syncEnabled: true,
+    note: "mobile-control",
+  });
+  mobileDebug("bind_codex_thread invoke:success", {
+    activeThreadId: codexToolbox?.mobileRemote?.activeThreadId,
+    activeThreadName: codexToolbox?.mobileRemote?.activeThreadName,
+    binding: getSelectedMobileBinding(),
+  });
+}
+
+function scheduleMobileChannelAutoSave() {
+  window.clearTimeout(larkCredentialSaveTimer);
+  larkCredentialSaveTimer = window.setTimeout(() => {
+    saveSelectedMobileChannelDraft({ render: false });
+  }, 700);
+}
+
+async function saveSelectedMobileChannelDraft({ render = false } = {}) {
+  if (selectedMobileChannel !== "lark") return;
+  const panel = $("toolboxMobileBindPanel");
+  const appId = panel.querySelector("[data-channel-field='appId']")?.value || "";
+  const appSecret = panel.querySelector("[data-channel-field='appSecret']")?.value || "";
+  if (!appId.trim() && !appSecret.trim()) return;
+  try {
+    mobileDebug("configure_mobile_channel invoke:start", {
+      channel: "lark",
+      hasAppId: Boolean(appId.trim()),
+      hasAppSecret: Boolean(appSecret.trim()),
+      render,
+    });
+    codexToolbox = await invoke("configure_mobile_channel", {
+      channel: "lark",
+      appId,
+      appSecret,
+      botToken: "",
+      accountId: "",
+      baseUrl: "https://open.feishu.cn",
+      userId: "",
+      botOpenId: "",
+    });
+    mobileDebug("configure_mobile_channel invoke:success", {
+      binding: getSelectedMobileBinding(),
+    });
+    if (render) renderCodexToolbox();
+  } catch (error) {
+    mobileDebugError("configure_mobile_channel invoke:failed", error);
+    showToast(String(error), "error");
+  }
+}
+
+async function handleMobileBindAction(event) {
+  const btn = event.currentTarget;
+  const action = btn.getAttribute("data-action");
+  btn.disabled = true;
+  try {
+    if (action === "toolbox-open-lark-create") {
+      selectedMobileChannel = "lark";
+      mobileDebug("start_lark_bot_registration invoke:start", { createOnly: true });
+      codexToolbox = await invoke("start_lark_bot_registration", { createOnly: true });
+      mobileDebug("start_lark_bot_registration invoke:success", { createOnly: true });
+      startToolboxRefresh(120);
+      showToast(t("toolboxCreateLarkBot"), "success");
+    } else if (action === "toolbox-open-lark-existing") {
+      selectedMobileChannel = "lark";
+      mobileDebug("start_lark_bot_registration invoke:start", { createOnly: false });
+      codexToolbox = await invoke("start_lark_bot_registration", { createOnly: false });
+      mobileDebug("start_lark_bot_registration invoke:success", { createOnly: false });
+      startToolboxRefresh(120);
+      showToast(t("toolboxRebindLarkBot"), "success");
+    } else if (action === "toolbox-unbind-lark-session") {
+      mobileDebug("unbind_codex_thread invoke:start", { channel: "lark" });
+      codexToolbox = await invoke("unbind_codex_thread", { channel: "lark" });
+      mobileDebug("unbind_codex_thread invoke:success", { channel: "lark" });
+      showToast(t("toolboxUnbindLarkSession"), "success");
+    } else if (action === "toolbox-stop-lark-listen") {
+      mobileDebug("stop_mobile_remote invoke:start", { source: "lark-panel" });
+      codexToolbox = await invoke("stop_mobile_remote", {});
+      mobileDebug("stop_mobile_remote invoke:success", { source: "lark-panel" });
+      showToast(t("toolboxStopLarkListen"), "success");
+    } else if (action === "toolbox-clear-lark-binding") {
+      mobileDebug("clear_mobile_channel_binding invoke:start", { channel: "lark" });
+      codexToolbox = await invoke("clear_mobile_channel_binding", { channel: "lark" });
+      mobileDebug("clear_mobile_channel_binding invoke:success", { channel: "lark" });
+      showToast(t("toolboxClearLarkBinding"), "success");
+    } else if (action === "toolbox-clear-qq-binding") {
+      mobileDebug("clear_mobile_channel_binding invoke:start", { channel: "qq" });
+      codexToolbox = await invoke("clear_mobile_channel_binding", { channel: "qq" });
+      mobileDebug("clear_mobile_channel_binding invoke:success", { channel: "qq" });
+      showToast("QQ 绑定已清除", "success");
+    } else if (action === "toolbox-clear-wechat-binding") {
+      mobileDebug("clear_mobile_channel_binding invoke:start", { channel: "wechat" });
+      codexToolbox = await invoke("clear_mobile_channel_binding", { channel: "wechat" });
+      mobileDebug("clear_mobile_channel_binding invoke:success", { channel: "wechat" });
+      showToast("微信绑定已清除", "success");
+    } else if (action === "toolbox-start-qq-qr") {
+      selectedMobileChannel = "qq";
+      startToolboxRefresh(120);
+      showToast(t("toolboxStartQqQr"), "success");
+      codexToolbox = await invoke("start_qq_qr_binding", {});
+    } else if (action === "toolbox-start-wechat-qr") {
+      selectedMobileChannel = "wechat";
+      startToolboxRefresh(120);
+      showToast(t("toolboxStartWechatQr"), "success");
+      codexToolbox = await invoke("start_wechat_qr_binding", {});
+    } else if (action === "toolbox-poll-wechat-qr") {
+      codexToolbox = await invoke("poll_wechat_qr_binding", { verifyCode: "" });
+      showToast(t("toolboxPollWechatQr"), "success");
+    } else if (action === "toolbox-open-qr") {
+      await invoke("open_external_target", { target: btn.getAttribute("data-url") || "" });
+    }
+    renderCodexToolbox();
+  } catch (error) {
+    mobileDebugError("mobile bind action failed", error, { action });
+    showToast(String(error), "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderSelectedMobileBinding(binding) {
+  const channel = binding.channel || selectedMobileChannel;
+  const title = channelLabel(channel);
+  const status = binding.status || binding.qrStatus || binding.credentialStatus || t("toolboxRemoteStopped");
+  const error = binding.lastError ? `<div class="mgmt-item-desc danger">${t("toolboxLastError")}: ${esc(binding.lastError)}</div>` : "";
+  const qr = renderChannelQr(binding);
+  let body = "";
+  let actions = "";
+
+  if (channel === "wechat") {
+    body = `${qr}<div class="mgmt-item-desc">${esc(binding.qrStatus || "点击绑定微信后，用手机微信扫码并确认绑定。")}</div>`;
+    actions = `
+      <button class="btn btn-primary btn-sm" data-action="toolbox-start-wechat-qr">${t("toolboxStartWechatQr")}</button>
+      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-wechat-binding">清除绑定</button>
+    `;
+  } else if (channel === "qq") {
+    body = `${qr}<div class="mgmt-item-desc">${esc(binding.qrStatus || "点击 QQ 扫码绑定后，用 QQ 扫描二维码即可保存机器人凭据。")}</div>`;
+    actions = `
+      <button class="btn btn-primary btn-sm" data-action="toolbox-start-qq-qr">${t("toolboxStartQqQr")}</button>
+      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-qq-binding">清除绑定</button>
+    `;
+  } else {
+    body = `
+      ${qr}
+      <div class="mgmt-item-desc">创建新机器人会打开飞书开放平台；创建完成后 App ID 和 App Secret 会自动填充并绑定当前对话。</div>
+      <div class="toolbox-channel-form toolbox-channel-form-compact">
+        <label class="toolbox-channel-field">
+          <span>${t("toolboxAppId")}</span>
+          <input type="text" data-channel-field="appId" autocomplete="off" value="${esc(binding.appId || "")}">
+        </label>
+        <label class="toolbox-channel-field">
+          <span>${t("toolboxAppSecret")}</span>
+          <input type="password" data-channel-field="appSecret" autocomplete="off" value="${esc(binding.appSecret || "")}">
+        </label>
+      </div>
+    `;
+    actions = `
+      <button class="btn btn-success btn-sm" data-action="toolbox-open-lark-existing">${t("toolboxRebindLarkBot")}</button>
+      <button class="btn btn-secondary btn-sm" data-action="toolbox-open-lark-create">${t("toolboxCreateLarkBot")}</button>
+      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-unbind-lark-session">${t("toolboxUnbindLarkSession")}</button>
+      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-stop-lark-listen">${t("toolboxStopLarkListen")}</button>
+      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-lark-binding">${t("toolboxClearLarkBinding")}</button>
+    `;
+  }
+
+  return `
+    <div class="toolbox-mobile-card">
+      <div class="toolbox-mobile-card-title">${esc(title)}</div>
+      <div class="mgmt-item-desc">${esc(status)}</div>
+      ${error}
+      ${body}
+      <div class="toolbox-thread-actions">${actions}</div>
+    </div>
+  `;
+}
+
+function renderChannelQr(binding) {
+  if (!shouldRenderChannelQr(binding)) return "";
+  const canOpenUrl = binding.channel === "lark";
+  const image = binding.qrDataUrl
+    ? `<img class="toolbox-qr-image" src="${esc(binding.qrDataUrl)}" alt="${esc(channelLabel(binding.channel))} QR">`
+    : "";
+  const open = canOpenUrl && binding.qrUrl
+    ? `<button class="btn btn-link btn-sm toolbox-qr-link" type="button" data-action="toolbox-open-qr" data-url="${esc(binding.qrUrl)}">${t("toolboxQrOpen")}</button>`
+    : "";
+  if (!image && !open) return "";
+  return `<div class="toolbox-qr-box">${image}${open}</div>`;
+}
+
+function shouldRenderChannelQr(binding) {
+  if (typeof helpers.shouldRenderChannelQr === "function") {
+    return helpers.shouldRenderChannelQr(binding);
+  }
+  if (!binding || (!binding.qrDataUrl && !binding.qrUrl)) return false;
+  if (binding.channel === "lark") return Boolean(binding.qrDataUrl || binding.qrUrl);
+  if (binding.channel === "qq") {
+    return Boolean(binding.qrDataUrl && isFreshMobileQr(binding) && isQqAuthorizationTarget(binding.qrUrl));
+  }
+  if (binding.channel === "wechat") {
+    const dataUrl = String(binding.qrDataUrl || "").trim().toLowerCase();
+    return Boolean(
+      binding.qrDataUrl &&
+      binding.qrDeviceCode &&
+      isFreshMobileQr(binding) &&
+      !dataUrl.startsWith("data:image/svg+xml")
+    );
+  }
+  return Boolean(binding.qrDataUrl);
+}
+
+function isFreshMobileQr(binding) {
+  if (typeof helpers.isFreshMobileQr === "function") {
+    return helpers.isFreshMobileQr(binding);
+  }
+  const startedAt = Number(binding?.qrStartedAt || 0);
+  if (!Number.isFinite(startedAt) || startedAt <= 0) return false;
+  return Date.now() - startedAt <= 10 * 60 * 1000;
+}
+
+function isQqAuthorizationTarget(value) {
+  if (typeof helpers.isQqAuthorizationTarget === "function") {
+    return helpers.isQqAuthorizationTarget(value);
+  }
+  return /^(https?:\/\/|mqqapi:\/\/|qqbot:\/\/)/i.test(String(value || "").trim());
+}
+
+function renderToolboxRemote() {
+  const remote = codexToolbox?.mobileRemote;
+  if (!remote) return;
+  const binding = getSelectedMobileBinding();
+  const activeThread = remote.activeThreadName || remote.activeThreadId || "";
+  const stateText = binding?.lastError || (remote.enabled ? t("toolboxRemoteRunning") : (remote.lastError || t("toolboxRemoteStopped")));
+  $("toolboxRemoteStatusValue").textContent = [
+    stateText,
+    channelLabel(selectedMobileChannel),
+    activeThread,
+    binding.status || binding.qrStatus || "",
+  ].filter(Boolean).join(" · ");
+}
+
+function channelLabel(channel) {
+  if (channel === "lark") return currentLang === "zh" ? "飞书" : "Feishu/Lark";
+  if (channel === "wechat") return currentLang === "zh" ? "微信" : "WeChat";
+  if (channel === "qq") return "QQ";
+  return String(channel || "").toUpperCase();
 }
 
 function showSwitchOverlay(profileName) {
@@ -2793,6 +3433,88 @@ $("codexSyncNowBtn").addEventListener("click", () => {
   const active = codexProfiles.find((p) => p.isActive);
   if (active) handleCodexSwitch(active.id);
 });
+$("codexToolboxBtn").addEventListener("click", openCodexToolbox);
+$("codexToolboxClose").addEventListener("click", closeCodexToolbox);
+$("codexToolboxOverlay").addEventListener("click", (event) => {
+  if (event.target === $("codexToolboxOverlay")) closeCodexToolbox();
+});
+$("toolboxTabMarket").addEventListener("click", () => switchToolboxTab("market"));
+$("toolboxTabSession").addEventListener("click", () => switchToolboxTab("session"));
+$("toolboxTabRemote").addEventListener("click", () => switchToolboxTab("remote"));
+$("toolboxSessionSyncBtn").addEventListener("click", async () => {
+  try {
+    codexToolbox = await invoke("sync_codex_sessions", {});
+    showToast(t("toolboxSessionsSynced"), "success");
+    renderCodexToolbox();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+});
+$("toolboxMarketApplyBtn").addEventListener("click", async () => {
+  try {
+    codexToolbox = await invoke("apply_plugin_marketplace", {
+      source: $("toolboxMarketplaceInput").value.trim(),
+    });
+    showToast(t("toolboxMarketplaceApplied"), "success");
+    renderCodexToolbox();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+});
+$("toolboxRemoteStartBtn").addEventListener("click", async () => {
+  if (toolboxRemoteBusy) return;
+  mobileDebug("remote start button clicked");
+  toolboxRemoteBusy = true;
+  $("toolboxRemoteStartBtn").disabled = true;
+  $("toolboxRemoteStopBtn").disabled = true;
+  try {
+    await bindCurrentMobileSelection();
+    mobileDebug("start_mobile_remote invoke:start", {
+      binding: getSelectedMobileBinding(),
+    });
+    codexToolbox = await invoke("start_mobile_remote", {});
+    mobileDebug("start_mobile_remote invoke:success", {
+      remote: codexToolbox?.mobileRemote,
+      binding: getSelectedMobileBinding(),
+    });
+    startToolboxRefresh(80);
+    showToast(t("toolboxRemoteStarted"), "success");
+    renderCodexToolbox();
+  } catch (error) {
+    mobileDebugError("start_mobile_remote flow failed", error);
+    showToast(String(error), "error");
+  } finally {
+    toolboxRemoteBusy = false;
+    $("toolboxRemoteStartBtn").disabled = false;
+    $("toolboxRemoteStopBtn").disabled = false;
+  }
+});
+$("toolboxRemoteStopBtn").addEventListener("click", async () => {
+  if (toolboxRemoteBusy) return;
+  mobileDebug("remote stop button clicked");
+  toolboxRemoteBusy = true;
+  $("toolboxRemoteStartBtn").disabled = true;
+  $("toolboxRemoteStopBtn").disabled = true;
+  try {
+    mobileDebug("stop_mobile_remote invoke:start", { source: "remote-main-button" });
+    codexToolbox = await invoke("stop_mobile_remote", {});
+    mobileDebug("stop_mobile_remote invoke:success", {
+      source: "remote-main-button",
+      remote: codexToolbox?.mobileRemote,
+      binding: getSelectedMobileBinding(),
+    });
+    showToast(t("toolboxRemoteStopped"), "success");
+    startToolboxRefresh(2);
+    renderCodexToolbox();
+  } catch (error) {
+    mobileDebugError("stop_mobile_remote flow failed", error);
+    showToast(String(error), "error");
+  } finally {
+    toolboxRemoteBusy = false;
+    $("toolboxRemoteStartBtn").disabled = false;
+    $("toolboxRemoteStopBtn").disabled = false;
+  }
+});
 
 // ── Management Panel Event Listeners ────────────────
 
@@ -3244,6 +3966,7 @@ $("settingsImportBtn").addEventListener("click", handleImportProfiles);
     loadProfiles(),
     loadCodexProfiles(),
     loadCodexStatus(),
+    loadCodexToolbox(),
     loadAppSettings(),
   ]);
   renderUpdateButton();

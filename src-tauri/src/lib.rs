@@ -1,10 +1,16 @@
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpStream, UdpSocket};
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use qrcode::{QrCode, EcLevel};
+use image::{DynamicImage, Luma};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -27,6 +33,16 @@ const GITHUB_LATEST_RELEASE_API: &str =
 const ENDPOINT_TEST_DEFAULT_TIMEOUT_SECS: u64 = 8;
 const ENDPOINT_TEST_MIN_TIMEOUT_SECS: u64 = 2;
 const ENDPOINT_TEST_MAX_TIMEOUT_SECS: u64 = 30;
+static QQ_QR_ACTIVE: AtomicBool = AtomicBool::new(false);
+static WECHAT_QR_ACTIVE: AtomicBool = AtomicBool::new(false);
+static LARK_REGISTRATION_ACTIVE: AtomicBool = AtomicBool::new(false);
+static MOBILE_REMOTE_START_ACTIVE: AtomicBool = AtomicBool::new(false);
+static MOBILE_REMOTE_CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
+static LARK_BRIDGE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static LARK_BRIDGE_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
+static QQ_GATEWAY_ACTIVE: AtomicBool = AtomicBool::new(false);
+static QQ_GATEWAY_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
+static WECHAT_LISTENER_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 // ── Data Structures ─────────────────────────────────
 
@@ -68,6 +84,146 @@ struct CodexProfile {
 #[derive(Serialize, Deserialize, Default)]
 struct CodexProfilesData {
     profiles: Vec<CodexProfile>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct CodexSessionBinding {
+    channel: String,
+    thread_id: String,
+    thread_name: String,
+    session_file: String,
+    updated_at: String,
+    cwd: String,
+    sync_enabled: bool,
+    last_synced_at: String,
+    note: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct CodexThreadRecord {
+    id: String,
+    thread_name: String,
+    updated_at: String,
+    session_file: String,
+    cwd: String,
+    last_user_message: String,
+    last_assistant_message: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct CodexSessionSyncState {
+    last_synced_at: String,
+    total: usize,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct PluginMarketplaceItem {
+    name: String,
+    source: String,
+    source_type: String,
+    is_official: bool,
+    is_current: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct RemoteDeviceState {
+    enabled: bool,
+    listen_addr: String,
+    port: u16,
+    discovery_token: String,
+    last_error: String,
+    last_started_at: String,
+    last_seen_at: String,
+    device_name: String,
+    local_ip: String,
+    #[serde(default)]
+    mode: String,
+    #[serde(default)]
+    active_thread_id: String,
+    #[serde(default)]
+    active_thread_name: String,
+}
+
+impl Default for RemoteDeviceState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen_addr: "0.0.0.0".into(),
+            port: 38527,
+            discovery_token: String::new(),
+            last_error: String::new(),
+            last_started_at: String::new(),
+            last_seen_at: String::new(),
+            device_name: String::new(),
+            local_ip: String::new(),
+            mode: "platform_bot".into(),
+            active_thread_id: String::new(),
+            active_thread_name: String::new(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct MobileChannelBinding {
+    channel: String,
+    thread_id: String,
+    thread_name: String,
+    session_file: String,
+    app_id: String,
+    app_secret: String,
+    bot_token: String,
+    account_id: String,
+    base_url: String,
+    user_id: String,
+    bot_open_id: String,
+    gateway_url: String,
+    qr_url: String,
+    qr_data_url: String,
+    qr_status: String,
+    qr_device_code: String,
+    qr_started_at: String,
+    launcher_url: String,
+    enabled: bool,
+    listening: bool,
+    status: String,
+    last_error: String,
+    credential_status: String,
+    last_checked_at: String,
+    updated_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct ToolboxState {
+    plugin_marketplace_input: String,
+    mobile_remote: RemoteDeviceState,
+    session_bindings: Vec<CodexSessionBinding>,
+    synced_codex_threads: Vec<CodexThreadRecord>,
+    session_sync: CodexSessionSyncState,
+    mobile_channels: Vec<MobileChannelBinding>,
+    selected_mobile_thread_id: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ToolboxSnapshot {
+    plugin_marketplace_input: String,
+    plugin_marketplaces: Vec<PluginMarketplaceItem>,
+    session_bindings: Vec<CodexSessionBinding>,
+    codex_threads: Vec<CodexThreadRecord>,
+    synced_codex_threads: Vec<CodexThreadRecord>,
+    session_sync: CodexSessionSyncState,
+    mobile_channels: Vec<MobileChannelBinding>,
+    selected_mobile_thread_id: String,
+    mobile_remote: RemoteDeviceState,
+    codex_home: String,
+    codex_config_path: String,
 }
 
 fn default_codex_auth_mode() -> String {
@@ -347,6 +503,18 @@ fn codex_config_path() -> PathBuf {
     codex_config_dir().join("config.toml")
 }
 
+fn codex_sessions_root() -> PathBuf {
+    codex_config_dir().join("sessions")
+}
+
+fn codex_session_index_path() -> PathBuf {
+    codex_config_dir().join("session_index.jsonl")
+}
+
+fn toolbox_state_path(app: &tauri::AppHandle) -> PathBuf {
+    data_dir(app).join("codex_toolbox_state.json")
+}
+
 /// 写入 Codex 配置文件。
 /// 默认写入 ~/.codex/auth.json 和 ~/.codex/config.toml；
 /// 官方账号登录/API 额度模式只写 ~/.codex/config.toml，不改动 auth.json。
@@ -357,6 +525,8 @@ fn write_codex_config(profile: &CodexProfile) -> Result<(), String> {
 fn write_codex_config_with_base_url(profile: &CodexProfile, base_url: &str) -> Result<(), String> {
     let dir = codex_config_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("创建 ~/.codex 目录失败: {}", e))?;
+    let existing_config = fs::read_to_string(codex_config_path()).unwrap_or_default();
+    let marketplace_sections = extract_marketplace_sections(&existing_config);
 
     // 写入 config.toml
     let official_account_mode = is_codex_official_account_api_quota(&profile.auth_mode);
@@ -430,7 +600,12 @@ requires_openai_auth = true
             base_url = base_url,
         )
     };
-    fs::write(codex_config_path(), toml_content)
+    let final_toml = if marketplace_sections.trim().is_empty() {
+        toml_content
+    } else {
+        format!("{}\n{}", toml_content.trim_end(), marketplace_sections)
+    };
+    fs::write(codex_config_path(), final_toml)
         .map_err(|e| format!("写入 codex config.toml 失败: {}", e))?;
 
     Ok(())
@@ -468,6 +643,4209 @@ fn read_codex_status() -> Option<LocationStatus> {
         .unwrap_or_default();
 
     Some(LocationStatus { api_key, base_url })
+}
+
+fn read_toolbox_state(app: &tauri::AppHandle) -> ToolboxState {
+    let path = toolbox_state_path(app);
+    if !path.exists() {
+        let mut state = ToolboxState::default();
+        state.plugin_marketplace_input = default_plugin_marketplace_url().to_string();
+        state.mobile_remote.discovery_token = uuid::Uuid::new_v4().to_string();
+        state.mobile_remote.device_name = local_device_name();
+        state.mobile_remote.local_ip = detect_local_ip();
+        return normalize_toolbox_state(state);
+    }
+    let mut state: ToolboxState = fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    if state.plugin_marketplace_input.trim().is_empty() {
+        state.plugin_marketplace_input = default_plugin_marketplace_url().to_string();
+    }
+    if state.mobile_remote.discovery_token.trim().is_empty() {
+        state.mobile_remote.discovery_token = uuid::Uuid::new_v4().to_string();
+    }
+    if state.mobile_remote.device_name.trim().is_empty() {
+        state.mobile_remote.device_name = local_device_name();
+    }
+    state.mobile_remote.local_ip = detect_local_ip();
+    normalize_toolbox_state(state)
+}
+
+fn normalize_toolbox_state(mut state: ToolboxState) -> ToolboxState {
+    state.plugin_marketplace_input = default_plugin_marketplace_url().to_string();
+    if state.mobile_remote.discovery_token.trim().is_empty() {
+        state.mobile_remote.discovery_token = uuid::Uuid::new_v4().to_string();
+    }
+    if state.mobile_remote.device_name.trim().is_empty() {
+        state.mobile_remote.device_name = local_device_name();
+    }
+    if state.mobile_remote.mode.trim().is_empty() {
+        state.mobile_remote.mode = "platform_bot".into();
+    }
+    if state.mobile_remote.listen_addr.trim().is_empty() {
+        state.mobile_remote.listen_addr = "platform".into();
+    }
+    state.mobile_remote.local_ip = detect_local_ip();
+
+    for channel in ["lark", "wechat", "qq"] {
+        if !state
+            .mobile_channels
+            .iter()
+            .any(|binding| binding.channel == channel)
+        {
+            state.mobile_channels.push(default_mobile_channel(channel));
+        }
+    }
+    for binding in state.mobile_channels.iter_mut() {
+        binding.channel = normalize_mobile_channel(&binding.channel);
+        if binding.status.trim().is_empty() {
+            binding.status = if binding.thread_id.trim().is_empty() {
+                "未绑定".into()
+            } else {
+                "已绑定，等待开启平台连接".into()
+            };
+        }
+        if binding.base_url.trim().is_empty() {
+            binding.base_url = default_mobile_channel_base_url(&binding.channel).to_string();
+        }
+        normalize_mobile_channel_qr_cache(binding);
+    }
+
+    if state.selected_mobile_thread_id.trim().is_empty() {
+        if let Some(first) = state.synced_codex_threads.first() {
+            state.selected_mobile_thread_id = first.id.clone();
+        }
+    }
+
+    let active = state
+        .synced_codex_threads
+        .iter()
+        .find(|thread| thread.id == state.selected_mobile_thread_id)
+        .cloned();
+    if let Some(thread) = active {
+        state.mobile_remote.active_thread_id = thread.id;
+        state.mobile_remote.active_thread_name = thread.thread_name;
+    }
+
+    state
+}
+
+fn normalize_mobile_channel(channel: &str) -> String {
+    match channel.trim().to_ascii_lowercase().as_str() {
+        "feishu" | "lark" => "lark".into(),
+        "wechat" | "weixin" | "wx" => "wechat".into(),
+        "qq" => "qq".into(),
+        other => other.to_string(),
+    }
+}
+
+const MOBILE_QR_CACHE_TTL_MS: u128 = 10 * 60 * 1000;
+
+fn mobile_qr_cache_is_fresh(started_at: &str) -> bool {
+    let Ok(started_at) = started_at.trim().parse::<u128>() else {
+        return false;
+    };
+    chrono_timestamp_millis().saturating_sub(started_at) <= MOBILE_QR_CACHE_TTL_MS
+}
+
+fn is_qq_authorization_target(value: &str) -> bool {
+    let lower = value.trim().to_ascii_lowercase();
+    lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("mqqapi://")
+        || lower.starts_with("qqbot://")
+}
+
+fn clear_stale_mobile_qr(binding: &mut MobileChannelBinding, message: &str) {
+    binding.qr_url.clear();
+    binding.qr_data_url.clear();
+    binding.qr_device_code.clear();
+    binding.qr_status = message.into();
+}
+
+fn normalize_mobile_channel_qr_cache(binding: &mut MobileChannelBinding) {
+    let has_qr = !binding.qr_url.trim().is_empty() || !binding.qr_data_url.trim().is_empty();
+    if !has_qr {
+        return;
+    }
+    match binding.channel.as_str() {
+        "qq" => {
+            if !is_qq_authorization_target(&binding.qr_url)
+                || !mobile_qr_cache_is_fresh(&binding.qr_started_at)
+            {
+                clear_stale_mobile_qr(binding, "QQ 二维码已失效，请重新绑定");
+            }
+        }
+        "wechat" => {
+            let qr_data = binding.qr_data_url.trim().to_ascii_lowercase();
+            if binding.qr_device_code.trim().is_empty()
+                || !mobile_qr_cache_is_fresh(&binding.qr_started_at)
+                || qr_data.starts_with("data:image/svg+xml")
+            {
+                clear_stale_mobile_qr(binding, "微信二维码已失效，请重新生成");
+            }
+        }
+        _ => {}
+    }
+}
+
+fn default_mobile_channel_base_url(channel: &str) -> &'static str {
+    match normalize_mobile_channel(channel).as_str() {
+        "lark" => "https://open.feishu.cn",
+        "wechat" => "https://ilinkai.weixin.qq.com",
+        _ => "",
+    }
+}
+
+fn default_mobile_channel(channel: &str) -> MobileChannelBinding {
+    let normalized = normalize_mobile_channel(channel);
+    MobileChannelBinding {
+        channel: normalized.clone(),
+        status: "未绑定".into(),
+        base_url: default_mobile_channel_base_url(&normalized).to_string(),
+        ..MobileChannelBinding::default()
+    }
+}
+
+fn write_toolbox_state(app: &tauri::AppHandle, state: &ToolboxState) -> Result<(), String> {
+    let path = toolbox_state_path(app);
+    let json = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+fn default_plugin_marketplace_url() -> &'static str {
+    "https://gitcode.com/weixin_65003717/codex-plugin.git"
+}
+
+fn default_plugin_marketplace_name() -> &'static str {
+    "CooperAPI-Plugin"
+}
+
+fn lark_create_bot_launcher_url() -> &'static str {
+    "https://open.feishu.cn/page/launcher?from=sdk&source=node-sdk%2Fhi-codex&tp=sdk&addons=H4sIAAAAAAAC_2XLMQqAMAwF0LtkloJrriJSav1Ih6RiQpfSuyvi5v5eJ8v1hBF3cmhSJ16oCAvM0gE26B6Txa06rWMiNKi_vDjk98L3woWM0hDb_LQxbv9jmpZoAAAA&createOnly=true&name=Hi+Codex&desc=%E6%8A%8A%E9%A3%9E%E4%B9%A6%E6%B6%88%E6%81%AF%E8%BD%AC%E5%8F%91%E7%BB%99+Hi+Codex%EF%BC%8C%E5%B9%B6%E6%8A%8A+Codex+%E5%9B%9E%E5%A4%8D%E5%90%8C%E6%AD%A5%E5%9B%9E%E9%A3%9E%E4%B9%A6%E3%80%82"
+}
+
+fn lark_registration_base_url() -> &'static str {
+    "https://accounts.feishu.cn"
+}
+
+fn lark_registration_endpoint() -> String {
+    format!("{}/oauth/v1/app/registration", lark_registration_base_url())
+}
+
+fn lark_registration_addons() -> &'static str {
+    "H4sIAAAAAAAC_2XLMQqAMAwF0LtkloJrriJSav1Ih6RiQpfSuyvi5v5eJ8v1hBF3cmhSJ16oCAvM0gE26B6Txa06rWMiNKi_vDjk98L3woWM0hDb_LQxbv9jmpZoAAAA"
+}
+
+fn percent_encode_query_value(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(*byte as char)
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+fn append_query_params(url: &str, params: &[(&str, &str)]) -> String {
+    let mut next = url.trim().to_string();
+    if next.is_empty() {
+        return String::new();
+    }
+    let mut first = !next.contains('?');
+    for (key, value) in params {
+        if key.trim().is_empty() {
+            continue;
+        }
+        if first {
+            next.push('?');
+            first = false;
+        } else if !next.ends_with('?') && !next.ends_with('&') {
+            next.push('&');
+        }
+        next.push_str(&percent_encode_query_value(key));
+        next.push('=');
+        next.push_str(&percent_encode_query_value(value));
+    }
+    next
+}
+
+fn base64_encode_bytes(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(((bytes.len() + 2) / 3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+        out.push(TABLE[(b0 >> 2) as usize] as char);
+        out.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(b2 & 0b0011_1111) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+/// 将文本(通常是 URL)生成二维码图片的 PNG data URL。用于微信/QQ 等需本地生成二维码的场景。
+fn generate_qr_code_data_url(content: &str) -> Result<String, String> {
+    let code = QrCode::with_error_correction_level(content, EcLevel::M)
+        .map_err(|e| format!("生成二维码失败: {e}"))?;
+    let image = code.render::<Luma<u8>>()
+        .min_dimensions(240, 240)
+        .build();
+    let dyn_img = DynamicImage::ImageLuma8(image);
+    let mut png_bytes = Vec::new();
+    dyn_img.write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .map_err(|e| format!("PNG 编码失败: {e}"))?;
+    let b64 = base64_encode_bytes(&png_bytes);
+    Ok(format!("data:image/png;base64,{b64}"))
+}
+
+fn image_content_type_from_body(content_type: &str, body: &[u8]) -> Option<String> {
+    let raw = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if raw.starts_with("image/") {
+        return Some(raw);
+    }
+    if body.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png".into())
+    } else if body.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg".into())
+    } else if body.starts_with(b"GIF87a") || body.starts_with(b"GIF89a") {
+        Some("image/gif".into())
+    } else if body.starts_with(b"RIFF") && body.get(8..12) == Some(b"WEBP") {
+        Some("image/webp".into())
+    } else if body
+        .iter()
+        .copied()
+        .skip_while(|byte| byte.is_ascii_whitespace())
+        .take(4)
+        .collect::<Vec<_>>()
+        .as_slice()
+        == b"<svg"
+    {
+        Some("image/svg+xml".into())
+    } else {
+        None
+    }
+}
+
+fn image_body_to_data_url(content_type: &str, body: &[u8]) -> String {
+    if body.is_empty() || body.len() > 2 * 1024 * 1024 {
+        return String::new();
+    }
+    image_content_type_from_body(content_type, body)
+        .map(|mime| format!("data:{mime};base64,{}", base64_encode_bytes(body)))
+        .unwrap_or_default()
+}
+
+fn fetch_image_as_data_url(client: &reqwest::blocking::Client, url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() || !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return String::new();
+    }
+    let Ok(response) = client.get(trimmed).send() else {
+        return String::new();
+    };
+    if !response.status().is_success() {
+        return String::new();
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    response
+        .bytes()
+        .ok()
+        .map(|bytes| image_body_to_data_url(&content_type, &bytes))
+        .unwrap_or_default()
+}
+
+fn decode_basic_html_entities(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+}
+
+fn normalize_page_asset_url(value: &str, base_url: &str) -> String {
+    let mut raw = decode_basic_html_entities(value)
+        .trim()
+        .trim_matches(['"', '\''])
+        .to_string();
+    if raw.is_empty() {
+        return String::new();
+    }
+    raw = raw.replace("\\/", "/");
+    let lower = raw.to_ascii_lowercase();
+    if lower.starts_with("data:image/")
+        || lower.starts_with("http://")
+        || lower.starts_with("https://")
+    {
+        return raw;
+    }
+    if raw.starts_with("//") {
+        let scheme = reqwest::Url::parse(base_url)
+            .ok()
+            .map(|url| url.scheme().to_string())
+            .unwrap_or_else(|| "https".into());
+        return format!("{scheme}:{raw}");
+    }
+    reqwest::Url::parse(base_url)
+        .ok()
+        .and_then(|base| base.join(&raw).ok())
+        .map(|url| url.to_string())
+        .unwrap_or_default()
+}
+
+fn push_html_attr_candidates(html: &str, attr: &str, candidates: &mut Vec<String>) {
+    let lower = html.to_ascii_lowercase();
+    let needle = format!("{attr}=");
+    let mut offset = 0usize;
+    while let Some(pos) = lower[offset..].find(&needle) {
+        let mut index = offset + pos + needle.len();
+        let bytes = html.as_bytes();
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index >= bytes.len() {
+            break;
+        }
+        let quote = bytes[index];
+        let (value_start, value_end) = if quote == b'"' || quote == b'\'' {
+            let value_start = index + 1;
+            let mut value_end = value_start;
+            while value_end < bytes.len() && bytes[value_end] != quote {
+                value_end += 1;
+            }
+            (value_start, value_end)
+        } else {
+            let value_start = index;
+            let mut value_end = value_start;
+            while value_end < bytes.len()
+                && !bytes[value_end].is_ascii_whitespace()
+                && bytes[value_end] != b'>'
+            {
+                value_end += 1;
+            }
+            (value_start, value_end)
+        };
+        if value_end > value_start {
+            candidates.push(html[value_start..value_end].to_string());
+        }
+        offset = value_end.saturating_add(1);
+    }
+}
+
+fn fetch_qr_image_or_page_data_url(client: &reqwest::blocking::Client, url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() || !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return String::new();
+    }
+    let Ok(response) = client.get(trimmed).send() else {
+        return String::new();
+    };
+    if !response.status().is_success() {
+        return String::new();
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let Ok(bytes) = response.bytes() else {
+        return String::new();
+    };
+    let direct = image_body_to_data_url(&content_type, &bytes);
+    if !direct.is_empty() {
+        return direct;
+    }
+    let Ok(html) = String::from_utf8(bytes.to_vec()) else {
+        return String::new();
+    };
+    let mut candidates = Vec::new();
+    for attr in [
+        "data-qrcode",
+        "data-qr",
+        "data-image",
+        "data-src",
+        "data-original",
+        "src",
+    ] {
+        push_html_attr_candidates(&html, attr, &mut candidates);
+    }
+    candidates.sort_by_key(|candidate| {
+        let lower = candidate.to_ascii_lowercase();
+        if lower.contains("qrcode") || lower.contains("qr") {
+            0
+        } else {
+            1
+        }
+    });
+    candidates.dedup();
+    for candidate in candidates {
+        let normalized = normalize_page_asset_url(&candidate, trimmed);
+        let lower = normalized.to_ascii_lowercase();
+        if lower.starts_with("data:image/") {
+            return normalized;
+        }
+        let data_url = fetch_image_as_data_url(client, &normalized);
+        if !data_url.is_empty() {
+            return data_url;
+        }
+    }
+    String::new()
+}
+
+fn official_plugin_marketplace_names() -> &'static [&'static str] {
+    &["openai-bundled", "openai-primary-runtime"]
+}
+
+fn local_device_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "VarSwitch".to_string())
+}
+
+fn detect_local_ip() -> String {
+    if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+        let _ = socket.connect("8.8.8.8:80");
+        if let Ok(addr) = socket.local_addr() {
+            return addr.ip().to_string();
+        }
+    }
+    "127.0.0.1".to_string()
+}
+
+fn read_lines_if_exists(path: &PathBuf) -> Vec<String> {
+    fs::read_to_string(path)
+        .ok()
+        .map(|text| {
+            text.lines()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn codex_session_relative_file(thread_id: &str) -> Option<String> {
+    let root = codex_sessions_root();
+    if !root.exists() {
+        return None;
+    }
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                    continue;
+                };
+                if !name.ends_with(".jsonl") {
+                    continue;
+                }
+                if name.contains(thread_id) {
+                    if let Ok(relative) = path.strip_prefix(codex_config_dir()) {
+                        return Some(relative.to_string_lossy().replace('\\', "/"));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn codex_session_path_from_relative(relative: &str) -> PathBuf {
+    let text = relative.replace('/', "\\");
+    codex_config_dir().join(text)
+}
+
+fn extract_text_from_content_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(extract_text_from_content_value)
+            .filter(|text| !text.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        serde_json::Value::Object(map) => {
+            if let Some(text) = map.get("text").and_then(|value| value.as_str()) {
+                return text.to_string();
+            }
+            if let Some(text) = map.get("content").map(extract_text_from_content_value) {
+                if !text.trim().is_empty() {
+                    return text;
+                }
+            }
+            if let Some(text) = map.get("message").map(extract_text_from_content_value) {
+                if !text.trim().is_empty() {
+                    return text;
+                }
+            }
+            String::new()
+        }
+        _ => String::new(),
+    }
+}
+
+fn shorten_preview(text: &str, max_chars: usize) -> String {
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = compact.chars();
+    let preview: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{preview}...")
+    } else {
+        preview
+    }
+}
+
+fn read_codex_thread_preview(session_file: &str) -> (String, String, String) {
+    let path = codex_session_path_from_relative(session_file);
+    let text = fs::read_to_string(path).unwrap_or_default();
+    let mut cwd = String::new();
+    let mut last_user_message = String::new();
+    let mut last_assistant_message = String::new();
+
+    for line in text.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if cwd.is_empty() {
+            cwd = value
+                .pointer("/payload/cwd")
+                .and_then(|value| value.as_str())
+                .or_else(|| {
+                    value
+                        .pointer("/payload/origin/cwd")
+                        .and_then(|value| value.as_str())
+                })
+                .unwrap_or("")
+                .to_string();
+        }
+        let role = value
+            .pointer("/payload/role")
+            .and_then(|value| value.as_str())
+            .or_else(|| {
+                value
+                    .pointer("/payload/message/role")
+                    .and_then(|value| value.as_str())
+            })
+            .unwrap_or("");
+
+        let text = value
+            .pointer("/payload/content")
+            .map(extract_text_from_content_value)
+            .or_else(|| {
+                value
+                    .pointer("/payload/message/content")
+                    .map(extract_text_from_content_value)
+            })
+            .or_else(|| {
+                value
+                    .pointer("/payload/text")
+                    .map(extract_text_from_content_value)
+            })
+            .unwrap_or_default();
+
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        match role {
+            "user" => last_user_message = shorten_preview(&text, 140),
+            "assistant" => last_assistant_message = shorten_preview(&text, 180),
+            _ => {}
+        }
+    }
+
+    (cwd, last_user_message, last_assistant_message)
+}
+
+fn read_codex_threads(limit: usize) -> Vec<CodexThreadRecord> {
+    let mut items = Vec::new();
+    for line in read_lines_if_exists(&codex_session_index_path())
+        .into_iter()
+        .rev()
+    {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let id = value
+            .get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if id.is_empty() || items.iter().any(|item: &CodexThreadRecord| item.id == id) {
+            continue;
+        }
+        let thread_name = value
+            .get("thread_name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let updated_at = value
+            .get("updated_at")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let Some(session_file) = codex_session_relative_file(&id) else {
+            continue;
+        };
+        let (cwd, last_user_message, last_assistant_message) =
+            read_codex_thread_preview(&session_file);
+        items.push(CodexThreadRecord {
+            id,
+            thread_name,
+            updated_at,
+            session_file,
+            cwd,
+            last_user_message,
+            last_assistant_message,
+        });
+        if items.len() >= limit {
+            break;
+        }
+    }
+    items
+}
+
+fn parse_toml_string_value(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 2 {
+        let bytes = trimmed.as_bytes();
+        if (bytes[0] == b'"' && bytes[trimmed.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[trimmed.len() - 1] == b'\'')
+        {
+            return trimmed[1..trimmed.len() - 1].to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+fn list_plugin_marketplaces(config_text: &str, current_source: &str) -> Vec<PluginMarketplaceItem> {
+    let mut result = Vec::new();
+    let lines: Vec<&str> = config_text.lines().collect();
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index].trim();
+        if !(line.starts_with("[marketplaces.") && line.ends_with(']')) {
+            index += 1;
+            continue;
+        }
+        let name = line
+            .trim_start_matches("[marketplaces.")
+            .trim_end_matches(']')
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
+        let mut source = String::new();
+        let mut source_type = String::new();
+        index += 1;
+        while index < lines.len() {
+            let current = lines[index].trim();
+            if current.starts_with('[') && current.ends_with(']') {
+                break;
+            }
+            if let Some(value) = current.strip_prefix("source =") {
+                source = parse_toml_string_value(value);
+            } else if let Some(value) = current.strip_prefix("source_type =") {
+                source_type = parse_toml_string_value(value);
+            }
+            index += 1;
+        }
+        result.push(PluginMarketplaceItem {
+            name: name.clone(),
+            source: source.clone(),
+            source_type: source_type.clone(),
+            is_official: official_plugin_marketplace_names().contains(&name.as_str()),
+            is_current: !current_source.trim().is_empty() && current_source.trim() == source.trim(),
+        });
+    }
+    result
+}
+
+fn extract_marketplace_sections(config_text: &str) -> String {
+    let lines: Vec<&str> = config_text.lines().collect();
+    let mut index = 0;
+    let mut sections = Vec::new();
+
+    while index < lines.len() {
+        let line = lines[index].trim();
+        if !(line.starts_with("[marketplaces.") && line.ends_with(']')) {
+            index += 1;
+            continue;
+        }
+        let mut block = vec![lines[index].to_string()];
+        index += 1;
+        while index < lines.len() {
+            let current = lines[index].trim();
+            if current.starts_with('[') && current.ends_with(']') {
+                break;
+            }
+            block.push(lines[index].to_string());
+            index += 1;
+        }
+        sections.push(block.join("\n").trim().to_string());
+    }
+
+    if sections.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", sections.join("\n\n"))
+    }
+}
+
+fn ensure_plugin_marketplace_section(
+    existing: &str,
+    name: &str,
+    source: &str,
+    source_type: &str,
+) -> String {
+    let header = format!("[marketplaces.{name}]");
+    let section = format!(
+        "{header}\nlast_updated = \"{}\"\nsource_type = \"{}\"\nsource = \"{}\"\n",
+        chrono_now(),
+        source_type,
+        source.replace('\\', "\\\\").replace('"', "\\\"")
+    );
+
+    let lines: Vec<&str> = existing.lines().collect();
+    let mut output = Vec::new();
+    let mut index = 0;
+    let mut replaced = false;
+
+    while index < lines.len() {
+        let line = lines[index].trim();
+        if line == header {
+            replaced = true;
+            output.push(section.trim_end().to_string());
+            index += 1;
+            while index < lines.len() {
+                let current = lines[index].trim();
+                if current.starts_with('[') && current.ends_with(']') {
+                    break;
+                }
+                index += 1;
+            }
+            continue;
+        }
+        output.push(lines[index].to_string());
+        index += 1;
+    }
+
+    let mut text = output.join("\n").trim().to_string();
+    if text.is_empty() {
+        return section;
+    }
+    if !replaced {
+        text.push_str("\n\n");
+        text.push_str(&section);
+        return text;
+    }
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text
+}
+
+fn remove_all_plugin_marketplace_sections(existing: &str) -> String {
+    let lines: Vec<&str> = existing.lines().collect();
+    let mut output = Vec::new();
+    let mut index = 0;
+    let mut skipping = false;
+
+    while index < lines.len() {
+        let trimmed = lines[index].trim();
+        if trimmed.starts_with("[marketplaces.") && trimmed.ends_with(']') {
+            skipping = true;
+            index += 1;
+            continue;
+        }
+        if skipping && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            skipping = false;
+        }
+        if !skipping {
+            output.push(lines[index].to_string());
+        }
+        index += 1;
+    }
+
+    let text = output.join("\n");
+    let mut compact = Vec::new();
+    let mut last_blank = false;
+    for line in text.lines() {
+        let blank = line.trim().is_empty();
+        if blank && last_blank {
+            continue;
+        }
+        compact.push(line.to_string());
+        last_blank = blank;
+    }
+    compact.join("\n").trim().to_string()
+}
+
+fn plugin_marketplace_source_type(source: &str) -> &'static str {
+    let lowered = source.to_ascii_lowercase();
+    if lowered.starts_with("http://")
+        || lowered.starts_with("https://")
+        || lowered.starts_with("ssh://")
+        || lowered.starts_with("git@")
+    {
+        "git"
+    } else {
+        "local"
+    }
+}
+
+fn normalize_mobile_base_url(value: &str, channel: &str) -> String {
+    let fallback = default_mobile_channel_base_url(channel);
+    let mut raw = value.trim().trim_end_matches('/').to_string();
+    if raw.is_empty() {
+        raw = fallback.to_string();
+    }
+    if !raw.is_empty() && !raw.starts_with("http://") && !raw.starts_with("https://") {
+        raw = format!("https://{raw}");
+    }
+    raw.trim_end_matches('/').to_string()
+}
+
+fn mobile_channel_credential_hint(channel: &str) -> &'static str {
+    match normalize_mobile_channel(channel).as_str() {
+        "lark" => "请填写飞书 App ID 和 App Secret",
+        "wechat" => "请填写微信 iLink Bot Token",
+        "qq" => "请填写 QQ Bot AppID 和 AppSecret",
+        _ => "请填写平台凭据",
+    }
+}
+
+fn mobile_channel_has_credentials(binding: &MobileChannelBinding) -> bool {
+    match normalize_mobile_channel(&binding.channel).as_str() {
+        "lark" | "qq" => !binding.app_id.trim().is_empty() && !binding.app_secret.trim().is_empty(),
+        "wechat" => !binding.bot_token.trim().is_empty(),
+        _ => false,
+    }
+}
+
+fn is_platform_code_ok(value: &serde_json::Value) -> bool {
+    match value.get("code").or_else(|| value.get("errcode")) {
+        None | Some(serde_json::Value::Null) => true,
+        Some(serde_json::Value::Number(number)) => number.as_i64().unwrap_or(0) == 0,
+        Some(serde_json::Value::String(text)) => text.trim().is_empty() || text.trim() == "0",
+        _ => false,
+    }
+}
+
+fn platform_error_message(value: &serde_json::Value, fallback: &str) -> String {
+    value
+        .get("msg")
+        .or_else(|| value.get("message"))
+        .or_else(|| value.get("errmsg"))
+        .and_then(|item| item.as_str())
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn gateway_url_label(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|parsed| {
+            parsed
+                .host_str()
+                .map(|host| format!("{}://{}", parsed.scheme(), host))
+        })
+        .unwrap_or_else(|| "平台网关".into())
+}
+
+fn post_json_value(
+    client: &reqwest::blocking::Client,
+    url: String,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let response = client
+        .post(&url)
+        .json(&payload)
+        .send()
+        .map_err(|e| format!("平台接口请求失败: {e}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|e| format!("平台接口响应读取失败: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("平台接口返回 HTTP {}：{}", status.as_u16(), body));
+    }
+    if body.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    serde_json::from_str(&body).map_err(|e| format!("平台接口返回不是 JSON: {e}; {body}"))
+}
+
+fn probe_lark_channel(
+    client: &reqwest::blocking::Client,
+    binding: &MobileChannelBinding,
+) -> Result<(String, String), String> {
+    if !mobile_channel_has_credentials(binding) {
+        return Err(mobile_channel_credential_hint("lark").into());
+    }
+    let base_url = normalize_mobile_base_url(&binding.base_url, "lark");
+    let result = post_json_value(
+        client,
+        format!("{base_url}/callback/ws/endpoint"),
+        serde_json::json!({
+            "AppID": binding.app_id.trim(),
+            "AppSecret": binding.app_secret.trim(),
+        }),
+    )?;
+    if !is_platform_code_ok(&result) {
+        return Err(format!(
+            "飞书 WebSocket 网关获取失败：{}",
+            platform_error_message(&result, "接口返回异常")
+        ));
+    }
+    let data = result.get("data").and_then(|item| item.as_object());
+    let gateway_url = data
+        .and_then(|item| item.get("URL").or_else(|| item.get("url")))
+        .and_then(|item| item.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if gateway_url.is_empty() {
+        return Err("飞书 WebSocket 网关地址为空".into());
+    }
+    Ok((
+        gateway_url.clone(),
+        format!(
+            "飞书 WebSocket 网关已验证：{}",
+            gateway_url_label(&gateway_url)
+        ),
+    ))
+}
+
+fn probe_qq_channel(
+    client: &reqwest::blocking::Client,
+    binding: &MobileChannelBinding,
+) -> Result<(String, String), String> {
+    if !mobile_channel_has_credentials(binding) {
+        return Err(mobile_channel_credential_hint("qq").into());
+    }
+    let token_result = post_json_value(
+        client,
+        "https://bots.qq.com/app/getAppAccessToken".into(),
+        serde_json::json!({
+            "appId": binding.app_id.trim(),
+            "clientSecret": binding.app_secret.trim(),
+        }),
+    )?;
+    let token = token_result
+        .get("access_token")
+        .and_then(|item| item.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if token.is_empty() {
+        return Err(format!(
+            "QQ Bot 鉴权失败：{}",
+            platform_error_message(&token_result, "未返回 access_token")
+        ));
+    }
+    let response = client
+        .get("https://api.sgroup.qq.com/gateway")
+        .header("Authorization", format!("QQBot {token}"))
+        .send()
+        .map_err(|e| format!("QQ 网关请求失败: {e}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|e| format!("QQ 网关响应读取失败: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("QQ 网关返回 HTTP {}：{}", status.as_u16(), body));
+    }
+    let result: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("QQ 网关返回不是 JSON: {e}; {body}"))?;
+    let gateway_url = result
+        .get("url")
+        .and_then(|item| item.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if gateway_url.is_empty() {
+        return Err("QQ 网关地址为空".into());
+    }
+    Ok((
+        gateway_url.clone(),
+        format!(
+            "QQ WebSocket 网关已验证：{}",
+            gateway_url_label(&gateway_url)
+        ),
+    ))
+}
+
+fn probe_wechat_channel(
+    client: &reqwest::blocking::Client,
+    binding: &MobileChannelBinding,
+) -> Result<(String, String), String> {
+    if !mobile_channel_has_credentials(binding) {
+        return Err(mobile_channel_credential_hint("wechat").into());
+    }
+    let base_url = normalize_mobile_base_url(&binding.base_url, "wechat");
+    let response = client
+        .post(format!("{base_url}/ilink/bot/msg/notifystart"))
+        .header("AuthorizationType", "ilink_bot_token")
+        .header(
+            "Authorization",
+            format!("Bearer {}", binding.bot_token.trim()),
+        )
+        .header("X-WECHAT-UIN", uuid::Uuid::new_v4().to_string())
+        .header("iLink-App-Id", "bot")
+        .header("iLink-App-ClientVersion", "132100")
+        .json(&serde_json::json!({
+            "base_info": {
+                "channel_version": "2.4.4",
+                "bot_agent": "VarSwitch/1.0"
+            }
+        }))
+        .send()
+        .map_err(|e| format!("微信 iLink 请求失败: {e}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|e| format!("微信 iLink 响应读取失败: {e}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "微信 iLink 返回 HTTP {}：{}",
+            status.as_u16(),
+            body
+        ));
+    }
+    if !body.trim().is_empty() {
+        let result: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("微信 iLink 返回不是 JSON: {e}; {body}"))?;
+        if !is_platform_code_ok(&result) {
+            let err_msg = platform_error_message(&result, "接口返回异常");
+            // 微信 iLink bot_token 有时效性，session timeout 提示用户重新绑定
+            if err_msg.to_lowercase().contains("session timeout") || err_msg.to_lowercase().contains("expired") {
+                return Err(format!(
+                    "微信 iLink 会话已过期（bot_token 失效），请清除微信绑定后重新扫码，并在扫码成功后立即开启连接。错误详情：{}",
+                    err_msg
+                ));
+            }
+            return Err(format!(
+                "微信 iLink 启动失败：{}",
+                err_msg
+            ));
+        }
+    }
+    Ok((
+        base_url.clone(),
+        format!("微信 iLink 已验证：{}", gateway_url_label(&base_url)),
+    ))
+}
+
+fn probe_mobile_channel(binding: &MobileChannelBinding) -> Result<(String, String), String> {
+    let client = build_http_client(15)?;
+    match normalize_mobile_channel(&binding.channel).as_str() {
+        "lark" => probe_lark_channel(&client, binding),
+        "wechat" => probe_wechat_channel(&client, binding),
+        "qq" => probe_qq_channel(&client, binding),
+        _ => Err("不支持的手机通道".into()),
+    }
+}
+
+fn command_available(name: &str) -> bool {
+    Command::new(name)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn node_command_name() -> Result<&'static str, String> {
+    for candidate in ["node", "node.exe"] {
+        if command_available(candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err("没有找到 node，请先安装 Node.js，或手动填写 QQ AppID/AppSecret".into())
+}
+
+/// 在 PATH 各目录下按文件名查找可执行文件，返回首个存在的完整路径。
+/// 用于解决 Windows 下 Rust 的 Command 只识别 .exe、找不到 npm 包装脚本(.cmd)的问题。
+fn which_in_path(file_names: &[&str]) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        for name in file_names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// 解析 Codex CLI 的可执行文件完整路径。
+///
+/// 优先级:
+/// 1. PATH 中的原生二进制 `codex.exe`(Rust 可直接 spawn，最稳)
+/// 2. PATH 中 npm 安装的包装脚本 `codex.cmd`(Windows 下 Rust 可经 cmd 执行)
+/// 3. PATH 中的无扩展名 `codex`(类 Unix 平台)
+/// 4. 若 PATH 仅有包装脚本，尝试解析其内部的原生 codex.exe
+fn resolve_codex_command() -> Result<PathBuf, String> {
+    // Windows 优先原生 exe，其次 .cmd；非 Windows 直接找 codex。
+    let candidates: &[&str] = if cfg!(windows) {
+        &["codex.exe", "codex.cmd", "codex.bat", "codex"]
+    } else {
+        &["codex", "codex.exe"]
+    };
+
+    if let Some(found) = which_in_path(candidates) {
+        // 找到的是 npm 包装脚本时，尝试定位其内部的原生 codex.exe 以获得更稳定的执行。
+        if let Some(native) = resolve_bundled_codex_exe(&found) {
+            return Ok(native);
+        }
+        return Ok(found);
+    }
+
+    Err(
+        "没有找到 Codex CLI。请先安装 Codex（npm i -g @openai/codex），或将 codex 加入 PATH 后重试。"
+            .into(),
+    )
+}
+
+/// 如果传入的是 npm 包装脚本(codex / codex.cmd)，尝试在其同级 node_modules 中
+/// 找到平台原生的 codex.exe，避免每次都经过 node 启动包装层。找不到则返回 None。
+fn resolve_bundled_codex_exe(wrapper: &std::path::Path) -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let ext = wrapper
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    // 只有包装脚本(无扩展名或 .cmd/.bat)才需要进一步解析；本身就是 .exe 直接用。
+    if matches!(ext.as_deref(), Some("exe")) {
+        return None;
+    }
+    let base = wrapper.parent()?;
+    let native = base
+        .join("node_modules")
+        .join("@openai")
+        .join("codex")
+        .join("node_modules")
+        .join("@openai")
+        .join("codex-win32-x64")
+        .join("vendor")
+        .join("x86_64-pc-windows-msvc")
+        .join("bin")
+        .join("codex.exe");
+    if native.is_file() {
+        Some(native)
+    } else {
+        None
+    }
+}
+
+fn npm_command_name() -> Result<&'static str, String> {
+    for candidate in ["npm.cmd", "npm", "npm.exe"] {
+        if command_available(candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err("没有找到 npm，请先安装 Node.js/npm，或手动填写 QQ AppID/AppSecret".into())
+}
+
+fn qq_qr_runner_text() -> &'static str {
+    r#"import { startQrConnect } from '@tencent-connect/qqbot-connector';
+import QRCode from 'qrcode';
+
+const emit = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
+
+let stop = null;
+try {
+  stop = startQrConnect({
+    async onSuccess(credentials) {
+      emit({ type: 'success', credentials });
+      setTimeout(() => process.exit(0), 80);
+    },
+    onFailure(error) {
+      emit({ type: 'failure', message: error?.message || String(error || '扫码绑定失败') });
+      setTimeout(() => process.exit(1), 80);
+    },
+    async onQrDisplayed(url) {
+      let dataUrl = '';
+      const value = String(url || '').trim();
+      if (!/^(https?:\/\/|mqqapi:\/\/|qqbot:\/\/)/i.test(value)) {
+        emit({ type: 'failure', message: `QQ connector 返回的不是可扫码授权链接，而是内部字符串：${value.slice(0, 24)}...` });
+        setTimeout(() => process.exit(1), 80);
+        return;
+      }
+      try {
+        dataUrl = await QRCode.toDataURL(value, { width: 240, margin: 1 });
+      } catch (error) {
+        emit({ type: 'warning', message: error?.message || String(error || '二维码生成失败') });
+      }
+      emit({ type: 'qr', url: value, dataUrl });
+    },
+    onQrExpired() {
+      emit({ type: 'expired' });
+    },
+  }, { displayQrCodeToConsole: false });
+} catch (error) {
+  emit({ type: 'failure', message: error?.message || String(error || '扫码服务启动失败') });
+  process.exit(1);
+}
+
+const shutdown = () => {
+  try {
+    if (typeof stop === 'function') stop();
+  } catch {}
+  process.exit(0);
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+"#
+}
+
+fn qq_gateway_runner_text() -> &'static str {
+    r#"import WebSocket from 'ws';
+import https from 'node:https';
+
+const emit = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
+const appId = process.env.QQ_APP_ID || '';
+const appSecret = process.env.QQ_APP_SECRET || '';
+const intents = Number(process.env.QQ_INTENTS || '33554432');
+let accessToken = '';
+let expiresAt = 0;
+let stopping = false;
+let ws = null;
+let heartbeatTimer = null;
+
+function requestJson(method, url, payload, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const body = payload == null ? '' : JSON.stringify(payload);
+    const req = https.request(url, {
+      method,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        ...(body ? { 'content-length': Buffer.byteLength(body) } : {}),
+        ...headers,
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(new Error(`HTTP ${res.statusCode}: ${text}`));
+          return;
+        }
+        try {
+          resolve(text.trim() ? JSON.parse(text) : {});
+        } catch {
+          reject(new Error(`接口返回不是 JSON: ${text.slice(0, 200)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function token() {
+  if (accessToken && Date.now() < expiresAt - 60000) return accessToken;
+  const result = await requestJson('POST', 'https://bots.qq.com/app/getAppAccessToken', {
+    appId,
+    clientSecret: appSecret,
+  });
+  accessToken = String(result.access_token || '').trim();
+  if (!accessToken) throw new Error(`QQ 鉴权未返回 access_token: ${JSON.stringify(result)}`);
+  expiresAt = Date.now() + Math.max(0, Number(result.expires_in || 0)) * 1000;
+  return accessToken;
+}
+
+async function api(method, path, payload) {
+  const t = await token();
+  return requestJson(method, `https://api.sgroup.qq.com${path}`, payload, {
+    authorization: `QQBot ${t}`,
+  });
+}
+
+function normalizeContent(data) {
+  for (const key of ['content', 'text', 'message', 'msg']) {
+    let text = String(data?.[key] || '').trim();
+    if (!text) continue;
+    text = text.replace(/<@!?\d+>/g, '').replace(/\s+/g, ' ').trim();
+    if (text) return text;
+  }
+  const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
+  return attachments.map((item, index) => {
+    const url = String(item?.url || item?.file_url || item?.image_url || '').trim();
+    const name = String(item?.filename || item?.name || item?.file_name || '').trim();
+    return `[QQ 附件 ${index + 1}: ${[name, url].filter(Boolean).join(' ') || '未提供链接'}]`;
+  }).join('\n').trim();
+}
+
+function parseMessage(payload) {
+  const eventType = String(payload?.t || '');
+  if (!['C2C_MESSAGE_CREATE', 'GROUP_MSG_RECEIVE', 'GROUP_AT_MESSAGE_CREATE', 'C2C_MSG_RECEIVE'].includes(eventType)) return null;
+  const data = payload?.d || {};
+  const content = normalizeContent(data);
+  if (!content) return null;
+  const author = data.author || {};
+  const groupOpenid = String(data.group_openid || data.group_id || '').trim();
+  const openid = String(data.openid || data.user_openid || author.user_openid || author.member_openid || author.id || '').trim();
+  return {
+    type: 'message',
+    eventType,
+    eventId: String(payload.id || data.event_id || '').trim(),
+    messageId: String(data.id || data.msg_id || '').trim(),
+    content,
+    scene: groupOpenid || eventType.startsWith('GROUP_') ? 'group' : 'c2c',
+    openid,
+    groupOpenid,
+  };
+}
+
+function clearHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+}
+
+async function connectOnce() {
+  const gateway = await api('GET', '/gateway');
+  const url = String(gateway.url || '').trim();
+  if (!url) throw new Error(`QQ 网关地址为空: ${JSON.stringify(gateway)}`);
+  emit({ type: 'status', message: '正在连接 QQ 网关...' });
+  await new Promise((resolve, reject) => {
+    ws = new WebSocket(url);
+    let settled = false;
+    const fail = (error) => {
+      clearHeartbeat();
+      if (!settled) {
+        settled = true;
+        reject(error instanceof Error ? error : new Error(String(error || 'QQ 网关断开')));
+      }
+    };
+    ws.on('open', () => emit({ type: 'status', message: 'QQ 网关已连接' }));
+    ws.on('message', async (data) => {
+      let payload = {};
+      try {
+        payload = JSON.parse(Buffer.isBuffer(data) ? data.toString('utf8') : String(data));
+      } catch {
+        return;
+      }
+      if (payload.s != null) ws.nextSeq = payload.s;
+      if (payload.op === 10) {
+        const heartbeatMs = Number(payload?.d?.heartbeat_interval || payload?.d?.heartbeatInterval || 30000);
+        const t = await token();
+        ws.send(JSON.stringify({
+          op: 2,
+          d: {
+            token: `QQBot ${t}`,
+            intents,
+            shard: [0, 1],
+            properties: { '$os': process.platform, '$browser': 'VarSwitch', '$device': 'VarSwitch' },
+          },
+        }));
+        clearHeartbeat();
+        heartbeatTimer = setInterval(() => {
+          try {
+            if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: 1, d: ws.nextSeq ?? null }));
+          } catch {}
+        }, Math.max(1000, heartbeatMs));
+        return;
+      }
+      if (payload.op === 0 && payload.t === 'READY') {
+        emit({ type: 'ready' });
+        return;
+      }
+      if (payload.op === 7 || payload.op === 9) {
+        fail(new Error('QQ 网关要求重新连接'));
+        return;
+      }
+      const message = parseMessage(payload);
+      if (message) emit(message);
+    });
+    ws.on('error', fail);
+    ws.on('close', () => fail(new Error('QQ 网关连接已关闭')));
+  });
+}
+
+async function main() {
+  if (!appId || !appSecret) throw new Error('缺少 QQ AppID/AppSecret');
+  while (!stopping) {
+    try {
+      await connectOnce();
+    } catch (error) {
+      if (stopping) break;
+      emit({ type: 'status', message: `QQ 网关断开，准备重连：${error?.message || String(error)}` });
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    } finally {
+      clearHeartbeat();
+      try { ws?.close(); } catch {}
+      ws = null;
+    }
+  }
+}
+
+const shutdown = () => {
+  stopping = true;
+  clearHeartbeat();
+  try { ws?.close(); } catch {}
+  setTimeout(() => process.exit(0), 50);
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+main().catch((error) => {
+  emit({ type: 'failure', message: error?.message || String(error || 'QQ 网关启动失败') });
+  process.exit(1);
+});
+"#
+}
+
+fn lark_bridge_runner_text() -> &'static str {
+    r#"import WebSocket from 'ws';
+import https from 'node:https';
+
+const emit = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
+
+const appId = String(process.env.LARK_APP_ID || '').trim();
+const appSecret = String(process.env.LARK_APP_SECRET || '').trim();
+const baseUrl = String(process.env.LARK_BASE_URL || 'https://open.feishu.cn').replace(/\/+$/, '');
+const botOpenId = String(process.env.LARK_BOT_OPEN_ID || '').trim();
+const WS_METHOD_CONTROL = 0;
+const WS_METHOD_DATA = 1;
+const WS_EVENT_TYPE = 'event';
+const WS_CARD_TYPE = 'card';
+const WS_PING_TYPE = 'ping';
+const WS_PONG_TYPE = 'pong';
+let stopping = false;
+let ws = null;
+let pingTimer = null;
+let pingIntervalMs = 30000;
+let serviceId = 0;
+const chunkCache = new Map();
+
+if (!appId || !appSecret) {
+  emit({ type: 'failure', message: '缺少飞书 AppID/AppSecret' });
+  process.exit(1);
+}
+
+function requestJson(method, url, payload, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const body = payload == null ? '' : JSON.stringify(payload);
+    const req = https.request(url, {
+      method,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'user-agent': 'VarSwitch hi-codex-compatible',
+        ...(body ? { 'content-length': Buffer.byteLength(body) } : {}),
+        ...headers,
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(new Error(`HTTP ${res.statusCode}: ${text}`));
+          return;
+        }
+        try {
+          resolve(text.trim() ? JSON.parse(text) : {});
+        } catch {
+          reject(new Error(`接口返回不是 JSON: ${text.slice(0, 200)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+function resultOk(result) {
+  return result?.code == null || result.code === 0 || result.code === '0';
+}
+
+function apiError(result, fallback = '接口返回异常') {
+  const message = String(result?.msg || result?.message || fallback).trim();
+  return result?.code == null || result.code === 0 || result.code === '0'
+    ? message
+    : `code=${result.code} ${message}`.trim();
+}
+
+async function pullWsConfig() {
+  const result = await requestJson('POST', `${baseUrl}/callback/ws/endpoint`, {
+    AppID: appId,
+    AppSecret: appSecret,
+  });
+  if (!resultOk(result)) throw new Error(`飞书 WebSocket 网关获取失败：${apiError(result)}`);
+  const data = result?.data || {};
+  const url = String(data.URL || data.url || '').trim();
+  if (!url) throw new Error(`飞书 WebSocket 网关地址为空：${JSON.stringify(result)}`);
+  const parsed = new URL(url);
+  serviceId = Number(parsed.searchParams.get('service_id') || parsed.searchParams.get('ServiceID') || 0);
+  const clientConfig = data.ClientConfig || data.clientConfig || {};
+  const seconds = Number(clientConfig.PingInterval || clientConfig.pingInterval || 30);
+  pingIntervalMs = Math.max(1000, seconds * 1000);
+  return url;
+}
+
+function readVarint(buffer, start) {
+  let value = 0;
+  let shift = 0;
+  let pos = start;
+  while (pos < buffer.length) {
+    const byte = buffer[pos++];
+    value += (byte & 0x7f) * Math.pow(2, shift);
+    if ((byte & 0x80) === 0) return [value, pos];
+    shift += 7;
+    if (shift > 70) break;
+  }
+  throw new Error('invalid protobuf varint');
+}
+
+function writeVarint(value) {
+  let next = Number(value || 0);
+  const out = [];
+  while (true) {
+    let byte = next & 0x7f;
+    next = Math.floor(next / 128);
+    if (next) out.push(byte | 0x80);
+    else {
+      out.push(byte);
+      break;
+    }
+  }
+  return Buffer.from(out);
+}
+
+function readBytes(buffer, pos) {
+  const [length, afterLength] = readVarint(buffer, pos);
+  const end = afterLength + length;
+  if (end > buffer.length) throw new Error('invalid protobuf length');
+  return [buffer.subarray(afterLength, end), end];
+}
+
+function skipValue(buffer, pos, wireType) {
+  if (wireType === 0) return readVarint(buffer, pos)[1];
+  if (wireType === 1) return Math.min(buffer.length, pos + 8);
+  if (wireType === 2) return readBytes(buffer, pos)[1];
+  if (wireType === 5) return Math.min(buffer.length, pos + 4);
+  throw new Error(`unsupported protobuf wire type: ${wireType}`);
+}
+
+function protoBytes(fieldId, value) {
+  const raw = Buffer.isBuffer(value) ? value : Buffer.from(value || '');
+  return Buffer.concat([writeVarint((fieldId << 3) | 2), writeVarint(raw.length), raw]);
+}
+
+function protoString(fieldId, value) {
+  return protoBytes(fieldId, Buffer.from(String(value || ''), 'utf8'));
+}
+
+function protoVarint(fieldId, value) {
+  return Buffer.concat([writeVarint((fieldId << 3) | 0), writeVarint(value)]);
+}
+
+function encodeHeader(key, value) {
+  return Buffer.concat([protoString(1, key), protoString(2, value)]);
+}
+
+function decodeHeader(buffer) {
+  let pos = 0;
+  let key = '';
+  let value = '';
+  while (pos < buffer.length) {
+    const [tag, afterTag] = readVarint(buffer, pos);
+    pos = afterTag;
+    const fieldId = tag >> 3;
+    const wireType = tag & 7;
+    if (fieldId === 1 && wireType === 2) {
+      const [raw, next] = readBytes(buffer, pos);
+      key = raw.toString('utf8');
+      pos = next;
+    } else if (fieldId === 2 && wireType === 2) {
+      const [raw, next] = readBytes(buffer, pos);
+      value = raw.toString('utf8');
+      pos = next;
+    } else {
+      pos = skipValue(buffer, pos, wireType);
+    }
+  }
+  return [key, value];
+}
+
+function encodeFrame(frame) {
+  const parts = [
+    protoVarint(1, frame.seqId || 0),
+    protoVarint(2, frame.logId || 0),
+    protoVarint(3, frame.service || 0),
+    protoVarint(4, frame.method || 0),
+  ];
+  for (const [key, value] of frame.headers || []) {
+    parts.push(protoBytes(5, encodeHeader(key, value)));
+  }
+  if (frame.payloadEncoding) parts.push(protoString(6, frame.payloadEncoding));
+  if (frame.payloadType) parts.push(protoString(7, frame.payloadType));
+  if (frame.payload?.length) parts.push(protoBytes(8, frame.payload));
+  if (frame.logIdNew) parts.push(protoString(9, frame.logIdNew));
+  return Buffer.concat(parts);
+}
+
+function decodeFrame(input) {
+  const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input);
+  const frame = { seqId: 0, logId: 0, service: 0, method: 0, headers: [], payloadEncoding: '', payloadType: '', payload: Buffer.alloc(0), logIdNew: '' };
+  let pos = 0;
+  while (pos < buffer.length) {
+    const [tag, afterTag] = readVarint(buffer, pos);
+    pos = afterTag;
+    const fieldId = tag >> 3;
+    const wireType = tag & 7;
+    if (fieldId === 1 && wireType === 0) [frame.seqId, pos] = readVarint(buffer, pos);
+    else if (fieldId === 2 && wireType === 0) [frame.logId, pos] = readVarint(buffer, pos);
+    else if (fieldId === 3 && wireType === 0) [frame.service, pos] = readVarint(buffer, pos);
+    else if (fieldId === 4 && wireType === 0) [frame.method, pos] = readVarint(buffer, pos);
+    else if (fieldId === 5 && wireType === 2) {
+      const [raw, next] = readBytes(buffer, pos);
+      frame.headers.push(decodeHeader(raw));
+      pos = next;
+    } else if (fieldId === 6 && wireType === 2) {
+      const [raw, next] = readBytes(buffer, pos);
+      frame.payloadEncoding = raw.toString('utf8');
+      pos = next;
+    } else if (fieldId === 7 && wireType === 2) {
+      const [raw, next] = readBytes(buffer, pos);
+      frame.payloadType = raw.toString('utf8');
+      pos = next;
+    } else if (fieldId === 8 && wireType === 2) {
+      const [raw, next] = readBytes(buffer, pos);
+      frame.payload = raw;
+      pos = next;
+    } else if (fieldId === 9 && wireType === 2) {
+      const [raw, next] = readBytes(buffer, pos);
+      frame.logIdNew = raw.toString('utf8');
+      pos = next;
+    } else {
+      pos = skipValue(buffer, pos, wireType);
+    }
+  }
+  return frame;
+}
+
+function headersObject(frame) {
+  return Object.fromEntries((frame.headers || []).map(([key, value]) => [String(key), String(value)]));
+}
+
+function safeJson(value) {
+  if (value && typeof value === 'object') return value;
+  const text = String(value || '').trim();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+function stripAtTags(text) {
+  return String(text || '')
+    .replace(/<at\s+[^>]*>(.*?)<\/at>/g, (_, name) => `@${String(name || '').trim()}`)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function collectCardText(value, out = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectCardText(item, out);
+  } else if (value && typeof value === 'object') {
+    for (const key of ['text', 'content', 'title', 'subtitle', 'alt', 'value']) {
+      if (typeof value[key] === 'string' && value[key].trim()) out.push(value[key].trim());
+    }
+    for (const item of Object.values(value)) collectCardText(item, out);
+  }
+  return out;
+}
+
+function normalizeContent(message) {
+  const type = String(message?.message_type || message?.msg_type || '').toLowerCase();
+  const parsed = safeJson(message?.content || message?.body || {});
+  if (type === 'text') {
+    const text = typeof parsed.text === 'string' ? parsed.text : String(message?.text || message?.content || '');
+    return stripAtTags(text);
+  }
+  if (type === 'post') {
+    const body = parsed.zh_cn || parsed.en_us || parsed.ja_jp || parsed;
+    const parts = [];
+    if (body?.title) parts.push(String(body.title).trim());
+    for (const paragraph of body?.content || []) {
+      if (!Array.isArray(paragraph)) continue;
+      const line = paragraph.map((item) => String(item?.text || item?.href || '')).join('').trim();
+      if (line) parts.push(line);
+    }
+    return parts.join('\n').trim();
+  }
+  if (type === 'interactive') return collectCardText(parsed).slice(0, 8).join('\n').trim() || '[飞书 卡片消息]';
+  if (['img', 'image'].includes(type)) return `[飞书 图片: ${parsed.image_key || parsed.file_key || '未提供 file_key'}]`;
+  if (['media', 'video', 'audio', 'file'].includes(type)) return `[飞书 文件: ${parsed.file_name || parsed.name || parsed.file_key || parsed.image_key || '未提供 file_key'}]`;
+  if (typeof parsed.text === 'string') return stripAtTags(parsed.text);
+  return stripAtTags(message?.content || '');
+}
+
+function parseEventPayload(data) {
+  if (data?.schema) {
+    const header = data.header || {};
+    return [String(header.event_type || data.event_type || '').trim(), { ...(data.event || {}), app_id: header.app_id, tenant_key: header.tenant_key, event_id: header.event_id }];
+  }
+  if (data?.event && typeof data.event === 'object') {
+    return [String(data.event.type || data.event_type || data.type || '').trim(), { ...data.event, app_id: data.app_id ?? data.event.app_id, tenant_key: data.tenant_key ?? data.event.tenant_key, event_id: data.event_id ?? data.event.event_id }];
+  }
+  return [String(data?.event_type || data?.type || '').trim(), data || {}];
+}
+
+function parseIncomingMessage(payload) {
+  const [eventType, event] = parseEventPayload(payload);
+  if (eventType && eventType !== 'im.message.receive_v1') return null;
+  if (event?.app_id && String(event.app_id).trim() !== appId) return null;
+  const senderId = event?.sender?.sender_id || {};
+  const senderOpenId = String(senderId.open_id || senderId.user_id || '').trim();
+  if (botOpenId && senderOpenId && senderOpenId === botOpenId) return null;
+  const message = event?.message || {};
+  const text = normalizeContent(message);
+  const messageId = String(message.message_id || '').trim();
+  const chatId = String(message.chat_id || '').trim();
+  if (!messageId || !text) return null;
+  return {
+    type: 'message',
+    eventId: String(event.event_id || messageId).trim(),
+    messageId,
+    chatId,
+    senderId: senderOpenId,
+    chatType: String(message.chat_type || '').trim(),
+    threadId: String(message.thread_id || message.root_id || '').trim(),
+    rootId: String(message.root_id || '').trim(),
+    text,
+  };
+}
+
+function mergeFramePayload(frame) {
+  const headers = headersObject(frame);
+  const messageId = headers.message_id || headers.trace_id || String(frame.seqId || '');
+  const total = Math.max(1, Number(headers.sum || 1));
+  const seq = Number(headers.seq || 0);
+  if (total <= 1) return safeJson(frame.payload.toString('utf8'));
+  const index = seq >= 0 && seq < total ? seq : Math.max(0, Math.min(total - 1, seq - 1));
+  const cache = chunkCache.get(messageId) || { chunks: Array(total).fill(null), created: Date.now() };
+  cache.chunks[index] = frame.payload;
+  chunkCache.set(messageId, cache);
+  if (cache.chunks.every(Boolean)) {
+    chunkCache.delete(messageId);
+    return safeJson(Buffer.concat(cache.chunks).toString('utf8'));
+  }
+  for (const [key, value] of chunkCache.entries()) {
+    if (Date.now() - value.created > 20000) chunkCache.delete(key);
+  }
+  return null;
+}
+
+function sendFrame(frame) {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(encodeFrame(frame));
+}
+
+function sendPing() {
+  sendFrame({ seqId: 0, logId: 0, service: serviceId, method: WS_METHOD_CONTROL, headers: [['type', WS_PING_TYPE]] });
+}
+
+function sendAck(frame, code = 200) {
+  sendFrame({
+    seqId: frame.seqId,
+    logId: frame.logId,
+    service: frame.service,
+    method: frame.method,
+    headers: [...(frame.headers || []), ['biz_rt', '0']],
+    payloadEncoding: frame.payloadEncoding,
+    payloadType: frame.payloadType,
+    payload: Buffer.from(JSON.stringify({ code }), 'utf8'),
+    logIdNew: frame.logIdNew,
+  });
+}
+
+function resetPingTimer() {
+  if (pingTimer) clearInterval(pingTimer);
+  pingTimer = setInterval(sendPing, Math.max(1000, pingIntervalMs));
+}
+
+function handleFrame(frame) {
+  const headers = headersObject(frame);
+  const frameType = headers.type || '';
+  if (frame.method === WS_METHOD_CONTROL) {
+    if (frameType === WS_PONG_TYPE && frame.payload?.length) {
+      const data = safeJson(frame.payload.toString('utf8'));
+      if (data.PingInterval) {
+        pingIntervalMs = Math.max(1000, Number(data.PingInterval) * 1000);
+        resetPingTimer();
+      }
+    }
+    return;
+  }
+  if (frame.method !== WS_METHOD_DATA || ![WS_EVENT_TYPE, WS_CARD_TYPE].includes(frameType)) return;
+  const payload = mergeFramePayload(frame);
+  if (!payload) return;
+  let code = 200;
+  try {
+    const message = parseIncomingMessage(payload);
+    if (message) emit(message);
+  } catch (error) {
+    code = 500;
+    emit({ type: 'status', message: `飞书消息解析失败：${error?.message || String(error)}` });
+  } finally {
+    sendAck(frame, code);
+  }
+}
+
+async function connectOnce() {
+  const url = await pullWsConfig();
+  emit({ type: 'status', message: '正在连接飞书 WebSocket...' });
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    ws = new WebSocket(url);
+    const fail = (error) => {
+      if (pingTimer) clearInterval(pingTimer);
+      pingTimer = null;
+      if (settled) return;
+      settled = true;
+      if (stopping) resolve();
+      else reject(error instanceof Error ? error : new Error(String(error || '飞书 WebSocket 已断开')));
+    };
+    ws.on('open', () => {
+      emit({ type: 'ready' });
+      sendPing();
+      resetPingTimer();
+    });
+    ws.on('message', (data) => {
+      try {
+        handleFrame(decodeFrame(Buffer.isBuffer(data) ? data : Buffer.from(data)));
+      } catch (error) {
+        emit({ type: 'status', message: `飞书 WebSocket 帧处理失败：${error?.message || String(error)}` });
+      }
+    });
+    ws.on('error', fail);
+    ws.on('close', () => fail(new Error('飞书 WebSocket 已关闭')));
+  });
+}
+
+async function main() {
+  while (!stopping) {
+    try {
+      await connectOnce();
+    } catch (error) {
+      if (stopping) break;
+      emit({ type: 'status', message: `飞书 WebSocket 异常，准备重连：${error?.message || String(error)}` });
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    } finally {
+      if (pingTimer) clearInterval(pingTimer);
+      pingTimer = null;
+      try { ws?.close(); } catch {}
+      ws = null;
+    }
+  }
+}
+
+const shutdown = () => {
+  stopping = true;
+  if (pingTimer) clearInterval(pingTimer);
+  try { ws?.close(); } catch {}
+  setTimeout(() => process.exit(0), 50);
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+main().catch((error) => {
+  emit({ type: 'failure', message: error?.message || String(error || '飞书消息桥启动失败') });
+  process.exit(1);
+});
+"#
+}
+
+fn ensure_lark_bridge_connector(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let connector_dir = data_dir(app).join("larkbot-connector");
+    fs::create_dir_all(&connector_dir).map_err(|e| e.to_string())?;
+    let package_path = connector_dir.join("package.json");
+    let runner_path = connector_dir.join("lark-bridge-runner.mjs");
+    let package_text = serde_json::to_string_pretty(&serde_json::json!({
+        "private": true,
+        "type": "module",
+        "dependencies": {
+            "ws": "latest"
+        }
+    }))
+    .map_err(|e| e.to_string())?;
+    fs::write(&package_path, package_text).map_err(|e| e.to_string())?;
+    fs::write(&runner_path, lark_bridge_runner_text()).map_err(|e| e.to_string())?;
+
+    let ws_module = connector_dir.join("node_modules").join("ws");
+    if !ws_module.exists() {
+        let npm = npm_command_name()?;
+        let output = Command::new(npm)
+            .args([
+                "install",
+                "--omit=dev",
+                "--no-audit",
+                "--no-fund",
+                "--registry=https://registry.npmmirror.com",
+            ])
+            .current_dir(&connector_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("启动 npm 安装飞书 WebSocket 依赖失败: {e}"))?;
+        if !output.status.success() {
+            let mut detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if detail.is_empty() {
+                detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            }
+            return Err(format!("安装飞书 WebSocket 依赖失败: {detail}"));
+        }
+    }
+    Ok(runner_path)
+}
+
+fn ensure_qq_qr_connector(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let connector_dir = data_dir(app).join("qqbot-connector");
+    fs::create_dir_all(&connector_dir).map_err(|e| e.to_string())?;
+    let package_path = connector_dir.join("package.json");
+    let runner_path = connector_dir.join("qqbot-qr-runner.mjs");
+    let package_text = serde_json::to_string_pretty(&serde_json::json!({
+        "private": true,
+        "type": "module",
+        "dependencies": {
+            "@tencent-connect/qqbot-connector": "latest",
+            "qrcode": "latest",
+            "ws": "latest"
+        }
+    }))
+    .map_err(|e| e.to_string())?;
+    fs::write(&package_path, package_text).map_err(|e| e.to_string())?;
+    fs::write(&runner_path, qq_qr_runner_text()).map_err(|e| e.to_string())?;
+
+    let connector_module = connector_dir
+        .join("node_modules")
+        .join("@tencent-connect")
+        .join("qqbot-connector");
+    let qrcode_module = connector_dir.join("node_modules").join("qrcode");
+    let ws_module = connector_dir.join("node_modules").join("ws");
+    if !connector_module.exists() || !qrcode_module.exists() || !ws_module.exists() {
+        let npm = npm_command_name()?;
+        let output = Command::new(npm)
+            .args([
+                "install",
+                "--omit=dev",
+                "--no-audit",
+                "--no-fund",
+                "--registry=https://registry.npmmirror.com",
+            ])
+            .current_dir(&connector_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("启动 npm 安装 QQ 扫码依赖失败: {e}"))?;
+        if !output.status.success() {
+            let mut detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if detail.is_empty() {
+                detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            }
+            return Err(format!("安装 QQ 扫码依赖失败: {detail}"));
+        }
+    }
+    Ok(runner_path)
+}
+
+fn ensure_qq_gateway_connector(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let connector_dir = data_dir(app).join("qqbot-connector");
+    let _ = ensure_qq_qr_connector(app)?;
+    let runner_path = connector_dir.join("qqbot-gateway-runner.mjs");
+    fs::write(&runner_path, qq_gateway_runner_text()).map_err(|e| e.to_string())?;
+    Ok(runner_path)
+}
+
+fn write_mobile_channel_qr_state(
+    app: &tauri::AppHandle,
+    channel: &str,
+    status: &str,
+    qr_url: &str,
+    qr_data_url: &str,
+    error: &str,
+) -> Result<ToolboxSnapshot, String> {
+    let normalized = normalize_mobile_channel(channel);
+    let mut state = read_toolbox_state(app);
+    if !state
+        .mobile_channels
+        .iter()
+        .any(|binding| binding.channel == normalized)
+    {
+        state
+            .mobile_channels
+            .push(default_mobile_channel(&normalized));
+    }
+    if let Some(binding) = state
+        .mobile_channels
+        .iter_mut()
+        .find(|binding| binding.channel == normalized)
+    {
+        let now = chrono_now();
+        binding.qr_status = status.to_string();
+        binding.qr_url = qr_url.to_string();
+        binding.qr_data_url = qr_data_url.to_string();
+        if qr_url.trim().is_empty() && qr_data_url.trim().is_empty() {
+            binding.qr_device_code.clear();
+        }
+        binding.last_error = error.to_string();
+        if !status.trim().is_empty()
+            && (!qr_url.trim().is_empty()
+                || !qr_data_url.trim().is_empty()
+                || binding.qr_started_at.trim().is_empty())
+        {
+            binding.qr_started_at = now.clone();
+        }
+        binding.updated_at = now;
+    }
+    write_toolbox_state(app, &state)?;
+    Ok(build_toolbox_snapshot(app))
+}
+
+fn selected_thread_for_mobile_state(state: &ToolboxState) -> Option<CodexThreadRecord> {
+    if state.synced_codex_threads.is_empty() {
+        return None;
+    }
+    let selected = state.selected_mobile_thread_id.trim();
+    if !selected.is_empty() {
+        if let Some(thread) = state
+            .synced_codex_threads
+            .iter()
+            .find(|thread| thread.id == selected)
+        {
+            return Some(thread.clone());
+        }
+    }
+    state.synced_codex_threads.first().cloned()
+}
+
+fn attach_selected_thread_to_mobile_channel(state: &mut ToolboxState, channel: &str) {
+    let normalized = normalize_mobile_channel(channel);
+    let Some(thread) = selected_thread_for_mobile_state(state) else {
+        return;
+    };
+
+    state
+        .session_bindings
+        .retain(|binding| normalize_mobile_channel(&binding.channel) != normalized);
+    state.session_bindings.push(CodexSessionBinding {
+        channel: normalized.clone(),
+        thread_id: thread.id.clone(),
+        thread_name: thread.thread_name.clone(),
+        session_file: thread.session_file.clone(),
+        updated_at: thread.updated_at.clone(),
+        cwd: thread.cwd.clone(),
+        sync_enabled: true,
+        last_synced_at: String::new(),
+        note: "mobile-control".into(),
+    });
+    state.selected_mobile_thread_id = thread.id.clone();
+    state.mobile_remote.active_thread_id = thread.id.clone();
+    state.mobile_remote.active_thread_name = thread.thread_name.clone();
+
+    if let Some(binding) = state
+        .mobile_channels
+        .iter_mut()
+        .find(|binding| binding.channel == normalized)
+    {
+        binding.thread_id = thread.id;
+        binding.thread_name = thread.thread_name;
+        binding.session_file = thread.session_file;
+        binding.enabled = true;
+        binding.status = "已绑定，等待开启平台连接".into();
+        binding.updated_at = chrono_now();
+    }
+}
+
+#[derive(Clone, Debug)]
+struct LarkRegistrationPollResult {
+    status: String,
+    client_id: String,
+    client_secret: String,
+    tenant_brand: String,
+    message: String,
+    interval_secs: u64,
+}
+
+fn post_lark_registration_form(
+    client: &reqwest::blocking::Client,
+    params: &[(&str, &str)],
+) -> Result<serde_json::Value, String> {
+    let response = client
+        .post(lark_registration_endpoint())
+        .header("locale", "zh")
+        .form(params)
+        .send()
+        .map_err(|e| format!("飞书机器人注册请求失败: {e}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|e| format!("飞书机器人注册响应读取失败: {e}"))?;
+    if !status.is_success() && body.trim().is_empty() {
+        return Err(format!("飞书机器人注册返回 HTTP {}", status.as_u16()));
+    }
+    serde_json::from_str(&body).map_err(|e| format!("飞书机器人注册返回不是 JSON: {e}; {body}"))
+}
+
+fn request_lark_registration(
+    client: &reqwest::blocking::Client,
+    create_only: bool,
+    app_id: &str,
+) -> Result<(String, String, u64), String> {
+    let result = post_lark_registration_form(
+        client,
+        &[
+            ("action", "begin"),
+            ("archetype", "PersonalAgent"),
+            ("auth_method", "client_secret"),
+            ("request_user_info", "open_id"),
+        ],
+    )?;
+    let device_code = json_string(&result, &["device_code"]);
+    let verification_url = json_string(
+        &result,
+        &[
+            "verification_uri_complete",
+            "verification_uri",
+            "qrcode_url",
+        ],
+    );
+    if device_code.is_empty() || verification_url.is_empty() {
+        return Err(format!("飞书注册接口未返回授权信息：{result}"));
+    }
+    let mut params = vec![
+        ("from", "sdk"),
+        ("source", "node-sdk/hi-codex"),
+        ("tp", "sdk"),
+        ("addons", lark_registration_addons()),
+        ("name", "Hi Codex"),
+        (
+            "desc",
+            "把飞书消息转发给 Hi Codex，并把 Codex 回复同步回飞书。",
+        ),
+    ];
+    if create_only {
+        params.push(("createOnly", "true"));
+    }
+    if !app_id.trim().is_empty() {
+        params.push(("clientID", app_id.trim()));
+    }
+    let launcher_url = append_query_params(&verification_url, &params);
+    let interval = result
+        .get("interval")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(5)
+        .clamp(2, 10);
+    Ok((device_code, launcher_url, interval))
+}
+
+fn poll_lark_registration_device(
+    client: &reqwest::blocking::Client,
+    device_code: &str,
+) -> Result<LarkRegistrationPollResult, String> {
+    let result = post_lark_registration_form(
+        client,
+        &[("action", "poll"), ("device_code", device_code.trim())],
+    )?;
+    let user_info = result
+        .get("user_info")
+        .and_then(|value| value.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let tenant_brand = user_info
+        .get("tenant_brand")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let client_id = json_string(&result, &["client_id"]);
+    let client_secret = json_string(&result, &["client_secret"]);
+    if !client_id.is_empty() && !client_secret.is_empty() {
+        return Ok(LarkRegistrationPollResult {
+            status: "confirmed".into(),
+            client_id,
+            client_secret,
+            tenant_brand,
+            message: "飞书机器人创建完成，AppID/AppSecret 已自动填充".into(),
+            interval_secs: 0,
+        });
+    }
+
+    let error = json_string(&result, &["error"]);
+    let description = json_string(&result, &["error_description", "message", "msg"]);
+    let (status, message, interval_secs) = match error.as_str() {
+        "" | "authorization_pending" => ("pending", "等待飞书创建/授权确认", 5),
+        "slow_down" => ("slow_down", "飞书要求降低轮询频率，稍后继续检查", 8),
+        "access_denied" => ("access_denied", "飞书授权被取消", 0),
+        "expired_token" => ("expired_token", "飞书创建授权已过期，请重新创建", 0),
+        _ => ("error", description.as_str(), 0),
+    };
+    Ok(LarkRegistrationPollResult {
+        status: status.into(),
+        client_id: String::new(),
+        client_secret: String::new(),
+        tenant_brand,
+        message: if message.is_empty() {
+            "等待飞书创建/授权确认".into()
+        } else {
+            message.into()
+        },
+        interval_secs,
+    })
+}
+
+fn apply_lark_registration_poll(
+    app: &tauri::AppHandle,
+    poll: LarkRegistrationPollResult,
+) -> Result<ToolboxSnapshot, String> {
+    let mut state = read_toolbox_state(app);
+    if let Some(binding) = state
+        .mobile_channels
+        .iter_mut()
+        .find(|binding| binding.channel == "lark")
+    {
+        binding.qr_status = poll.message.clone();
+        binding.last_error.clear();
+        binding.updated_at = chrono_now();
+        if poll.status == "confirmed" {
+            binding.app_id = poll.client_id;
+            binding.app_secret = poll.client_secret;
+            binding.base_url = if poll.tenant_brand == "lark" {
+                "https://open.larksuite.com".into()
+            } else {
+                "https://open.feishu.cn".into()
+            };
+            binding.qr_device_code.clear();
+            binding.qr_url.clear();
+            binding.qr_data_url.clear();
+            binding.credential_status = "飞书 AppID/AppSecret 已自动保存".into();
+        } else if matches!(
+            poll.status.as_str(),
+            "access_denied" | "expired_token" | "error"
+        ) {
+            binding.last_error = poll.message;
+        }
+    }
+    if poll.status == "confirmed" {
+        attach_selected_thread_to_mobile_channel(&mut state, "lark");
+    }
+    write_toolbox_state(app, &state)?;
+    Ok(build_toolbox_snapshot(app))
+}
+
+fn start_lark_registration_poll_worker(
+    app: tauri::AppHandle,
+    device_code: String,
+    initial_interval_secs: u64,
+) {
+    std::thread::spawn(move || {
+        let client = match build_http_client(15) {
+            Ok(client) => client,
+            Err(error) => {
+                update_channel_status(&app, "lark", "飞书注册轮询失败", &error);
+                LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
+        let mut interval = initial_interval_secs.clamp(2, 10);
+        for _ in 0..120 {
+            std::thread::sleep(Duration::from_secs(interval));
+            let poll = match poll_lark_registration_device(&client, &device_code) {
+                Ok(poll) => poll,
+                Err(error) => {
+                    update_channel_status(&app, "lark", "飞书注册轮询失败", &error);
+                    LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
+                    return;
+                }
+            };
+            interval = poll.interval_secs.clamp(2, 10);
+            let final_status = matches!(
+                poll.status.as_str(),
+                "confirmed" | "access_denied" | "expired_token" | "error"
+            );
+            let _ = apply_lark_registration_poll(&app, poll);
+            if final_status {
+                LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+        }
+        update_channel_status(
+            &app,
+            "lark",
+            "飞书注册轮询超时",
+            "长时间没有拿到 AppID/AppSecret，请重新创建飞书机器人",
+        );
+        LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
+    });
+}
+
+fn json_string<'a>(value: &'a serde_json::Value, keys: &[&str]) -> String {
+    for key in keys {
+        if let Some(text) = value.get(*key).and_then(|item| item.as_str()) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+fn split_platform_reply_text(content: &str, chunk_size: usize, max_parts: usize) -> Vec<String> {
+    let mut text = content.trim().to_string();
+    if text.is_empty() {
+        text = "Codex 没有返回可发送的文本。".into();
+    }
+    let mut parts = Vec::new();
+    while !text.is_empty() && parts.len() < max_parts {
+        let char_count = text.chars().count();
+        if char_count <= chunk_size {
+            parts.push(text.trim().to_string());
+            text.clear();
+            break;
+        }
+        let mut split_at = 0usize;
+        for (idx, (byte_index, ch)) in text.char_indices().enumerate() {
+            if idx >= chunk_size {
+                break;
+            }
+            if ch == '\n' || ch == '。' || ch == '.' {
+                split_at = byte_index + ch.len_utf8();
+            }
+        }
+        if split_at < chunk_size / 2 {
+            split_at = text
+                .char_indices()
+                .nth(chunk_size)
+                .map(|(idx, _)| idx)
+                .unwrap_or_else(|| text.len());
+        }
+        let head = text[..split_at].trim().to_string();
+        if !head.is_empty() {
+            parts.push(head);
+        }
+        text = text[split_at..].trim().to_string();
+    }
+    if !text.is_empty() && !parts.is_empty() {
+        let suffix = "\n\n[回复过长，已截断]";
+        let mut last = parts.pop().unwrap_or_default();
+        while last.chars().count() + suffix.chars().count() > chunk_size {
+            last.pop();
+        }
+        parts.push(format!("{}{}", last.trim_end(), suffix));
+    }
+    if parts.is_empty() {
+        vec!["Codex 没有返回可发送的文本。".into()]
+    } else {
+        parts
+    }
+}
+
+fn update_mobile_channel_credentials_from_qr(
+    app: &tauri::AppHandle,
+    channel: &str,
+    app_id: &str,
+    app_secret: &str,
+    bot_token: &str,
+    account_id: &str,
+    base_url: &str,
+    user_id: &str,
+) -> Result<ToolboxSnapshot, String> {
+    let normalized = normalize_mobile_channel(channel);
+    let mut state = read_toolbox_state(app);
+    {
+        let Some(binding) = state
+            .mobile_channels
+            .iter_mut()
+            .find(|binding| binding.channel == normalized)
+        else {
+            write_toolbox_state(app, &state)?;
+            return Ok(build_toolbox_snapshot(app));
+        };
+        if !app_id.trim().is_empty() {
+            binding.app_id = app_id.trim().to_string();
+        }
+        if !app_secret.trim().is_empty() {
+            binding.app_secret = app_secret.trim().to_string();
+        }
+        if !bot_token.trim().is_empty() {
+            binding.bot_token = bot_token.trim().to_string();
+        }
+        if !account_id.trim().is_empty() {
+            binding.account_id = account_id.trim().to_string();
+        }
+        if !base_url.trim().is_empty() {
+            binding.base_url = normalize_mobile_base_url(base_url, &normalized);
+        }
+        if !user_id.trim().is_empty() {
+            binding.user_id = user_id.trim().to_string();
+        }
+        binding.qr_status = "绑定成功".into();
+        binding.credential_status = "平台凭据已保存".into();
+        binding.last_error.clear();
+        binding.updated_at = chrono_now();
+    }
+    attach_selected_thread_to_mobile_channel(&mut state, &normalized);
+    write_toolbox_state(app, &state)?;
+    Ok(build_toolbox_snapshot(app))
+}
+
+fn run_codex_cli_reply(prompt: &str, cwd: &str, thread_id: &str) -> Result<String, String> {
+    let text = prompt.trim();
+    if text.is_empty() {
+        return Err("消息内容为空".into());
+    }
+    let executable = resolve_codex_command()?;
+    let output_path = std::env::temp_dir().join(format!(
+        "varswitch-codex-reply-{}-{}.txt",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    let workdir = if cwd.trim().is_empty() {
+        std::env::current_dir().unwrap_or_else(|_| home_dir())
+    } else {
+        PathBuf::from(cwd)
+    };
+    let mut command = codex_command(&executable);
+    command.args([
+        "--ask-for-approval",
+        "never",
+        "exec",
+        "--sandbox",
+        "workspace-write",
+        "--color",
+        "never",
+        "--output-last-message",
+    ]);
+    command.arg(&output_path);
+    // 选中了已同步的会话时，用 `resume <SESSION_ID>` 续接该会话，
+    // 这样手机消息会接到用户在「控制对话」里选择的那个 Codex 线程中，
+    // 并携带其完整历史上下文；没有选中线程才退回到全新临时会话。
+    let thread = thread_id.trim();
+    if thread.is_empty() {
+        command.arg("--ephemeral");
+    } else {
+        command.arg("resume").arg(thread);
+    }
+    command.arg("-");
+    let mut child = command
+        .current_dir(workdir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("启动 Codex CLI 失败({}): {e}", executable.display()))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| format!("写入 Codex CLI prompt 失败: {e}"))?;
+    }
+    // 关闭 stdin，通知 codex 输入结束，否则 `exec -` 会一直等待。
+    drop(child.stdin.take());
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("等待 Codex CLI 回复失败: {e}"))?;
+    let reply = fs::read_to_string(&output_path)
+        .unwrap_or_else(|_| String::from_utf8_lossy(&output.stdout).to_string())
+        .trim()
+        .to_string();
+    let _ = fs::remove_file(&output_path);
+    if !output.status.success() {
+        let mut detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if detail.is_empty() {
+            detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        }
+        return Err(format!("Codex CLI 执行失败: {detail}"));
+    }
+    if reply.is_empty() {
+        // 退出码成功但没有 last-message 文件时，退回用 stdout 内容。
+        let stdout_text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !stdout_text.is_empty() {
+            return Ok(stdout_text);
+        }
+        Err("Codex CLI 没有返回回复".into())
+    } else {
+        Ok(reply)
+    }
+}
+
+/// 构造执行 Codex 的 Command。对于 .cmd/.bat 包装脚本，Windows 下需通过 `cmd /C` 调用，
+/// 否则 Rust 会因为不是合法的 PE 可执行文件而报 "program not found" / "%1 不是有效的应用程序"。
+fn codex_command(executable: &std::path::Path) -> Command {
+    let ext = executable
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    if cfg!(windows) && matches!(ext.as_deref(), Some("cmd") | Some("bat")) {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg(executable);
+        cmd
+    } else {
+        Command::new(executable)
+    }
+}
+
+// ===================== Codex 桌面 App CDP 注入 =====================
+//
+// 把手机消息注入 Codex 桌面 App(Electron)里用户选中的对话，让 App 自己收发回复。
+// 机制:Codex App 带 `--remote-debugging-port` 启动后暴露 Chrome DevTools Protocol，
+// 通过 HTTP 拿到页面 target 的 webSocketDebuggerUrl，再用裸 WebSocket 发
+// `Runtime.evaluate` 在页面里执行 JS，定位输入框→填消息→点发送→轮询回复。
+
+/// Codex App 常见的调试端口候选。watcher 启动 Codex 时通常用 9229。
+const CODEX_CDP_PORTS: &[u16] = &[9229, 9222, 9223, 9230];
+
+/// 探测 Codex App 的调试端口。先扫候选端口(命中 /json/version 即可)，
+/// 再退回读取 Codex.exe 进程命令行里的 `--remote-debugging-port=`。
+fn codex_debug_port() -> Option<u16> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(800))
+        .build()
+        .ok()?;
+    for &port in CODEX_CDP_PORTS {
+        let url = format!("http://127.0.0.1:{port}/json/version");
+        if let Ok(resp) = client.get(&url).send() {
+            if resp.status().is_success() {
+                return Some(port);
+            }
+        }
+    }
+    codex_debug_port_from_process()
+}
+
+/// 从正在运行的 Codex.exe 命令行里解析 `--remote-debugging-port=<port>`。
+#[cfg(windows)]
+fn codex_debug_port_from_process() -> Option<u16> {
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_Process -Filter \"name='Codex.exe'\" | Select-Object -ExpandProperty CommandLine",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let marker = "--remote-debugging-port=";
+    for line in text.lines() {
+        if let Some(idx) = line.find(marker) {
+            let rest = &line[idx + marker.len()..];
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(port) = digits.parse::<u16>() {
+                if port > 0 {
+                    return Some(port);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn codex_debug_port_from_process() -> Option<u16> {
+    None
+}
+
+/// 用于重启的目标调试端口。
+const CODEX_PREFERRED_DEBUG_PORT: u16 = 9229;
+
+/// 探测调试端口；若没有，则自动用调试端口重启 Codex App 后再探测。
+/// 这样即使用户的 Codex 以普通模式启动(没带 --remote-debugging-port)，也能用手机控制。
+fn codex_debug_port_or_relaunch() -> Result<u16, String> {
+    if let Some(port) = codex_debug_port() {
+        return Ok(port);
+    }
+    // 没有调试端口 —— 尝试带调试端口重启 Codex App。
+    eprintln!("[mobile-control][codex-app] 未检测到调试端口，尝试用调试端口重启 Codex App");
+    relaunch_codex_with_debug_port(CODEX_PREFERRED_DEBUG_PORT)?;
+    // 重启后轮询等待端口起来(最多约 20 秒)。
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(500));
+        if let Some(port) = codex_debug_port() {
+            eprintln!("[mobile-control][codex-app] Codex 已带调试端口 {port} 重启成功");
+            return Ok(port);
+        }
+    }
+    Err("已尝试重启 Codex App，但调试端口仍未就绪，请手动重启 Codex 后重试".into())
+}
+
+/// 从正在运行的 Codex 主进程拿到其可执行文件完整路径(动态获取，不写死安装位置)。
+#[cfg(windows)]
+fn running_codex_exe_path() -> Option<String> {
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            // 主进程:名为 Codex.exe、命令行不含 --type= (排除 GPU/渲染子进程) 且不在 resources 下。
+            "Get-CimInstance Win32_Process -Filter \"name='Codex.exe'\" | Where-Object { $_.CommandLine -notlike '*--type=*' -and $_.CommandLine -notlike '*resources*' } | Select-Object -First 1 -ExpandProperty ExecutablePath",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path)
+    }
+}
+
+/// 关闭所有 Codex.exe 进程，再用 `--remote-debugging-port` 重启同一个可执行文件。
+#[cfg(windows)]
+fn relaunch_codex_with_debug_port(port: u16) -> Result<(), String> {
+    // 1) 先拿到当前运行的 Codex.exe 路径(重启后要用同一个版本)。
+    let exe_path = running_codex_exe_path()
+        .ok_or("未找到正在运行的 Codex App，请先手动打开 Codex 桌面应用")?;
+    // 2) 关闭所有 Codex.exe(taskkill /F /T 连子进程一并结束)。
+    let _ = Command::new("taskkill")
+        .args(["/F", "/T", "/IM", "Codex.exe"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    // 等待进程退出，端口释放。
+    std::thread::sleep(Duration::from_millis(1500));
+    // 3) 用调试端口重启。--remote-allow-origins 允许本地 CDP 连接。
+    let allow_origin = format!("http://127.0.0.1:{port}");
+    Command::new(&exe_path)
+        .arg(format!("--remote-debugging-port={port}"))
+        .arg(format!("--remote-allow-origins={allow_origin}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("重启 Codex App 失败({exe_path}): {e}"))?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn relaunch_codex_with_debug_port(_port: u16) -> Result<(), String> {
+    Err("当前平台暂不支持自动重启 Codex App".into())
+}
+
+/// 在调试端口上找到 Codex 页面 target，返回其 webSocketDebuggerUrl。
+fn codex_find_page_target(port: u16) -> Result<String, String> {
+    // App 刚重启时端口已就绪但页面可能还没初始化，target 列表会暂时为空，故重试。
+    let mut last_err = String::from("没有找到可注入的 Codex 页面");
+    for attempt in 0..20 {
+        match codex_find_page_target_once(port) {
+            Ok(ws) => return Ok(ws),
+            Err(e) => {
+                last_err = e;
+                if attempt < 19 {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
+        }
+    }
+    Err(format!("{last_err}（请确认 Codex App 已打开且可见）"))
+}
+
+fn codex_find_page_target_once(port: u16) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .map_err(|e| format!("创建 CDP HTTP 客户端失败: {e}"))?;
+    let url = format!("http://127.0.0.1:{port}/json");
+    let resp = client
+        .get(&url)
+        .send()
+        .map_err(|e| format!("连接 Codex 调试端口失败: {e}"))?;
+    let targets: serde_json::Value = resp
+        .json()
+        .map_err(|e| format!("解析 Codex target 列表失败: {e}"))?;
+    let list = targets
+        .as_array()
+        .ok_or("Codex 调试端口未返回 target 列表")?;
+    // 优先选 type==page 的可见页面;Codex 主窗口 url 形如 app://-/index.html。
+    let mut fallback: Option<String> = None;
+    for target in list {
+        let target_type = json_string(target, &["type"]);
+        let ws = json_string(target, &["webSocketDebuggerUrl"]);
+        if ws.is_empty() {
+            continue;
+        }
+        if target_type == "page" {
+            let url = json_string(target, &["url"]);
+            let title = json_string(target, &["title"]);
+            // 跳过 devtools 自身页面。
+            if url.starts_with("devtools://") {
+                continue;
+            }
+            if url.contains("index.html")
+                || url.starts_with("app://")
+                || title.to_lowercase().contains("codex")
+            {
+                return Ok(ws);
+            }
+            if fallback.is_none() {
+                fallback = Some(ws);
+            }
+        }
+    }
+    fallback.ok_or_else(|| "Codex 页面尚未就绪".into())
+}
+
+/// 极简 CDP WebSocket 客户端(手写裸 WebSocket，仅满足注入需求)。
+struct CdpClient {
+    stream: TcpStream,
+    next_id: i64,
+}
+
+impl CdpClient {
+    /// 连接 webSocketDebuggerUrl(形如 ws://127.0.0.1:9229/devtools/page/<id>)并完成握手。
+    fn connect(ws_url: &str) -> Result<CdpClient, String> {
+        let rest = ws_url
+            .strip_prefix("ws://")
+            .ok_or("仅支持 ws:// 的 CDP 地址")?;
+        let slash = rest.find('/').unwrap_or(rest.len());
+        let host_port = &rest[..slash];
+        let path = if slash < rest.len() { &rest[slash..] } else { "/" };
+        let (host, port) = match host_port.rsplit_once(':') {
+            Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(9229)),
+            None => (host_port.to_string(), 9229),
+        };
+        let mut stream = TcpStream::connect((host.as_str(), port))
+            .map_err(|e| format!("连接 Codex 调试端口失败: {e}"))?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(180)))
+            .ok();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .ok();
+        // 随机 16 字节做握手 key。
+        let key_bytes = uuid::Uuid::new_v4().into_bytes();
+        let key = base64_encode_bytes(&key_bytes);
+        let request = format!(
+            "GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        stream
+            .write_all(request.as_bytes())
+            .map_err(|e| format!("发送 WebSocket 握手失败: {e}"))?;
+        // 读取握手响应直到空行。
+        let mut header = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            let n = stream
+                .read(&mut byte)
+                .map_err(|e| format!("读取 WebSocket 握手响应失败: {e}"))?;
+            if n == 0 {
+                return Err("WebSocket 握手连接被关闭".into());
+            }
+            header.push(byte[0]);
+            if header.ends_with(b"\r\n\r\n") {
+                break;
+            }
+            if header.len() > 8192 {
+                return Err("WebSocket 握手响应过长".into());
+            }
+        }
+        let header_text = String::from_utf8_lossy(&header);
+        if !header_text.contains("101") {
+            return Err(format!(
+                "WebSocket 握手失败: {}",
+                header_text.lines().next().unwrap_or("")
+            ));
+        }
+        Ok(CdpClient {
+            stream,
+            next_id: 0,
+        })
+    }
+
+    /// 发送一个带掩码的文本帧(客户端→服务端必须带掩码)。
+    fn send_text(&mut self, text: &str) -> Result<(), String> {
+        let data = text.as_bytes();
+        let len = data.len();
+        let mut frame = Vec::with_capacity(len + 14);
+        frame.push(0x81); // FIN + 文本帧
+        let mask_bit = 0x80u8;
+        if len < 126 {
+            frame.push(mask_bit | len as u8);
+        } else if len < 65536 {
+            frame.push(mask_bit | 126);
+            frame.extend_from_slice(&(len as u16).to_be_bytes());
+        } else {
+            frame.push(mask_bit | 127);
+            frame.extend_from_slice(&(len as u64).to_be_bytes());
+        }
+        let mask = uuid::Uuid::new_v4().into_bytes();
+        frame.extend_from_slice(&mask[..4]);
+        for (i, b) in data.iter().enumerate() {
+            frame.push(b ^ mask[i % 4]);
+        }
+        self.stream
+            .write_all(&frame)
+            .map_err(|e| format!("发送 CDP 帧失败: {e}"))
+    }
+
+    /// 精确读取 n 字节。
+    fn read_exact(&mut self, n: usize) -> Result<Vec<u8>, String> {
+        let mut buf = vec![0u8; n];
+        self.stream
+            .read_exact(&mut buf)
+            .map_err(|e| format!("读取 CDP 数据失败: {e}"))?;
+        Ok(buf)
+    }
+
+    /// 读取一个完整帧的 payload(自动应答 ping，跳过非文本控制帧)。
+    fn recv_text(&mut self) -> Result<String, String> {
+        loop {
+            let head = self.read_exact(2)?;
+            let opcode = head[0] & 0x0f;
+            let masked = (head[1] & 0x80) != 0;
+            let mut len = (head[1] & 0x7f) as usize;
+            if len == 126 {
+                let ext = self.read_exact(2)?;
+                len = u16::from_be_bytes([ext[0], ext[1]]) as usize;
+            } else if len == 127 {
+                let ext = self.read_exact(8)?;
+                len = u64::from_be_bytes([
+                    ext[0], ext[1], ext[2], ext[3], ext[4], ext[5], ext[6], ext[7],
+                ]) as usize;
+            }
+            let mask = if masked {
+                Some(self.read_exact(4)?)
+            } else {
+                None
+            };
+            let mut payload = self.read_exact(len)?;
+            if let Some(mask) = mask {
+                for (i, b) in payload.iter_mut().enumerate() {
+                    *b ^= mask[i % 4];
+                }
+            }
+            match opcode {
+                0x1 => return Ok(String::from_utf8_lossy(&payload).to_string()),
+                0x8 => return Err("CDP WebSocket 已关闭".into()),
+                0x9 => {
+                    // ping → 回 pong(带掩码空帧即可，简化处理)
+                    let _ = self.send_pong(&payload);
+                    continue;
+                }
+                _ => continue, // pong / 续帧等，忽略
+            }
+        }
+    }
+
+    fn send_pong(&mut self, payload: &[u8]) -> Result<(), String> {
+        let len = payload.len().min(125);
+        let mut frame = Vec::with_capacity(len + 6);
+        frame.push(0x8a); // FIN + pong
+        frame.push(0x80 | len as u8);
+        let mask = uuid::Uuid::new_v4().into_bytes();
+        frame.extend_from_slice(&mask[..4]);
+        for (i, b) in payload.iter().take(len).enumerate() {
+            frame.push(b ^ mask[i % 4]);
+        }
+        self.stream
+            .write_all(&frame)
+            .map_err(|e| format!("发送 pong 失败: {e}"))
+    }
+
+    /// 发送一条 CDP 命令并等待匹配 id 的响应。
+    fn command(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        self.next_id += 1;
+        let id = self.next_id;
+        let request = serde_json::json!({ "id": id, "method": method, "params": params });
+        self.send_text(&request.to_string())?;
+        // 循环读取直到拿到本次命令的响应(跳过事件通知)。
+        for _ in 0..10000 {
+            let text = self.recv_text()?;
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+                continue;
+            };
+            if value.get("id").and_then(|v| v.as_i64()) == Some(id) {
+                if let Some(err) = value.get("error") {
+                    return Err(format!("CDP 命令 {method} 失败: {err}"));
+                }
+                return Ok(value.get("result").cloned().unwrap_or(serde_json::Value::Null));
+            }
+            // 否则是事件(method 字段)，继续等。
+        }
+        Err(format!("CDP 命令 {method} 等待响应超时"))
+    }
+}
+
+/// 在 Codex 页面执行一段 JS 表达式，返回其(已 returnByValue 的)结果值。
+fn cdp_evaluate(
+    client: &mut CdpClient,
+    expression: &str,
+) -> Result<serde_json::Value, String> {
+    client.command("Runtime.enable", serde_json::json!({}))?;
+    let result = client.command(
+        "Runtime.evaluate",
+        serde_json::json!({
+            "expression": expression,
+            "returnByValue": true,
+            "awaitPromise": true,
+            "allowUnsafeEvalBlockedByCSP": true,
+            "userGesture": true,
+        }),
+    )?;
+    if let Some(exception) = result.get("exceptionDetails") {
+        return Err(format!("Codex 页面脚本异常: {exception}"));
+    }
+    Ok(result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null))
+}
+
+/// 注入到 Codex 页面的发送脚本(移植自参考实现 send_prompt_to_codex_page_no_wait)。
+/// `{PROMPT_JSON}` 处会被替换为 JSON 安全转义后的消息字符串字面量。
+/// 逻辑:找输入框 → 写入消息 → 点发送(兜底回车) → 轮询助手回复直到稳定 → 返回 {ok,text}。
+fn codex_inject_send_script(prompt_json: &str) -> String {
+    const TEMPLATE: &str = r#"
+(async () => {
+  const prompt = __PROMPT_JSON__;
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const textOf = (n) => (n?.innerText || n?.textContent || "").trim();
+  function visible(n) {
+    if (!n) return false;
+    const s = getComputedStyle(n);
+    const r = n.getBoundingClientRect();
+    return s.visibility !== "hidden" && s.display !== "none" && r.width > 0 && r.height > 0;
+  }
+  function assistantTexts() {
+    // Codex 桌面 App 的回复渲染在 markdown 内容块里，且不在用户气泡(items-end / bg-token-foreground)内。
+    // 用户消息气泡含 items-end 或 bg-token-foreground 类，据此排除。
+    function inUserBubble(node) {
+      let c = node;
+      for (let i = 0; c && i < 12; i++, c = c.parentElement) {
+        const cl = (c.className || "").toString();
+        if (cl.includes("items-end") || cl.includes("bg-token-foreground")) return true;
+      }
+      return false;
+    }
+    const values = [];
+    // 优先用 markdown 内容块(每条回复一个 _markdownContent_ 容器)。
+    let blocks = Array.from(document.querySelectorAll("[class*='markdownContent'], [class*='markdown-content'], [class*='_markdown']"))
+      .filter(visible)
+      .filter(n => !inUserBubble(n));
+    // 退路:旧版属性选择器。
+    if (!blocks.length) {
+      blocks = Array.from(document.querySelectorAll("[data-message-author-role='assistant'], [data-role='assistant'], [class*='assistant'], article"))
+        .filter(visible);
+    }
+    for (const n of blocks) {
+      const t = textOf(n);
+      if (t && !values.includes(t)) values.push(t);
+    }
+    return values;
+  }
+  function findInput() {
+    const selectors = ["textarea:not([disabled])", "[contenteditable='true']", "[role='textbox']"];
+    for (const sel of selectors) {
+      const ns = Array.from(document.querySelectorAll(sel)).filter(visible);
+      const n = ns[ns.length - 1];
+      if (n) return n;
+    }
+    return null;
+  }
+  function setInputValue(input, value) {
+    input.focus();
+    if ("value" in input) {
+      // textarea/input: 逐字符模拟打字,确保 React 受控组件每次都触发 onChange。
+      const setter = Object.getOwnPropertyDescriptor(input.constructor.prototype, "value")?.set
+        || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+        || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      if (setter) {
+        setter.call(input, "");
+        for (const char of value) {
+          const current = input.value;
+          setter.call(input, current + char);
+          input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: char }));
+        }
+      } else {
+        input.value = value;
+        input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+      }
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    } else {
+      // contenteditable: execCommand 逐字符插入。
+      input.textContent = "";
+      if (document.execCommand) {
+        for (const char of value) {
+          document.execCommand("insertText", false, char);
+        }
+      } else {
+        input.textContent = value;
+      }
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+  function buttonLabel(b) {
+    return [b.getAttribute("aria-label"), b.getAttribute("title"), b.getAttribute("data-testid"), b.textContent]
+      .filter(Boolean).join(" ").toLowerCase();
+  }
+  function centerDistance(b, rect) {
+    const r = b.getBoundingClientRect();
+    const dx = Math.max(0, rect.left - r.right, r.left - rect.right);
+    const dy = Math.max(0, rect.top - r.bottom, r.top - rect.bottom);
+    return dx + dy;
+  }
+  function findSendButton(input) {
+    const buttons = Array.from(document.querySelectorAll("button")).filter(visible);
+    const inputRect = input.getBoundingClientRect();
+    const labeled = buttons.filter(b => /send|submit|arrow|up|发送|提交/.test(buttonLabel(b)) && !b.disabled);
+    if (labeled.length) return labeled.sort((a, b) => centerDistance(a, inputRect) - centerDistance(b, inputRect))[0];
+    const containers = [];
+    let node = input;
+    for (let i = 0; node && i < 6; i++, node = node.parentElement) containers.push(node);
+    for (const container of containers) {
+      const local = Array.from(container.querySelectorAll("button")).filter(b => visible(b) && !b.disabled);
+      const rightSide = local.filter(b => {
+        const r = b.getBoundingClientRect();
+        return r.left >= inputRect.left && r.top < inputRect.bottom + 80 && r.bottom > inputRect.top - 80;
+      });
+      if (rightSide.length) return rightSide.sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right)[0];
+    }
+    return buttons.filter(b => !b.disabled).sort((a, b) => centerDistance(a, inputRect) - centerDistance(b, inputRect))[0] || null;
+  }
+  function activateButton(button) {
+    if (!button) return false;
+    button.scrollIntoView?.({ block: "center", inline: "center" });
+    // 直接调 click(),不触发冗余的鼠标事件链(可能导致重复提交)。
+    button.click();
+    return true;
+  }
+  function submitByKeyboard(input) {
+    const opts = { key: "Enter", code: "Enter", which: 13, keyCode: 13, bubbles: true, cancelable: true };
+    input.dispatchEvent(new KeyboardEvent("keydown", opts));
+    input.dispatchEvent(new KeyboardEvent("keypress", opts));
+    input.dispatchEvent(new KeyboardEvent("keyup", opts));
+  }
+  const before = assistantTexts();
+  const input = findInput();
+  if (!input) return { ok: false, error: "未找到 Codex 输入框" };
+  setInputValue(input, prompt);
+  let sent = false;
+  for (let i = 0; i < 20; i++) {
+    await sleep(150);
+    const button = findSendButton(input);
+    if (button && !button.disabled) { sent = activateButton(button); break; }
+  }
+  if (!sent) submitByKeyboard(input);
+  // 给输入框清空留足时间(逐字符输入+发送后 Codex 清空输入框需要时间)。
+  await sleep(1500);
+  const startedAt = Date.now();
+  const baseLast = before[before.length - 1] || "";
+  let latest = "";
+  let lastChangeAt = 0;
+  let everChanged = false;
+  while (Date.now() - startedAt < 180000) {
+    await sleep(800);
+    const after = assistantTexts();
+    const current = after[after.length - 1] || "";
+    // 出现了新回复(数量变化或末条内容变化)。
+    if ((after.length !== before.length || current !== baseLast) && current) {
+      everChanged = true;
+      if (current !== latest) {
+        latest = current;
+        lastChangeAt = Date.now();
+      }
+    }
+    if (everChanged && latest) {
+      // 以"回复文本连续稳定"为主判据；不再死等 Stop 按钮消失，
+      // 因为 Codex 界面可能常驻停止类按钮，会导致永远判不了稳定。
+      const busy = Boolean(document.querySelector("[data-testid*='stop-button'], button[aria-label='Stop generating'], button[aria-label='停止生成']"));
+      const stableFor = Date.now() - lastChangeAt;
+      if (!busy && stableFor > 2500) return { ok: true, text: latest };
+      if (busy && stableFor > 8000) return { ok: true, text: latest };
+    }
+  }
+  return { ok: !!latest, text: latest, error: latest ? "" : "Codex 没有产生回复" };
+})()
+"#;
+    TEMPLATE.replace("__PROMPT_JSON__", prompt_json)
+}
+
+/// 用 codex://threads/<id> deep link 让 Codex App 切到指定对话，并等待切换完成。
+fn activate_codex_thread(thread_id: &str) -> Result<(), String> {
+    let id = thread_id.trim();
+    if id.is_empty() {
+        return Ok(());
+    }
+    let deep_link = format!("codex://threads/{id}");
+    #[cfg(windows)]
+    {
+        // 用 cmd 的 start 触发系统协议处理(start 的首个引号参数是窗口标题，故留空)。
+        Command::new("cmd")
+            .args(["/C", "start", "", &deep_link])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("打开 Codex 对话失败: {e}"))?;
+    }
+    #[cfg(not(windows))]
+    {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        Command::new(opener)
+            .arg(&deep_link)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("打开 Codex 对话失败: {e}"))?;
+    }
+    // 等待 App 切换对话并渲染(参考实现的 CODEX_DEEPLINK_SETTLE_SECONDS≈2.5s)。
+    std::thread::sleep(Duration::from_millis(2500));
+    Ok(())
+}
+
+/// 把消息注入 Codex 桌面 App 选中的对话，等待并返回助手回复。
+/// 流程:切对话 → 探测调试端口 → 找页面 target → CDP 注入发送脚本 → 解析回复。
+fn send_prompt_to_codex_app(thread_id: &str, prompt: &str) -> Result<String, String> {
+    let text = prompt.trim();
+    if text.is_empty() {
+        return Err("消息内容为空".into());
+    }
+    // 1) 探测调试端口；没有则自动用调试端口重启 Codex App(放在切对话之前，
+    //    因为重启会重置页面，切对话必须在重启之后做)。
+    let port = codex_debug_port_or_relaunch()?;
+    // 2) 切到选中的对话(thread_id 为空则注入当前打开的对话)。
+    if let Err(error) = activate_codex_thread(thread_id) {
+        eprintln!("[mobile-control][codex-app] 切换对话失败(继续尝试注入当前对话): {error}");
+    }
+    // 3) 找页面 target。
+    let ws_url = codex_find_page_target(port)?;
+    // 4) 连接 CDP 并注入。
+    let mut client = CdpClient::connect(&ws_url)?;
+    let prompt_json = serde_json::to_string(text)
+        .map_err(|e| format!("序列化消息失败: {e}"))?;
+    let script = codex_inject_send_script(&prompt_json);
+    let value = cdp_evaluate(&mut client, &script)?;
+    // 4) 解析脚本返回 {ok, text, error}。
+    let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    if ok {
+        let reply = json_string(&value, &["text"]);
+        if reply.trim().is_empty() {
+            return Err("Codex App 已发送但未捕获到回复内容".into());
+        }
+        Ok(reply.trim().to_string())
+    } else {
+        let error = json_string(&value, &["error"]);
+        Err(if error.is_empty() {
+            "Codex App 注入失败".into()
+        } else {
+            error
+        })
+    }
+}
+
+/// 统一的回复分发:优先注入 Codex 桌面 App，失败时降级到后台 CLI(resume 续接)。
+fn dispatch_codex_reply(thread_id: &str, text: &str, cwd: &str) -> Result<String, String> {
+    match send_prompt_to_codex_app(thread_id, text) {
+        Ok(reply) => Ok(reply),
+        Err(app_err) => {
+            eprintln!("[mobile-control][codex-app] 注入失败，降级到 CLI: {app_err}");
+            run_codex_cli_reply(text, cwd, thread_id).map_err(|cli_err| {
+                format!("Codex App 注入失败({app_err})；CLI 兜底也失败：{cli_err}")
+            })
+        }
+    }
+}
+
+
+
+fn lark_tenant_access_token(
+    client: &reqwest::blocking::Client,
+    binding: &MobileChannelBinding,
+) -> Result<String, String> {
+    let base_url = normalize_mobile_base_url(&binding.base_url, "lark");
+    let result = post_json_value(
+        client,
+        format!("{base_url}/open-apis/auth/v3/tenant_access_token/internal"),
+        serde_json::json!({
+            "app_id": binding.app_id.trim(),
+            "app_secret": binding.app_secret.trim(),
+        }),
+    )?;
+    let token = json_string(&result, &["tenant_access_token"]);
+    if token.is_empty() {
+        Err(format!(
+            "获取飞书 tenant_access_token 失败: {}",
+            platform_error_message(&result, "未返回 token")
+        ))
+    } else {
+        Ok(token)
+    }
+}
+
+fn send_lark_text_reply(
+    binding: &MobileChannelBinding,
+    message_id: &str,
+    chat_id: &str,
+    content: &str,
+) -> Result<(), String> {
+    let client = build_http_client(20)?;
+    let token = lark_tenant_access_token(&client, binding)?;
+    let base_url = normalize_mobile_base_url(&binding.base_url, "lark");
+    for chunk in split_platform_reply_text(content, 3500, 5) {
+        let reply_error: String;
+        let payload = serde_json::json!({
+            "content": serde_json::json!({ "text": chunk }).to_string(),
+            "msg_type": "text"
+        });
+        let reply_result = client
+            .post(format!(
+                "{base_url}/open-apis/im/v1/messages/{}/reply",
+                percent_encode_query_value(message_id)
+            ))
+            .bearer_auth(&token)
+            .json(&payload)
+            .send();
+        match reply_result {
+            Ok(response) => {
+                let status = response.status();
+                let body = response
+                    .text()
+                    .map_err(|e| format!("飞书回复响应读取失败: {e}"))?;
+                let result: serde_json::Value =
+                    serde_json::from_str(&body).unwrap_or_else(|_| serde_json::json!({}));
+                if status.is_success() && is_platform_code_ok(&result) {
+                    continue;
+                }
+                reply_error = if !status.is_success() {
+                    format!("飞书 reply 返回 HTTP {}：{}", status.as_u16(), body)
+                } else {
+                    format!(
+                        "飞书 reply 返回错误：{}",
+                        platform_error_message(&result, "接口返回异常")
+                    )
+                };
+            }
+            Err(error) => {
+                reply_error = format!("飞书 reply 请求失败: {error}");
+            }
+        }
+        if chat_id.trim().is_empty() {
+            return Err(if reply_error.is_empty() {
+                "飞书 reply 失败，且缺少 chat_id，无法改用主动发送".into()
+            } else {
+                reply_error
+            });
+        }
+        let response = client
+            .post(format!(
+                "{base_url}/open-apis/im/v1/messages?receive_id_type=chat_id"
+            ))
+            .bearer_auth(&token)
+            .json(&serde_json::json!({
+                "receive_id": chat_id.trim(),
+                "content": serde_json::json!({ "text": chunk }).to_string(),
+                "msg_type": "text"
+            }))
+            .send()
+            .map_err(|e| format!("飞书主动发送失败: {e}; reply_error={reply_error}"))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .map_err(|e| format!("飞书主动发送响应读取失败: {e}"))?;
+        if !status.is_success() {
+            return Err(format!(
+                "飞书主动发送返回 HTTP {}：{}；reply_error={}",
+                status.as_u16(),
+                body,
+                reply_error
+            ));
+        }
+        let result: serde_json::Value =
+            serde_json::from_str(&body).unwrap_or_else(|_| serde_json::json!({}));
+        if !is_platform_code_ok(&result) {
+            return Err(format!(
+                "飞书主动发送失败: {}；reply_error={}",
+                platform_error_message(&result, "接口返回异常"),
+                reply_error
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn qq_access_token(
+    client: &reqwest::blocking::Client,
+    binding: &MobileChannelBinding,
+) -> Result<String, String> {
+    let result = post_json_value(
+        client,
+        "https://bots.qq.com/app/getAppAccessToken".into(),
+        serde_json::json!({
+            "appId": binding.app_id.trim(),
+            "clientSecret": binding.app_secret.trim(),
+        }),
+    )?;
+    let token = json_string(&result, &["access_token"]);
+    if token.is_empty() {
+        Err(format!(
+            "QQ Bot 鉴权失败：{}",
+            platform_error_message(&result, "未返回 access_token")
+        ))
+    } else {
+        Ok(token)
+    }
+}
+
+fn send_qq_text_reply(
+    binding: &MobileChannelBinding,
+    message: &serde_json::Value,
+    content: &str,
+) -> Result<(), String> {
+    let client = build_http_client(20)?;
+    let token = qq_access_token(&client, binding)?;
+    let scene = json_string(message, &["scene"]);
+    let group_openid = json_string(message, &["groupOpenid", "group_openid"]);
+    let openid = json_string(message, &["openid", "openId", "userOpenid"]);
+    let message_id = json_string(message, &["messageId", "message_id"]);
+    let event_id = json_string(message, &["eventId", "event_id"]);
+    let path = if scene == "group" || !group_openid.is_empty() {
+        if group_openid.is_empty() {
+            return Err("缺少 QQ 群聊 group_openid，无法回复".into());
+        }
+        format!(
+            "https://api.sgroup.qq.com/v2/groups/{}/messages",
+            percent_encode_query_value(&group_openid)
+        )
+    } else {
+        if openid.is_empty() {
+            return Err("缺少 QQ 用户 openid，无法回复".into());
+        }
+        format!(
+            "https://api.sgroup.qq.com/v2/users/{}/messages",
+            percent_encode_query_value(&openid)
+        )
+    };
+    for (index, chunk) in split_platform_reply_text(content, 1800, 5)
+        .into_iter()
+        .enumerate()
+    {
+        let mut payload = serde_json::json!({
+            "content": chunk,
+            "msg_type": 0,
+            "msg_seq": ((chrono_timestamp_millis() % 90_000_000) as usize + index + 1),
+        });
+        if let Some(object) = payload.as_object_mut() {
+            if !message_id.is_empty() {
+                object.insert("msg_id".into(), serde_json::json!(message_id.clone()));
+            }
+            if !event_id.is_empty() {
+                object.insert("event_id".into(), serde_json::json!(event_id.clone()));
+            }
+        }
+        let response = client
+            .post(&path)
+            .header("Authorization", format!("QQBot {token}"))
+            .json(&payload)
+            .send()
+            .map_err(|e| format!("QQ 回复发送失败: {e}"))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .map_err(|e| format!("QQ 回复响应读取失败: {e}"))?;
+        if !status.is_success() {
+            return Err(format!("QQ 回复返回 HTTP {}：{}", status.as_u16(), body));
+        }
+    }
+    Ok(())
+}
+
+fn wechat_bot_base_info() -> serde_json::Value {
+    serde_json::json!({
+        "channel_version": "2.4.4",
+        "bot_agent": "VarSwitch/1.0"
+    })
+}
+
+fn wechat_request_json(
+    client: &reqwest::blocking::Client,
+    method: &str,
+    base_url: &str,
+    endpoint: &str,
+    token: &str,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let url = format!(
+        "{}/{}",
+        normalize_mobile_base_url(base_url, "wechat"),
+        endpoint.trim_start_matches('/')
+    );
+    let request = match method {
+        "GET" => client.get(&url),
+        _ => client.post(&url).json(&payload),
+    }
+    .header("AuthorizationType", "ilink_bot_token")
+    .header("Authorization", format!("Bearer {}", token.trim()))
+    .header("X-WECHAT-UIN", uuid::Uuid::new_v4().to_string())
+    .header("iLink-App-Id", "bot")
+    .header("iLink-App-ClientVersion", "132100");
+    let response = request
+        .send()
+        .map_err(|e| format!("微信 iLink 请求失败: {e}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|e| format!("微信 iLink 响应读取失败: {e}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "微信 iLink 返回 HTTP {}：{}",
+            status.as_u16(),
+            body
+        ));
+    }
+    if body.trim().is_empty() {
+        Ok(serde_json::json!({}))
+    } else {
+        serde_json::from_str(&body).map_err(|e| format!("微信 iLink 返回不是 JSON: {e}; {body}"))
+    }
+}
+
+fn wechat_json_array<'a>(
+    value: &'a serde_json::Value,
+    keys: &[&str],
+) -> Vec<&'a serde_json::Value> {
+    for key in keys {
+        if let Some(array) = value.get(*key).and_then(|item| item.as_array()) {
+            return array.iter().collect();
+        }
+    }
+    Vec::new()
+}
+
+fn normalize_wechat_message_content(data: &serde_json::Value) -> String {
+    let source = data
+        .get("msg")
+        .or_else(|| data.get("message"))
+        .filter(|item| item.get("item_list").is_some())
+        .unwrap_or(data);
+    let mut parts = Vec::new();
+    if let Some(items) = source.get("item_list").and_then(|item| item.as_array()) {
+        for item in items {
+            let item_type = item
+                .get("type")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0);
+            match item_type {
+                1 => {
+                    let text = item
+                        .get("text_item")
+                        .and_then(|value| value.get("text"))
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .trim();
+                    if !text.is_empty() {
+                        parts.push(text.to_string());
+                    }
+                }
+                2 => {
+                    let url = item
+                        .get("image_item")
+                        .and_then(|value| value.get("media"))
+                        .and_then(|value| value.get("full_url"))
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default();
+                    parts.push(if url.is_empty() {
+                        "[微信 图片]".into()
+                    } else {
+                        format!("[微信 图片: {url}]")
+                    });
+                }
+                3 => parts.push("[微信 语音]".into()),
+                4 => {
+                    let filename = item
+                        .get("file_item")
+                        .and_then(|value| value.get("file_name"))
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default();
+                    parts.push(if filename.is_empty() {
+                        "[微信 文件]".into()
+                    } else {
+                        format!("[微信 文件: {filename}]")
+                    });
+                }
+                5 => parts.push("[微信 视频]".into()),
+                _ => {}
+            }
+        }
+    }
+    parts.join("\n").trim().to_string()
+}
+
+fn parse_wechat_incoming_message(
+    data: &serde_json::Value,
+    account_id: &str,
+) -> Option<serde_json::Value> {
+    let source = data
+        .get("msg")
+        .or_else(|| data.get("message"))
+        .filter(|item| item.get("item_list").is_some())
+        .unwrap_or(data);
+    let content = normalize_wechat_message_content(source);
+    let sender_id = json_string(source, &["from_user_id"]);
+    if content.is_empty() || sender_id.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "eventId": json_string(source, &["client_id", "message_id", "seq"]),
+        "messageId": json_string(source, &["message_id", "client_id", "seq"]),
+        "content": content,
+        "senderId": sender_id,
+        "contextToken": json_string(source, &["context_token"]),
+        "accountId": account_id,
+    }))
+}
+
+fn send_wechat_text_reply(
+    binding: &MobileChannelBinding,
+    message: &serde_json::Value,
+    content: &str,
+) -> Result<(), String> {
+    let client = build_http_client(20)?;
+    let sender_id = json_string(message, &["senderId", "sender_id"]);
+    if sender_id.is_empty() {
+        return Err("缺少微信发送者 ID，无法回复".into());
+    }
+    let context_token = json_string(message, &["contextToken", "context_token"]);
+    for chunk in split_platform_reply_text(content, 1800, 5) {
+        let result = wechat_request_json(
+            &client,
+            "POST",
+            &binding.base_url,
+            "ilink/bot/sendmessage",
+            &binding.bot_token,
+            serde_json::json!({
+                    "msg": {
+                        "from_user_id": "",
+                    "to_user_id": sender_id.clone(),
+                    "client_id": format!("varswitch-wechat:{}-{}", chrono_timestamp_millis(), uuid::Uuid::new_v4()),
+                    "message_type": 2,
+                    "message_state": 2,
+                    "item_list": [{
+                        "type": 1,
+                        "text_item": { "text": chunk }
+                    }],
+                    "context_token": if context_token.is_empty() { serde_json::Value::Null } else { serde_json::json!(context_token.clone()) }
+                },
+                "base_info": wechat_bot_base_info(),
+            }),
+        )?;
+        if !is_platform_code_ok(&result) {
+            return Err(format!(
+                "微信回复发送失败：{}",
+                platform_error_message(&result, "接口返回异常")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn update_channel_status(app: &tauri::AppHandle, channel: &str, status: &str, error: &str) {
+    if error.trim().is_empty() {
+        println!("[mobile-control][status][{}] {}", channel, status);
+    } else {
+        eprintln!(
+            "[mobile-control][status][{}] {} | error={}",
+            channel, status, error
+        );
+    }
+    let normalized = normalize_mobile_channel(channel);
+    let mut state = read_toolbox_state(app);
+    if let Some(binding) = state
+        .mobile_channels
+        .iter_mut()
+        .find(|binding| binding.channel == normalized)
+    {
+        binding.status = status.to_string();
+        binding.last_error = error.to_string();
+        binding.updated_at = chrono_now();
+    }
+    let _ = write_toolbox_state(app, &state);
+}
+
+fn handle_lark_bridge_message(
+    app: &tauri::AppHandle,
+    payload: &serde_json::Value,
+) -> Result<(), String> {
+    let message_id = json_string(payload, &["messageId", "message_id"]);
+    let chat_id = json_string(payload, &["chatId", "chat_id"]);
+    let text = json_string(payload, &["text", "content"]);
+    if message_id.is_empty() || text.is_empty() {
+        println!(
+            "[mobile-control][lark] ignored empty message: message_id_empty={}, text_empty={}",
+            message_id.is_empty(),
+            text.is_empty()
+        );
+        return Ok(());
+    }
+    println!(
+        "[mobile-control][lark] received message: message_id={}, text_len={}",
+        message_id,
+        text.chars().count()
+    );
+    let state = read_toolbox_state(app);
+    let binding = state
+        .mobile_channels
+        .iter()
+        .find(|binding| binding.channel == "lark")
+        .cloned()
+        .ok_or("飞书通道不存在")?;
+    let selected_thread = state
+        .synced_codex_threads
+        .iter()
+        .find(|thread| {
+            thread.id == binding.thread_id || thread.id == state.selected_mobile_thread_id
+        })
+        .cloned();
+    let cwd = selected_thread
+        .as_ref()
+        .map(|thread| thread.cwd.as_str())
+        .unwrap_or("");
+    println!(
+        "[mobile-control][lark] dispatching to codex: thread_id={}, thread_name={}, cwd={}",
+        selected_thread
+            .as_ref()
+            .map(|thread| thread.id.as_str())
+            .unwrap_or(""),
+        selected_thread
+            .as_ref()
+            .map(|thread| thread.thread_name.as_str())
+            .unwrap_or(""),
+        cwd
+    );
+    update_channel_status(app, "lark", "收到飞书消息，正在发送给 Codex", "");
+    let thread_id = selected_thread
+        .as_ref()
+        .map(|thread| thread.id.as_str())
+        .unwrap_or("");
+    let reply = dispatch_codex_reply(thread_id, &text, cwd)
+        .map_err(|error| format!("Codex 执行失败：{error}"))?;
+    println!(
+        "[mobile-control][lark] codex replied: message_id={}, reply_len={}",
+        message_id,
+        reply.chars().count()
+    );
+    update_channel_status(app, "lark", "Codex 已回复，正在同步回飞书", "");
+    send_lark_text_reply(&binding, &message_id, &chat_id, &reply)
+        .map_err(|error| format!("飞书回发失败：{error}"))?;
+    update_channel_status(app, "lark", "Codex 回复已同步回飞书", "");
+    Ok(())
+}
+
+fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Result<(), String> {
+    if LARK_BRIDGE_ACTIVE.swap(true, Ordering::SeqCst) {
+        println!("[mobile-control][lark] bridge already active, skip start");
+        return Ok(());
+    }
+    println!(
+        "[mobile-control][lark] starting bridge: thread_id={}, thread_name={}, app_id={}",
+        binding.thread_id, binding.thread_name, binding.app_id
+    );
+    let runner = ensure_lark_bridge_connector(&app)?;
+    let node = node_command_name()?;
+    let connector_dir = runner
+        .parent()
+        .ok_or("飞书 connector 运行目录不存在")?
+        .to_path_buf();
+    let mut child = Command::new(node)
+        .arg(&runner)
+        .current_dir(connector_dir)
+        .env("LARK_APP_ID", binding.app_id.trim())
+        .env("LARK_APP_SECRET", binding.app_secret.trim())
+        .env(
+            "LARK_BASE_URL",
+            normalize_mobile_base_url(&binding.base_url, "lark"),
+        )
+        .env("LARK_BOT_OPEN_ID", binding.bot_open_id.trim())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            LARK_BRIDGE_ACTIVE.store(false, Ordering::SeqCst);
+            format!("启动飞书消息桥失败: {e}")
+        })?;
+    let stdout = child.stdout.take().ok_or("飞书消息桥没有输出通道")?;
+    let stderr = child.stderr.take();
+    if let Ok(mut guard) = LARK_BRIDGE_CHILD.lock() {
+        *guard = Some(child);
+    }
+    if let Some(stderr) = stderr {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().flatten() {
+                eprintln!("[mobile-control][lark][stderr] {}", line);
+            }
+        });
+    }
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().flatten() {
+            if !LARK_BRIDGE_ACTIVE.load(Ordering::SeqCst) {
+                break;
+            }
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&line) else {
+                println!("[mobile-control][lark][stdout] {}", line);
+                continue;
+            };
+            println!("[mobile-control][lark][event] {}", payload);
+            match json_string(&payload, &["type"]).as_str() {
+                "ready" => {
+                    update_channel_status(&app, "lark", "飞书智能体已在线，等待手机消息", "")
+                }
+                "message" => {
+                    if let Err(error) = handle_lark_bridge_message(&app, &payload) {
+                        update_channel_status(&app, "lark", "飞书消息处理失败", &error);
+                    }
+                }
+                "status" => {
+                    let message = json_string(&payload, &["message"]);
+                    update_channel_status(&app, "lark", &message, "");
+                }
+                "failure" => {
+                    let error = json_string(&payload, &["message"]);
+                    update_channel_status(&app, "lark", "飞书消息桥启动失败", &error);
+                }
+                _ => {}
+            }
+        }
+        LARK_BRIDGE_ACTIVE.store(false, Ordering::SeqCst);
+        if let Ok(mut guard) = LARK_BRIDGE_CHILD.lock() {
+            let _ = guard.take().map(|mut child| child.wait());
+        }
+        println!("[mobile-control][lark] bridge worker exited");
+    });
+    Ok(())
+}
+
+fn stop_lark_bridge() {
+    println!("[mobile-control][lark] stopping bridge");
+    LARK_BRIDGE_ACTIVE.store(false, Ordering::SeqCst);
+    if let Ok(mut guard) = LARK_BRIDGE_CHILD.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+fn selected_thread_for_message(
+    state: &ToolboxState,
+    binding: &MobileChannelBinding,
+) -> Option<CodexThreadRecord> {
+    state
+        .synced_codex_threads
+        .iter()
+        .find(|thread| {
+            thread.id == binding.thread_id || thread.id == state.selected_mobile_thread_id
+        })
+        .cloned()
+}
+
+fn handle_qq_gateway_message(
+    app: &tauri::AppHandle,
+    payload: &serde_json::Value,
+) -> Result<(), String> {
+    let text = json_string(payload, &["content", "text"]);
+    if text.is_empty() {
+        return Ok(());
+    }
+    let state = read_toolbox_state(app);
+    let binding = state
+        .mobile_channels
+        .iter()
+        .find(|binding| binding.channel == "qq")
+        .cloned()
+        .ok_or("QQ 通道不存在")?;
+    let selected_thread = selected_thread_for_message(&state, &binding);
+    let cwd = selected_thread
+        .as_ref()
+        .map(|thread| thread.cwd.clone())
+        .unwrap_or_default();
+    let thread_id = selected_thread
+        .as_ref()
+        .map(|thread| thread.id.as_str())
+        .unwrap_or("");
+    update_channel_status(app, "qq", "收到 QQ 消息，正在发送给 Codex", "");
+    let reply = dispatch_codex_reply(thread_id, &text, &cwd)?;
+    send_qq_text_reply(&binding, payload, &reply)?;
+    update_channel_status(app, "qq", "Codex 回复已同步回 QQ", "");
+    Ok(())
+}
+
+fn start_qq_gateway(app: tauri::AppHandle, binding: MobileChannelBinding) -> Result<(), String> {
+    if QQ_GATEWAY_ACTIVE.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    let runner = ensure_qq_gateway_connector(&app).map_err(|error| {
+        QQ_GATEWAY_ACTIVE.store(false, Ordering::SeqCst);
+        error
+    })?;
+    let node = node_command_name().map_err(|error| {
+        QQ_GATEWAY_ACTIVE.store(false, Ordering::SeqCst);
+        error
+    })?;
+    let connector_dir = runner
+        .parent()
+        .ok_or("QQ 网关运行目录不存在")?
+        .to_path_buf();
+    let mut child = Command::new(node)
+        .arg(&runner)
+        .current_dir(connector_dir)
+        .env("QQ_APP_ID", binding.app_id.trim())
+        .env("QQ_APP_SECRET", binding.app_secret.trim())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            QQ_GATEWAY_ACTIVE.store(false, Ordering::SeqCst);
+            format!("启动 QQ 网关失败: {e}")
+        })?;
+    let stdout = child.stdout.take().ok_or("QQ 网关没有输出通道")?;
+    if let Ok(mut guard) = QQ_GATEWAY_CHILD.lock() {
+        *guard = Some(child);
+    }
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().flatten() {
+            if !QQ_GATEWAY_ACTIVE.load(Ordering::SeqCst) {
+                break;
+            }
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            match json_string(&payload, &["type"]).as_str() {
+                "ready" => update_channel_status(&app, "qq", "QQ 机器人已在线，等待手机消息", ""),
+                "status" => {
+                    let message = json_string(&payload, &["message"]);
+                    update_channel_status(&app, "qq", &message, "");
+                }
+                "message" => {
+                    if let Err(error) = handle_qq_gateway_message(&app, &payload) {
+                        update_channel_status(&app, "qq", "QQ 消息处理失败", &error);
+                    }
+                }
+                "failure" => {
+                    let error = json_string(&payload, &["message"]);
+                    update_channel_status(&app, "qq", "QQ 网关启动失败", &error);
+                }
+                _ => {}
+            }
+        }
+        QQ_GATEWAY_ACTIVE.store(false, Ordering::SeqCst);
+        if let Ok(mut guard) = QQ_GATEWAY_CHILD.lock() {
+            let _ = guard.take().map(|mut child| child.wait());
+        }
+    });
+    Ok(())
+}
+
+fn stop_qq_gateway() {
+    QQ_GATEWAY_ACTIVE.store(false, Ordering::SeqCst);
+    if let Ok(mut guard) = QQ_GATEWAY_CHILD.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+fn wechat_next_update_cursor(result: &serde_json::Value, previous: &str) -> String {
+    for source in [
+        Some(result),
+        result.get("data"),
+        result.get("result"),
+        result.get("body"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let value = json_string(
+            source,
+            &[
+                "get_updates_buf",
+                "getUpdatesBuf",
+                "next_get_updates_buf",
+                "nextGetUpdatesBuf",
+                "next_buf",
+                "nextBuf",
+                "buf",
+            ],
+        );
+        if !value.is_empty() {
+            return value;
+        }
+    }
+    previous.to_string()
+}
+
+fn wechat_update_items(result: &serde_json::Value) -> Vec<serde_json::Value> {
+    let mut items = Vec::new();
+    for source in [
+        Some(result),
+        result.get("data"),
+        result.get("result"),
+        result.get("body"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        for item in wechat_json_array(
+            source,
+            &[
+                "msgs",
+                "msg_list",
+                "msgList",
+                "message_list",
+                "messageList",
+                "messages",
+                "updates",
+                "update_list",
+                "updateList",
+            ],
+        ) {
+            items.push(item.clone());
+        }
+        if source.get("item_list").is_some() || source.get("msg").is_some() {
+            items.push(source.clone());
+        }
+    }
+    items
+}
+
+fn handle_wechat_bot_message(
+    app: &tauri::AppHandle,
+    payload: &serde_json::Value,
+) -> Result<(), String> {
+    let text = json_string(payload, &["content", "text"]);
+    if text.is_empty() {
+        return Ok(());
+    }
+    let state = read_toolbox_state(app);
+    let binding = state
+        .mobile_channels
+        .iter()
+        .find(|binding| binding.channel == "wechat")
+        .cloned()
+        .ok_or("微信通道不存在")?;
+    let selected_thread = selected_thread_for_message(&state, &binding);
+    let cwd = selected_thread
+        .as_ref()
+        .map(|thread| thread.cwd.clone())
+        .unwrap_or_default();
+    let thread_id = selected_thread
+        .as_ref()
+        .map(|thread| thread.id.as_str())
+        .unwrap_or("");
+    update_channel_status(app, "wechat", "收到微信消息，正在发送给 Codex", "");
+    let reply = dispatch_codex_reply(thread_id, &text, &cwd)?;
+    send_wechat_text_reply(&binding, payload, &reply)?;
+    update_channel_status(app, "wechat", "Codex 回复已同步回微信", "");
+    Ok(())
+}
+
+fn start_wechat_listener(
+    app: tauri::AppHandle,
+    binding: MobileChannelBinding,
+) -> Result<(), String> {
+    if WECHAT_LISTENER_ACTIVE.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    std::thread::spawn(move || {
+        let client = match build_http_client(45) {
+            Ok(client) => client,
+            Err(error) => {
+                update_channel_status(&app, "wechat", "微信监听启动失败", &error);
+                WECHAT_LISTENER_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
+        match wechat_request_json(
+            &client,
+            "POST",
+            &binding.base_url,
+            "ilink/bot/msg/notifystart",
+            &binding.bot_token,
+            serde_json::json!({ "base_info": wechat_bot_base_info() }),
+        ) {
+            Ok(result) if is_platform_code_ok(&result) => {
+                update_channel_status(&app, "wechat", "微信 iLink 已在线，等待手机消息", "")
+            }
+            Ok(result) => {
+                let err_msg = platform_error_message(&result, "接口返回异常");
+                // 检测 token 过期
+                if err_msg.to_lowercase().contains("session timeout")
+                    || err_msg.to_lowercase().contains("expired")
+                    || err_msg.to_lowercase().contains("token")
+                {
+                    update_channel_status(
+                        &app,
+                        "wechat",
+                        "微信 token 已过期，请清除绑定后重新扫码",
+                        &format!("错误详情：{}", err_msg),
+                    );
+                } else {
+                    update_channel_status(
+                        &app,
+                        "wechat",
+                        "微信监听启动失败",
+                        &err_msg,
+                    );
+                }
+                WECHAT_LISTENER_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+            Err(error) => {
+                update_channel_status(&app, "wechat", "微信监听启动失败", &error);
+                WECHAT_LISTENER_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+        }
+        let mut cursor = String::new();
+        let mut seen = HashSet::new();
+        while WECHAT_LISTENER_ACTIVE.load(Ordering::SeqCst) {
+            let result = match wechat_request_json(
+                &client,
+                "POST",
+                &binding.base_url,
+                "ilink/bot/getupdates",
+                &binding.bot_token,
+                serde_json::json!({
+                    "get_updates_buf": cursor,
+                    "base_info": wechat_bot_base_info(),
+                }),
+            ) {
+                Ok(result) => result,
+                Err(error) => {
+                    update_channel_status(&app, "wechat", "微信消息拉取失败", &error);
+                    std::thread::sleep(Duration::from_secs(3));
+                    continue;
+                }
+            };
+            cursor = wechat_next_update_cursor(&result, &cursor);
+            for item in wechat_update_items(&result) {
+                let Some(message) = parse_wechat_incoming_message(&item, &binding.account_id)
+                else {
+                    continue;
+                };
+                let key = json_string(&message, &["messageId", "eventId"]);
+                if !key.is_empty() && !seen.insert(key.clone()) {
+                    continue;
+                }
+                if seen.len() > 300 {
+                    seen.clear();
+                }
+                if let Err(error) = handle_wechat_bot_message(&app, &message) {
+                    update_channel_status(&app, "wechat", "微信消息处理失败", &error);
+                }
+            }
+        }
+        let _ = wechat_request_json(
+            &client,
+            "POST",
+            &binding.base_url,
+            "ilink/bot/msg/notifystop",
+            &binding.bot_token,
+            serde_json::json!({ "base_info": wechat_bot_base_info() }),
+        );
+        update_channel_status(&app, "wechat", "微信监听已停止", "");
+        WECHAT_LISTENER_ACTIVE.store(false, Ordering::SeqCst);
+    });
+    Ok(())
+}
+
+fn stop_wechat_listener(app: &tauri::AppHandle) {
+    WECHAT_LISTENER_ACTIVE.store(false, Ordering::SeqCst);
+    let state = read_toolbox_state(app);
+    if let Some(binding) = state
+        .mobile_channels
+        .iter()
+        .find(|binding| binding.channel == "wechat" && !binding.bot_token.trim().is_empty())
+    {
+        if let Ok(client) = build_http_client(10) {
+            let _ = wechat_request_json(
+                &client,
+                "POST",
+                &binding.base_url,
+                "ilink/bot/msg/notifystop",
+                &binding.bot_token,
+                serde_json::json!({ "base_info": wechat_bot_base_info() }),
+            );
+        }
+    }
+}
+
+fn build_toolbox_snapshot(app: &tauri::AppHandle) -> ToolboxSnapshot {
+    let state = read_toolbox_state(app);
+    let config_path = codex_config_path();
+    let config_text = fs::read_to_string(&config_path).unwrap_or_default();
+    let current_source = state.plugin_marketplace_input.clone();
+    ToolboxSnapshot {
+        plugin_marketplace_input: current_source.clone(),
+        plugin_marketplaces: list_plugin_marketplaces(&config_text, &current_source),
+        session_bindings: state.session_bindings.clone(),
+        codex_threads: Vec::new(),
+        synced_codex_threads: state.synced_codex_threads.clone(),
+        session_sync: state.session_sync.clone(),
+        mobile_channels: state.mobile_channels.clone(),
+        selected_mobile_thread_id: state.selected_mobile_thread_id.clone(),
+        mobile_remote: state.mobile_remote.clone(),
+        codex_home: codex_config_dir().to_string_lossy().to_string(),
+        codex_config_path: config_path.to_string_lossy().to_string(),
+    }
 }
 
 /// 编辑器信息
@@ -1845,6 +6223,1020 @@ fn import_codex_current(app: tauri::AppHandle, name: String) -> Result<CodexProf
 #[tauri::command]
 fn get_codex_status() -> Option<LocationStatus> {
     read_codex_status()
+}
+
+#[tauri::command]
+fn get_codex_toolbox(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn apply_plugin_marketplace(
+    app: tauri::AppHandle,
+    source: String,
+) -> Result<ToolboxSnapshot, String> {
+    let _ = source;
+    let trimmed = default_plugin_marketplace_url();
+    let config_path = codex_config_path();
+    let existing = fs::read_to_string(&config_path).unwrap_or_default();
+    let source_type = plugin_marketplace_source_type(trimmed);
+    let cleaned = remove_all_plugin_marketplace_sections(&existing);
+    let next = ensure_plugin_marketplace_section(
+        &cleaned,
+        default_plugin_marketplace_name(),
+        trimmed,
+        source_type,
+    );
+    let parent = config_path
+        .parent()
+        .ok_or("Codex 配置目录不存在")?
+        .to_path_buf();
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    fs::write(&config_path, next).map_err(|e| e.to_string())?;
+
+    let mut state = read_toolbox_state(&app);
+    state.plugin_marketplace_input = default_plugin_marketplace_url().to_string();
+    write_toolbox_state(&app, &state)?;
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn sync_codex_sessions(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    let threads = read_codex_threads(200);
+    let mut state = read_toolbox_state(&app);
+    state.synced_codex_threads = threads;
+    state.session_sync = CodexSessionSyncState {
+        last_synced_at: chrono_now(),
+        total: state.synced_codex_threads.len(),
+    };
+    if state.selected_mobile_thread_id.trim().is_empty() {
+        if let Some(first) = state.synced_codex_threads.first() {
+            state.selected_mobile_thread_id = first.id.clone();
+        }
+    }
+    write_toolbox_state(&app, &state)?;
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn select_mobile_thread(
+    app: tauri::AppHandle,
+    thread_id: String,
+) -> Result<ToolboxSnapshot, String> {
+    let normalized = thread_id.trim().to_string();
+    if normalized.is_empty() {
+        return Err("请选择要控制的会话".into());
+    }
+    let mut state = read_toolbox_state(&app);
+    let threads = if state.synced_codex_threads.is_empty() {
+        read_codex_threads(200)
+    } else {
+        state.synced_codex_threads.clone()
+    };
+    let thread = threads
+        .into_iter()
+        .find(|item| item.id == normalized)
+        .ok_or("会话未找到，请先同步本地历史")?;
+    state.selected_mobile_thread_id = thread.id.clone();
+    state.mobile_remote.active_thread_id = thread.id;
+    state.mobile_remote.active_thread_name = thread.thread_name;
+    write_toolbox_state(&app, &state)?;
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn configure_mobile_channel(
+    app: tauri::AppHandle,
+    channel: String,
+    app_id: String,
+    app_secret: String,
+    bot_token: String,
+    account_id: String,
+    base_url: String,
+    user_id: String,
+    bot_open_id: String,
+) -> Result<ToolboxSnapshot, String> {
+    let normalized_channel = normalize_mobile_channel(&channel);
+    if !["lark", "wechat", "qq"].contains(&normalized_channel.as_str()) {
+        return Err("不支持的手机通道".into());
+    }
+    let mut state = read_toolbox_state(&app);
+    if !state
+        .mobile_channels
+        .iter()
+        .any(|binding| binding.channel == normalized_channel)
+    {
+        state
+            .mobile_channels
+            .push(default_mobile_channel(&normalized_channel));
+    }
+    if let Some(binding) = state
+        .mobile_channels
+        .iter_mut()
+        .find(|binding| binding.channel == normalized_channel)
+    {
+        binding.app_id = app_id.trim().to_string();
+        binding.app_secret = app_secret.trim().to_string();
+        binding.bot_token = bot_token.trim().to_string();
+        binding.account_id = account_id.trim().to_string();
+        binding.base_url = normalize_mobile_base_url(&base_url, &normalized_channel);
+        binding.user_id = user_id.trim().to_string();
+        binding.bot_open_id = bot_open_id.trim().to_string();
+        binding.credential_status = if mobile_channel_has_credentials(binding) {
+            "已保存平台凭据，等待开启连接".into()
+        } else {
+            mobile_channel_credential_hint(&normalized_channel).into()
+        };
+        binding.last_error.clear();
+        binding.updated_at = chrono_now();
+    }
+    if state
+        .mobile_channels
+        .iter()
+        .find(|binding| binding.channel == normalized_channel)
+        .map(mobile_channel_has_credentials)
+        .unwrap_or(false)
+    {
+        attach_selected_thread_to_mobile_channel(&mut state, &normalized_channel);
+    }
+    write_toolbox_state(&app, &state)?;
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn start_lark_bot_registration(
+    app: tauri::AppHandle,
+    create_only: Option<bool>,
+) -> Result<ToolboxSnapshot, String> {
+    if LARK_REGISTRATION_ACTIVE.swap(true, Ordering::SeqCst) {
+        return Ok(build_toolbox_snapshot(&app));
+    }
+    let create_only = create_only.unwrap_or(true);
+    let existing_app_id = read_toolbox_state(&app)
+        .mobile_channels
+        .iter()
+        .find(|binding| binding.channel == "lark")
+        .map(|binding| binding.app_id.clone())
+        .unwrap_or_default();
+
+    let client = match build_http_client(15) {
+        Ok(client) => client,
+        Err(error) => {
+            LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
+            return Err(error);
+        }
+    };
+    let (device_code, launcher_url, interval) =
+        match request_lark_registration(&client, create_only, &existing_app_id) {
+            Ok(result) => result,
+            Err(error) => {
+                LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
+                return Err(error);
+            }
+        };
+    if let Err(error) = open_with_system(&launcher_url) {
+        LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
+        return Err(error);
+    }
+    let mut state = read_toolbox_state(&app);
+    if let Some(binding) = state
+        .mobile_channels
+        .iter_mut()
+        .find(|binding| binding.channel == "lark")
+    {
+        binding.base_url = default_mobile_channel_base_url("lark").into();
+        binding.launcher_url = launcher_url;
+        binding.qr_url = binding.launcher_url.clone();
+        binding.qr_device_code = device_code.clone();
+        binding.qr_status = if create_only {
+            "已打开飞书创建页面，创建完成后会自动填充 AppID/AppSecret".into()
+        } else {
+            "已打开飞书换绑页面，完成授权后会自动读取 AppID/AppSecret".into()
+        };
+        binding.credential_status = "等待飞书创建/授权确认".into();
+        binding.status = if create_only {
+            "等待飞书机器人创建完成".into()
+        } else {
+            "等待飞书已有机器人授权完成".into()
+        };
+        binding.last_error.clear();
+        binding.qr_started_at = chrono_now();
+        binding.updated_at = chrono_now();
+    }
+    write_toolbox_state(&app, &state)?;
+    start_lark_registration_poll_worker(app.clone(), device_code, interval);
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn poll_lark_bot_registration(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    let state = read_toolbox_state(&app);
+    let binding = state
+        .mobile_channels
+        .iter()
+        .find(|binding| binding.channel == "lark")
+        .cloned()
+        .ok_or("飞书通道不存在")?;
+    if binding.qr_device_code.trim().is_empty() {
+        return Ok(build_toolbox_snapshot(&app));
+    }
+    let client = build_http_client(15)?;
+    let poll = match poll_lark_registration_device(&client, &binding.qr_device_code) {
+        Ok(poll) => poll,
+        Err(error) => {
+            update_channel_status(&app, "lark", "飞书自动读取 AppID/AppSecret 失败", &error);
+            return Ok(build_toolbox_snapshot(&app));
+        }
+    };
+    apply_lark_registration_poll(&app, poll)
+}
+
+#[tauri::command]
+fn open_lark_bot_launcher(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    match start_lark_bot_registration(app.clone(), Some(true)) {
+        Ok(snapshot) => Ok(snapshot),
+        Err(_) => {
+            let url = lark_create_bot_launcher_url();
+            open_with_system(url)?;
+            let mut state = read_toolbox_state(&app);
+            if let Some(binding) = state
+                .mobile_channels
+                .iter_mut()
+                .find(|binding| binding.channel == "lark")
+            {
+                binding.launcher_url = url.into();
+                binding.qr_url = url.into();
+                binding.qr_status =
+                    "已打开飞书创建页面；当前网络未能启动自动填充，请稍后重试自动创建".into();
+                binding.updated_at = chrono_now();
+            }
+            write_toolbox_state(&app, &state)?;
+            Ok(build_toolbox_snapshot(&app))
+        }
+    }
+}
+
+#[tauri::command]
+fn clear_mobile_channel_binding(
+    app: tauri::AppHandle,
+    channel: String,
+) -> Result<ToolboxSnapshot, String> {
+    let normalized_channel = normalize_mobile_channel(&channel);
+    match normalized_channel.as_str() {
+        "lark" => stop_lark_bridge(),
+        "qq" => stop_qq_gateway(),
+        "wechat" => stop_wechat_listener(&app),
+        _ => {}
+    }
+    let mut state = read_toolbox_state(&app);
+    state
+        .session_bindings
+        .retain(|binding| normalize_mobile_channel(&binding.channel) != normalized_channel);
+    if let Some(binding) = state
+        .mobile_channels
+        .iter_mut()
+        .find(|binding| binding.channel == normalized_channel)
+    {
+        let base_url = default_mobile_channel_base_url(&normalized_channel).to_string();
+        *binding = MobileChannelBinding {
+            channel: normalized_channel.clone(),
+            status: "未绑定".into(),
+            base_url,
+            updated_at: chrono_now(),
+            ..MobileChannelBinding::default()
+        };
+    }
+    write_toolbox_state(&app, &state)?;
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    if QQ_QR_ACTIVE.swap(true, Ordering::SeqCst) {
+        let _ = write_mobile_channel_qr_state(
+            &app,
+            "qq",
+            "QQ 扫码绑定正在进行中，请稍等二维码刷新",
+            "",
+            "",
+            "",
+        );
+        return Ok(build_toolbox_snapshot(&app));
+    }
+
+    let _ = write_mobile_channel_qr_state(&app, "qq", "正在准备 QQ 扫码绑定服务...", "", "", "");
+    let app_for_thread = app.clone();
+    std::thread::spawn(move || {
+        let runner = match ensure_qq_qr_connector(&app_for_thread) {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = write_mobile_channel_qr_state(
+                    &app_for_thread,
+                    "qq",
+                    "QQ 扫码绑定失败",
+                    "",
+                    "",
+                    &error,
+                );
+                QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
+        let node = match node_command_name() {
+            Ok(command) => command,
+            Err(error) => {
+                let _ = write_mobile_channel_qr_state(
+                    &app_for_thread,
+                    "qq",
+                    "QQ 扫码绑定失败",
+                    "",
+                    "",
+                    &error,
+                );
+                QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
+        let connector_dir = match runner.parent() {
+            Some(parent) => parent.to_path_buf(),
+            None => {
+                let _ = write_mobile_channel_qr_state(
+                    &app_for_thread,
+                    "qq",
+                    "QQ 扫码绑定失败",
+                    "",
+                    "",
+                    "QQ 扫码运行目录不存在",
+                );
+                QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
+        let mut child = match Command::new(node)
+            .arg(&runner)
+            .current_dir(connector_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => {
+                let _ = write_mobile_channel_qr_state(
+                    &app_for_thread,
+                    "qq",
+                    "QQ 扫码绑定失败",
+                    "",
+                    "",
+                    &format!("启动 QQ 扫码服务失败: {error}"),
+                );
+                QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                let _ = write_mobile_channel_qr_state(
+                    &app_for_thread,
+                    "qq",
+                    "QQ 扫码绑定失败",
+                    "",
+                    "",
+                    "QQ 扫码服务没有输出通道",
+                );
+                let _ = child.kill();
+                let _ = child.wait();
+                QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().flatten() {
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            let event_type = json_string(&payload, &["type"]);
+            match event_type.as_str() {
+                "qr" => {
+                    let url = json_string(&payload, &["url"]);
+                    let mut data_url = json_string(&payload, &["dataUrl", "data_url"]);
+                    // QQ connector 应返回 data:image/ 格式二维码，但若失败或返回 URL，用本地生成兜底。
+                    if !data_url.starts_with("data:image/") && !url.is_empty() {
+                        data_url = generate_qr_code_data_url(&url).unwrap_or_default();
+                    }
+                    if data_url.is_empty() || !data_url.starts_with("data:image/") {
+                        let _ = write_mobile_channel_qr_state(
+                            &app_for_thread,
+                            "qq",
+                            "QQ 扫码绑定失败",
+                            "",
+                            "",
+                            "QQ connector 未返回可用二维码且本地生成失败",
+                        );
+                        break;
+                    }
+                    let _ = write_mobile_channel_qr_state(
+                        &app_for_thread,
+                        "qq",
+                        "请用 QQ 扫描二维码完成机器人绑定",
+                        &url,
+                        &data_url,
+                        "",
+                    );
+                }
+                "success" => {
+                    let credentials_raw = payload
+                        .get("credentials")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({}));
+
+                    // QQ connector 返回的 credentials 是数组 [{"appId":"...","appSecret":"..."}]，取第一个元素
+                    let credentials = if credentials_raw.is_array() {
+                        credentials_raw.get(0).cloned().unwrap_or_else(|| serde_json::json!({}))
+                    } else {
+                        credentials_raw
+                    };
+
+                    let app_id = json_string(&credentials, &["appId", "appid", "app_id", "id"]);
+                    let app_secret = json_string(
+                        &credentials,
+                        &[
+                            "appSecret",
+                            "appsecret",
+                            "app_secret",
+                            "clientSecret",
+                            "client_secret",
+                        ],
+                    );
+                    let _ = update_mobile_channel_credentials_from_qr(
+                        &app_for_thread,
+                        "qq",
+                        &app_id,
+                        &app_secret,
+                        "",
+                        "",
+                        "",
+                        "",
+                    );
+                    break;
+                }
+                "expired" => {
+                    let _ = write_mobile_channel_qr_state(
+                        &app_for_thread,
+                        "qq",
+                        "二维码已过期，请重新绑定",
+                        "",
+                        "",
+                        "QQ 扫码二维码已过期",
+                    );
+                    break;
+                }
+                "failure" => {
+                    let message = json_string(&payload, &["message"]);
+                    let _ = write_mobile_channel_qr_state(
+                        &app_for_thread,
+                        "qq",
+                        "QQ 扫码绑定失败",
+                        "",
+                        "",
+                        &message,
+                    );
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let _ = child.wait();
+        QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+    });
+
+    Ok(build_toolbox_snapshot(&app))
+}
+
+fn wechat_qr_data_url_from_content(value: &str) -> String {
+    let raw = value.trim();
+    if raw.starts_with("data:image/") {
+        raw.to_string()
+    } else {
+        let compact = raw.replace(['\r', '\n', ' '], "");
+        let image_mime = if compact.starts_with("iVBORw0KGgo") {
+            Some("image/png")
+        } else if compact.starts_with("/9j/") {
+            Some("image/jpeg")
+        } else if compact.starts_with("R0lGOD") {
+            Some("image/gif")
+        } else if compact.starts_with("UklGR") {
+            Some("image/webp")
+        } else {
+            None
+        };
+        image_mime
+            .map(|mime| format!("data:{mime};base64,{compact}"))
+            .unwrap_or_default()
+    }
+}
+
+fn request_wechat_qr_binding(app: &tauri::AppHandle) -> Result<(), String> {
+    let client = build_http_client(15)?;
+    let base_url = default_mobile_channel_base_url("wechat");
+    let url = format!("{base_url}/ilink/bot/get_bot_qrcode?bot_type=3");
+    let response = client
+        .post(&url)
+        .json(&serde_json::json!({ "local_token_list": [] }))
+        .send()
+        .map_err(|e| format!("微信二维码请求失败: {e}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|e| format!("微信二维码响应读取失败: {e}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "微信二维码接口返回 HTTP {}：{}",
+            status.as_u16(),
+            body
+        ));
+    }
+    let result: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("微信二维码返回不是 JSON: {e}; {body}"))?;
+    if !is_platform_code_ok(&result) {
+        return Err(format!(
+            "微信二维码生成失败：{}",
+            platform_error_message(&result, "接口返回异常")
+        ));
+    }
+    let qrcode = json_string(&result, &["qrcode"]);
+    let image_content = json_string(&result, &["qrcode_img_content", "qrcodeImageContent"]);
+    let qr_url = json_string(&result, &["qrcode_url", "qrcodeUrl", "url"]);
+    if qrcode.is_empty() {
+        return Err(format!("微信二维码接口未返回绑定码：{result}"));
+    }
+
+    let mut qr_data_url = wechat_qr_data_url_from_content(&image_content);
+    if qr_data_url.is_empty()
+        && (image_content.starts_with("http://") || image_content.starts_with("https://"))
+    {
+        // 微信 iLink 返回的 qrcode_img_content 是个 liteapp 短链(HTML页面),不是真图片。
+        // 用本地 qrcode crate 把这个 URL 编码成二维码图片,用户扫短链即可绑定。
+        qr_data_url = generate_qr_code_data_url(&image_content).unwrap_or_default();
+    }
+    if qr_data_url.is_empty() && (qr_url.starts_with("http://") || qr_url.starts_with("https://")) {
+        qr_data_url = generate_qr_code_data_url(&qr_url).unwrap_or_default();
+    }
+    if qr_data_url
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("data:image/svg+xml")
+    {
+        qr_data_url.clear();
+    }
+    if qr_data_url.is_empty() {
+        return Err("微信接口没有返回真实可扫码二维码图片，已拒绝展示文本二维码；请重新生成或检查 iLink 接口返回".into());
+    }
+
+    let mut state = read_toolbox_state(app);
+    if let Some(binding) = state
+        .mobile_channels
+        .iter_mut()
+        .find(|binding| binding.channel == "wechat")
+    {
+        binding.qr_url.clear();
+        binding.qr_data_url = qr_data_url.clone();
+        binding.qr_device_code = qrcode;
+        binding.qr_status = "请用手机微信扫描二维码，并在手机上确认绑定".into();
+        binding.base_url = base_url.into();
+        binding.qr_started_at = chrono_now();
+        binding.updated_at = chrono_now();
+        binding.last_error.clear();
+    }
+    write_toolbox_state(app, &state)
+}
+
+#[tauri::command]
+fn start_wechat_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    if WECHAT_QR_ACTIVE.swap(true, Ordering::SeqCst) {
+        let _ = write_mobile_channel_qr_state(
+            &app,
+            "wechat",
+            "微信二维码正在生成中，请稍等",
+            "",
+            "",
+            "",
+        );
+        return Ok(build_toolbox_snapshot(&app));
+    }
+
+    let _ = write_mobile_channel_qr_state(&app, "wechat", "正在请求微信绑定二维码...", "", "", "");
+    let app_for_thread = app.clone();
+    std::thread::spawn(move || {
+        if let Err(error) = request_wechat_qr_binding(&app_for_thread) {
+            let _ = write_mobile_channel_qr_state(
+                &app_for_thread,
+                "wechat",
+                "微信二维码生成失败",
+                "",
+                "",
+                &error,
+            );
+        }
+        WECHAT_QR_ACTIVE.store(false, Ordering::SeqCst);
+    });
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn poll_wechat_qr_binding(
+    app: tauri::AppHandle,
+    verify_code: Option<String>,
+) -> Result<ToolboxSnapshot, String> {
+    let state = read_toolbox_state(&app);
+    let binding = state
+        .mobile_channels
+        .iter()
+        .find(|binding| binding.channel == "wechat")
+        .cloned()
+        .ok_or("微信通道不存在")?;
+    if binding.qr_device_code.trim().is_empty() {
+        return Err("请先生成微信绑定二维码".into());
+    }
+    let client = build_http_client(35)?;
+    let mut url = format!(
+        "{}/ilink/bot/get_qrcode_status?qrcode={}",
+        normalize_mobile_base_url(&binding.base_url, "wechat"),
+        percent_encode_query_value(&binding.qr_device_code)
+    );
+    if let Some(code) = verify_code {
+        if !code.trim().is_empty() {
+            url.push_str("&verify_code=");
+            url.push_str(&percent_encode_query_value(code.trim()));
+        }
+    }
+    let response = client
+        .get(&url)
+        .send()
+        .map_err(|e| format!("微信扫码状态查询失败: {e}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|e| format!("微信扫码状态响应读取失败: {e}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "微信扫码状态返回 HTTP {}：{}",
+            status.as_u16(),
+            body
+        ));
+    }
+    let result: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("微信扫码状态返回不是 JSON: {e}; {body}"))?;
+    let qr_status = json_string(&result, &["status"]);
+    if qr_status == "confirmed" {
+        let bot_token = json_string(&result, &["bot_token"]);
+        let account_id = json_string(&result, &["ilink_bot_id", "account_id"]);
+        let base_url = json_string(&result, &["baseurl", "base_url"]);
+        let user_id = json_string(&result, &["ilink_user_id", "user_id"]);
+        return update_mobile_channel_credentials_from_qr(
+            &app,
+            "wechat",
+            "",
+            "",
+            &bot_token,
+            &account_id,
+            &base_url,
+            &user_id,
+        );
+    }
+    let message = match qr_status.as_str() {
+        "scaned" => "微信已扫码，请在手机上确认",
+        "need_verifycode" => "微信需要验证码，请按手机提示输入验证码",
+        "expired" => "微信二维码已过期，请重新生成",
+        "binded_redirect" => "该微信机器人已绑定过，请重新生成或换绑",
+        _ => "等待微信扫码确认",
+    };
+    write_mobile_channel_qr_state(
+        &app,
+        "wechat",
+        message,
+        &binding.qr_url,
+        &binding.qr_data_url,
+        "",
+    )
+}
+
+#[tauri::command]
+fn bind_codex_thread(
+    app: tauri::AppHandle,
+    channel: String,
+    thread_id: String,
+    sync_enabled: bool,
+    note: Option<String>,
+) -> Result<ToolboxSnapshot, String> {
+    let normalized_channel = normalize_mobile_channel(&channel);
+    println!(
+        "[mobile-control][bind] request: channel={}, normalized={}, thread_id={}, sync_enabled={}, note={}",
+        channel,
+        normalized_channel,
+        thread_id,
+        sync_enabled,
+        note.as_deref().unwrap_or("")
+    );
+    if normalized_channel.is_empty() {
+        eprintln!("[mobile-control][bind] failed: empty channel");
+        return Err("绑定通道不能为空".into());
+    }
+    let state = read_toolbox_state(&app);
+    let thread_pool = if state.synced_codex_threads.is_empty() {
+        read_codex_threads(200)
+    } else {
+        state.synced_codex_threads.clone()
+    };
+    let thread = thread_pool
+        .into_iter()
+        .find(|item| item.id == thread_id)
+        .ok_or("会话未找到")?;
+    println!(
+        "[mobile-control][bind] found thread: channel={}, thread_id={}, thread_name={}, session_file={}, cwd={}",
+        normalized_channel,
+        thread.id,
+        thread.thread_name,
+        thread.session_file,
+        thread.cwd
+    );
+    let mut state = state;
+    let thread_id_value = thread.id.clone();
+    let thread_name_value = thread.thread_name.clone();
+    let session_file_value = thread.session_file.clone();
+    let updated_at_value = thread.updated_at.clone();
+    let cwd_value = thread.cwd.clone();
+    state
+        .session_bindings
+        .retain(|binding| normalize_mobile_channel(&binding.channel) != normalized_channel);
+    state.session_bindings.push(CodexSessionBinding {
+        channel: normalized_channel.clone(),
+        thread_id: thread_id_value.clone(),
+        thread_name: thread_name_value.clone(),
+        session_file: session_file_value.clone(),
+        updated_at: updated_at_value,
+        cwd: cwd_value,
+        sync_enabled,
+        last_synced_at: String::new(),
+        note: note.unwrap_or_default().trim().to_string(),
+    });
+    if let Some(binding) = state
+        .mobile_channels
+        .iter_mut()
+        .find(|binding| binding.channel == normalized_channel)
+    {
+        binding.thread_id = thread_id_value.clone();
+        binding.thread_name = thread_name_value.clone();
+        binding.session_file = session_file_value.clone();
+        binding.enabled = true;
+        binding.status = "已绑定，等待开启平台连接".into();
+        binding.last_error.clear();
+        binding.updated_at = chrono_now();
+    } else {
+        let mut mobile_binding = default_mobile_channel(&normalized_channel);
+        mobile_binding.thread_id = thread_id_value.clone();
+        mobile_binding.thread_name = thread_name_value.clone();
+        mobile_binding.session_file = session_file_value;
+        mobile_binding.enabled = true;
+        mobile_binding.status = "已绑定，等待开启平台连接".into();
+        mobile_binding.updated_at = chrono_now();
+        state.mobile_channels.push(mobile_binding);
+    }
+    state.selected_mobile_thread_id = thread_id_value.clone();
+    state.mobile_remote.active_thread_id = thread_id_value;
+    state.mobile_remote.active_thread_name = thread_name_value;
+    write_toolbox_state(&app, &state)?;
+    println!(
+        "[mobile-control][bind] saved: channel={}, thread_id={}",
+        normalized_channel, state.mobile_remote.active_thread_id
+    );
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn unbind_codex_thread(app: tauri::AppHandle, channel: String) -> Result<ToolboxSnapshot, String> {
+    let normalized_channel = normalize_mobile_channel(&channel);
+    println!(
+        "[mobile-control][unbind] request: channel={}, normalized={}",
+        channel, normalized_channel
+    );
+    let mut state = read_toolbox_state(&app);
+    state
+        .session_bindings
+        .retain(|binding| normalize_mobile_channel(&binding.channel) != normalized_channel);
+    if let Some(binding) = state
+        .mobile_channels
+        .iter_mut()
+        .find(|binding| binding.channel == normalized_channel)
+    {
+        binding.thread_id.clear();
+        binding.thread_name.clear();
+        binding.session_file.clear();
+        binding.enabled = false;
+        binding.listening = false;
+        binding.status = "未绑定".into();
+        binding.last_error.clear();
+        binding.updated_at = chrono_now();
+    }
+    write_toolbox_state(&app, &state)?;
+    println!(
+        "[mobile-control][unbind] saved: channel={}",
+        normalized_channel
+    );
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn start_mobile_remote(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    port: Option<u16>,
+) -> Result<ToolboxSnapshot, String> {
+    let _ = state;
+    let _ = port;
+    println!("[mobile-control][start] start_mobile_remote requested");
+    MOBILE_REMOTE_CANCEL_REQUESTED.store(false, Ordering::SeqCst);
+    let already_starting = MOBILE_REMOTE_START_ACTIVE.swap(true, Ordering::SeqCst);
+    let mut toolbox_state = read_toolbox_state(&app);
+    toolbox_state.mobile_remote.enabled = true;
+    toolbox_state.mobile_remote.mode = "platform_bot".into();
+    toolbox_state.mobile_remote.listen_addr = "platform".into();
+    toolbox_state.mobile_remote.last_started_at = chrono_now();
+    toolbox_state.mobile_remote.last_error.clear();
+    toolbox_state.mobile_remote.device_name = local_device_name();
+    toolbox_state.mobile_remote.local_ip = detect_local_ip();
+    for channel in toolbox_state.mobile_channels.iter_mut() {
+        if channel.enabled && !channel.thread_id.trim().is_empty() {
+            channel.listening = false;
+            channel.status = "正在连接平台...".into();
+            channel.last_error.clear();
+            channel.updated_at = chrono_now();
+        }
+    }
+    write_toolbox_state(&app, &toolbox_state)?;
+    if !already_starting {
+        println!("[mobile-control][start] spawning platform connection worker");
+        let app_for_thread = app.clone();
+        std::thread::spawn(move || run_mobile_remote_start(app_for_thread));
+    } else {
+        println!("[mobile-control][start] worker already starting, skip spawn");
+    }
+    Ok(build_toolbox_snapshot(&app))
+}
+
+fn run_mobile_remote_start(app: tauri::AppHandle) {
+    println!("[mobile-control][start-worker] begin");
+    let mut toolbox_state = read_toolbox_state(&app);
+    let mut connected_count = 0usize;
+    let mut last_error = String::new();
+    let mut lark_bridge_binding: Option<MobileChannelBinding> = None;
+    let mut qq_gateway_binding: Option<MobileChannelBinding> = None;
+    let mut wechat_listener_binding: Option<MobileChannelBinding> = None;
+    for channel in toolbox_state.mobile_channels.iter_mut() {
+        if MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst) {
+            println!("[mobile-control][start-worker] cancelled before channel probe");
+            MOBILE_REMOTE_START_ACTIVE.store(false, Ordering::SeqCst);
+            return;
+        }
+        if channel.enabled && !channel.thread_id.trim().is_empty() {
+            println!(
+                "[mobile-control][start-worker] probing channel: channel={}, thread_id={}, thread_name={}",
+                channel.channel, channel.thread_id, channel.thread_name
+            );
+            if !mobile_channel_has_credentials(channel) {
+                channel.listening = false;
+                channel.credential_status = mobile_channel_credential_hint(&channel.channel).into();
+                channel.last_error = channel.credential_status.clone();
+                channel.status = "缺少平台凭据，无法开启连接".into();
+                channel.updated_at = chrono_now();
+                last_error = channel.last_error.clone();
+                eprintln!(
+                    "[mobile-control][start-worker] missing credentials: channel={}, error={}",
+                    channel.channel, channel.last_error
+                );
+                continue;
+            }
+            match probe_mobile_channel(channel) {
+                Ok((gateway_url, status)) => {
+                    println!(
+                        "[mobile-control][start-worker] probe ok: channel={}, gateway={}, status={}",
+                        channel.channel, gateway_url, status
+                    );
+                    connected_count += 1;
+                    channel.gateway_url = gateway_url;
+                    channel.listening = true;
+                    channel.status = status;
+                    channel.credential_status = "平台凭据已验证".into();
+                    channel.last_error.clear();
+                    channel.last_checked_at = chrono_now();
+                    channel.updated_at = chrono_now();
+                    match channel.channel.as_str() {
+                        "lark" => lark_bridge_binding = Some(channel.clone()),
+                        "qq" => qq_gateway_binding = Some(channel.clone()),
+                        "wechat" => wechat_listener_binding = Some(channel.clone()),
+                        _ => {}
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[mobile-control][start-worker] probe failed: channel={}, error={}",
+                        channel.channel, error
+                    );
+                    channel.listening = false;
+                    channel.status = "平台连接失败".into();
+                    channel.last_error = error.clone();
+                    channel.last_checked_at = chrono_now();
+                    channel.updated_at = chrono_now();
+                    last_error = error;
+                }
+            }
+        }
+    }
+    if MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst) {
+        println!("[mobile-control][start-worker] cancelled after channel probe");
+        MOBILE_REMOTE_START_ACTIVE.store(false, Ordering::SeqCst);
+        return;
+    }
+    if connected_count == 0 {
+        eprintln!(
+            "[mobile-control][start-worker] no channels connected: last_error={}",
+            last_error
+        );
+        toolbox_state.mobile_remote.enabled = false;
+        toolbox_state.mobile_remote.last_error = if last_error.is_empty() {
+            "没有可连接的手机通道，请先绑定对话并填写平台凭据".into()
+        } else {
+            last_error
+        };
+    }
+    let _ = write_toolbox_state(&app, &toolbox_state);
+    println!(
+        "[mobile-control][start-worker] state saved: enabled={}, connected_count={}",
+        toolbox_state.mobile_remote.enabled, connected_count
+    );
+    if toolbox_state.mobile_remote.enabled {
+        if let Some(binding) = lark_bridge_binding {
+            println!("[mobile-control][start-worker] starting lark bridge");
+            if let Err(error) = start_lark_bridge(app.clone(), binding) {
+                eprintln!(
+                    "[mobile-control][start-worker] lark bridge failed: {}",
+                    error
+                );
+                update_channel_status(&app, "lark", "飞书消息桥启动失败", &error);
+            }
+        }
+        if let Some(binding) = qq_gateway_binding {
+            println!("[mobile-control][start-worker] starting qq gateway");
+            if let Err(error) = start_qq_gateway(app.clone(), binding) {
+                eprintln!(
+                    "[mobile-control][start-worker] qq gateway failed: {}",
+                    error
+                );
+                update_channel_status(&app, "qq", "QQ 网关启动失败", &error);
+            }
+        }
+        if let Some(binding) = wechat_listener_binding {
+            println!("[mobile-control][start-worker] starting wechat listener");
+            if let Err(error) = start_wechat_listener(app.clone(), binding) {
+                eprintln!(
+                    "[mobile-control][start-worker] wechat listener failed: {}",
+                    error
+                );
+                update_channel_status(&app, "wechat", "微信监听启动失败", &error);
+            }
+        }
+    }
+    MOBILE_REMOTE_START_ACTIVE.store(false, Ordering::SeqCst);
+    println!("[mobile-control][start-worker] finished");
+}
+
+#[tauri::command]
+fn stop_mobile_remote(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+) -> Result<ToolboxSnapshot, String> {
+    let _ = state;
+    println!("[mobile-control][stop] stop_mobile_remote requested");
+    MOBILE_REMOTE_CANCEL_REQUESTED.store(true, Ordering::SeqCst);
+    MOBILE_REMOTE_START_ACTIVE.store(false, Ordering::SeqCst);
+    stop_lark_bridge();
+    stop_qq_gateway();
+    stop_wechat_listener(&app);
+    let mut toolbox_state = read_toolbox_state(&app);
+    toolbox_state.mobile_remote.enabled = false;
+    toolbox_state.mobile_remote.last_error.clear();
+    toolbox_state.mobile_remote.local_ip = detect_local_ip();
+    for channel in toolbox_state.mobile_channels.iter_mut() {
+        channel.listening = false;
+        if channel.enabled {
+            channel.status = "已绑定，平台连接已停止".into();
+            channel.updated_at = chrono_now();
+        }
+    }
+    write_toolbox_state(&app, &toolbox_state)?;
+    println!("[mobile-control][stop] stopped and state saved");
+    Ok(build_toolbox_snapshot(&app))
 }
 
 // ── Skills Commands ──────────────────────────────────
@@ -3768,6 +9160,13 @@ fn chrono_now() -> String {
     format!("{}", d.as_millis())
 }
 
+fn chrono_timestamp_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
+}
+
 // ── App Entry ───────────────────────────────────────
 
 #[cfg(test)]
@@ -3846,6 +9245,133 @@ mod tests {
             !settings.never_show_usage_guide,
             "usage guide should show by default until the user disables it"
         );
+    }
+
+    #[test]
+    fn remove_all_plugin_marketplace_sections_keeps_other_config() {
+        let config = r#"model = "gpt-5"
+
+[marketplaces.old]
+source = "https://example.test/old.git"
+source_type = "git"
+
+[model_providers.customer]
+name = "customer"
+
+[marketplaces.openai-bundled]
+source = "C:\\bundle"
+source_type = "local"
+"#;
+
+        let cleaned = remove_all_plugin_marketplace_sections(config);
+
+        assert!(cleaned.contains(r#"model = "gpt-5""#));
+        assert!(cleaned.contains("[model_providers.customer]"));
+        assert!(!cleaned.contains("[marketplaces."));
+    }
+
+    #[test]
+    fn normalize_toolbox_state_adds_mobile_channels() {
+        let state = normalize_toolbox_state(ToolboxState::default());
+
+        for channel in ["lark", "wechat", "qq"] {
+            assert!(
+                state
+                    .mobile_channels
+                    .iter()
+                    .any(|item| item.channel == channel),
+                "{channel} channel should be present"
+            );
+        }
+        assert_eq!(
+            state.plugin_marketplace_input,
+            default_plugin_marketplace_url()
+        );
+        assert_eq!(state.mobile_remote.mode, "platform_bot");
+    }
+
+    #[test]
+    fn normalize_toolbox_state_sets_mobile_channel_defaults() {
+        let state = normalize_toolbox_state(ToolboxState::default());
+        let lark = state
+            .mobile_channels
+            .iter()
+            .find(|item| item.channel == "lark")
+            .expect("lark channel");
+        let wechat = state
+            .mobile_channels
+            .iter()
+            .find(|item| item.channel == "wechat")
+            .expect("wechat channel");
+
+        assert_eq!(lark.base_url, "https://open.feishu.cn");
+        assert_eq!(wechat.base_url, "https://ilinkai.weixin.qq.com");
+    }
+
+    #[test]
+    fn normalize_toolbox_state_clears_stale_text_qr_cache() {
+        let mut state = ToolboxState::default();
+        let mut qq = default_mobile_channel("qq");
+        qq.qr_url = "raw-internal-token".into();
+        qq.qr_data_url = "data:image/png;base64,abc".into();
+        qq.qr_started_at = chrono_timestamp_millis().to_string();
+        state.mobile_channels.push(qq);
+        let mut wechat = default_mobile_channel("wechat");
+        wechat.qr_device_code = "device-code".into();
+        wechat.qr_data_url = "data:image/svg+xml;base64,abc".into();
+        wechat.qr_started_at = chrono_timestamp_millis().to_string();
+        state.mobile_channels.push(wechat);
+
+        let state = normalize_toolbox_state(state);
+        let qq = state
+            .mobile_channels
+            .iter()
+            .find(|item| item.channel == "qq")
+            .expect("qq channel");
+        let wechat = state
+            .mobile_channels
+            .iter()
+            .find(|item| item.channel == "wechat")
+            .expect("wechat channel");
+
+        assert!(qq.qr_data_url.is_empty());
+        assert!(qq.qr_url.is_empty());
+        assert!(wechat.qr_data_url.is_empty());
+        assert!(wechat.qr_device_code.is_empty());
+    }
+
+    #[test]
+    fn normalize_toolbox_state_keeps_fresh_platform_qr_cache() {
+        let mut state = ToolboxState::default();
+        let mut qq = default_mobile_channel("qq");
+        qq.qr_url = "https://bots.qq.com/connect/abc".into();
+        qq.qr_data_url = "data:image/png;base64,abc".into();
+        qq.qr_started_at = chrono_timestamp_millis().to_string();
+        state.mobile_channels.push(qq);
+
+        let state = normalize_toolbox_state(state);
+        let qq = state
+            .mobile_channels
+            .iter()
+            .find(|item| item.channel == "qq")
+            .expect("qq channel");
+
+        assert_eq!(qq.qr_url, "https://bots.qq.com/connect/abc");
+        assert_eq!(qq.qr_data_url, "data:image/png;base64,abc");
+    }
+
+    #[test]
+    fn mobile_channel_credentials_require_platform_specific_fields() {
+        let mut lark = default_mobile_channel("lark");
+        assert!(!mobile_channel_has_credentials(&lark));
+        lark.app_id = "cli_xxx".into();
+        lark.app_secret = "secret".into();
+        assert!(mobile_channel_has_credentials(&lark));
+
+        let mut wechat = default_mobile_channel("wechat");
+        assert!(!mobile_channel_has_credentials(&wechat));
+        wechat.bot_token = "token".into();
+        assert!(mobile_channel_has_credentials(&wechat));
     }
 
     #[test]
@@ -4186,6 +9712,22 @@ pub fn run() {
             switch_codex_profile,
             import_codex_current,
             get_codex_status,
+            get_codex_toolbox,
+            apply_plugin_marketplace,
+            sync_codex_sessions,
+            select_mobile_thread,
+            configure_mobile_channel,
+            start_lark_bot_registration,
+            poll_lark_bot_registration,
+            open_lark_bot_launcher,
+            clear_mobile_channel_binding,
+            start_qq_qr_binding,
+            start_wechat_qr_binding,
+            poll_wechat_qr_binding,
+            bind_codex_thread,
+            unbind_codex_thread,
+            start_mobile_remote,
+            stop_mobile_remote,
             get_app_settings,
             save_app_settings,
             get_app_paths,
