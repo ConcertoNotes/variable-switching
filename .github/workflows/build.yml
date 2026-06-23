@@ -24,7 +24,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -37,14 +37,22 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build Tauri app & publish to Release
-        uses: tauri-apps/tauri-action@v0
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tauriScript: npm run tauri
-          tagName: ${{ github.event.inputs.version || github.ref_name }}
-          releaseName: VarSwitch ${{ github.event.inputs.version || github.ref_name }}
-          releaseBody: 'See the assets below to download the installer for your platform.'
-          releaseDraft: false
+          uploadWorkflowArtifacts: true
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: VarSwitch ${{ github.event.inputs.version || github.ref_name }}
+          body: See the assets below to download the installer for your platform.
+          draft: false
           prerelease: false
+          files: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*setup.exe
