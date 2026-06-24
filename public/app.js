@@ -36,6 +36,7 @@ function mobileDebugError(label, error, payload = {}) {
 const LANG_STORAGE_KEY = "varswitch.lang";
 const THEME_STORAGE_KEY = "varswitch.theme";
 const APP_REPOSITORY_URL = "https://github.com/ConcertoNotes/variable-switching";
+const APP_DOWNLOAD_PAGE_URL = "https://download.varswitch.strova.top/";
 const CODEX_PRESETS = [
   {
     id: "openai",
@@ -359,6 +360,8 @@ const I18N = {
     settingsMinTrayDesc: "Hide to system tray when closing the window",
     settingsConfigDir: "Config directory",
     settingsClaudePath: "Claude settings",
+    settingsLogs: "Runtime logs",
+    settingsLogsDesc: "Open the logs folder to view or report issues",
     settingsOpen: "Open",
     settingsBrowse: "Browse",
     settingsSavePath: "Save Path",
@@ -376,6 +379,9 @@ const I18N = {
     settingsDefaultPath: "Default: {path}",
     settingsExport: "Export Profiles",
     settingsImport: "Import Profiles",
+    settingsAutoBackup: "Auto backup",
+    settingsAutoBackupDesc: "Snapshots are taken before every switch; you can roll back mistakes",
+    settingsViewBackups: "Roll back",
     toastSettingsSaved: "Settings saved",
     toastEditorPathSaved: "{name} path saved",
     toastEditorPathReset: "{name} path reset",
@@ -388,12 +394,12 @@ const I18N = {
     settingsLang: "Language",
     settingsTheme: "Theme",
     supportSectionTitle: "Quick Actions",
-    supportHintDefault: "Open the usage guide, check GitHub Releases for updates, or jump to the repository.",
-    supportHintUpdateAvailable: "{version} is available. Click again to open the GitHub release page.",
+    supportHintDefault: "Open the usage guide, check for updates, or jump to the repository.",
+    supportHintUpdateAvailable: "{version} is available. Click again to open the download page.",
     supportHintUpToDate: "You're already on the latest version: {version}.",
     usageGuideBtn: "Usage Guide",
     updateCheckBtn: "Check for Updates",
-    updateReleaseBtn: "Open Release Page {version}",
+    updateReleaseBtn: "Open Download Page {version}",
     githubRepoBtn: "GitHub Repo",
     usageGuideKicker: "Usage Guide",
     usageGuideTitle: "How to use VarSwitch",
@@ -410,10 +416,12 @@ const I18N = {
     usageGuideNever: "Never remind again",
     toastGuideDisabled: "Usage guide disabled",
     checkingUpdates: "Checking for Updates...",
-    openingReleasePage: "Opening Release Page...",
+    openingReleasePage: "Opening Download Page...",
     toastUpdateAvailable: "Update available: {version}",
+    updatePillText: "New version {version} is available",
+    updatePillAction: "Download",
     toastAlreadyLatest: "You're already on the latest version",
-    toastReleaseOpened: "Release page opened",
+    toastReleaseOpened: "Download page opened",
     toastRepoOpened: "Repository opened"
   },
   zh: {
@@ -684,6 +692,8 @@ const I18N = {
     settingsMinTrayDesc: "关闭窗口时隐藏到系统托盘",
     settingsConfigDir: "配置目录",
     settingsClaudePath: "Claude 设置",
+    settingsLogs: "运行日志",
+    settingsLogsDesc: "出现问题时可打开日志文件夹查看或反馈",
     settingsOpen: "打开",
     settingsBrowse: "浏览",
     settingsSavePath: "保存路径",
@@ -701,6 +711,9 @@ const I18N = {
     settingsDefaultPath: "默认路径：{path}",
     settingsExport: "导出配置",
     settingsImport: "导入配置",
+    settingsAutoBackup: "自动备份",
+    settingsAutoBackupDesc: "每次切换配置前自动快照，误操作可回滚",
+    settingsViewBackups: "回滚",
     toastSettingsSaved: "设置已保存",
     toastEditorPathSaved: "已保存 {name} 路径",
     toastEditorPathReset: "已重置 {name} 路径",
@@ -713,12 +726,12 @@ const I18N = {
     settingsLang: "语言",
     settingsTheme: "主题",
     supportSectionTitle: "快捷操作",
-    supportHintDefault: "打开使用说明、检查 GitHub Releases 更新，或直接访问仓库。",
-    supportHintUpdateAvailable: "发现新版本 {version}，再次点击即可打开 GitHub 发布页。",
+    supportHintDefault: "打开使用说明、检查更新，或直接访问仓库。",
+    supportHintUpdateAvailable: "发现新版本 {version}，再次点击即可打开下载页。",
     supportHintUpToDate: "当前已经是最新版本：{version}。",
     usageGuideBtn: "使用说明",
     updateCheckBtn: "检查更新",
-    updateReleaseBtn: "打开发布页 {version}",
+    updateReleaseBtn: "打开下载页 {version}",
     githubRepoBtn: "GitHub 仓库",
     usageGuideKicker: "使用说明",
     usageGuideTitle: "VarSwitch 使用说明",
@@ -735,10 +748,12 @@ const I18N = {
     usageGuideNever: "永不提醒",
     toastGuideDisabled: "已关闭使用说明提醒",
     checkingUpdates: "正在检查更新...",
-    openingReleasePage: "正在打开发布页...",
+    openingReleasePage: "正在打开下载页...",
     toastUpdateAvailable: "发现新版本：{version}",
+    updatePillText: "发现新版本 {version}",
+    updatePillAction: "下载更新",
     toastAlreadyLatest: "当前已经是最新版本",
-    toastReleaseOpened: "已打开发布页",
+    toastReleaseOpened: "已打开下载页",
     toastRepoOpened: "已打开仓库地址"
   }
 };
@@ -779,6 +794,7 @@ let isShowingGithubSkills = false;
 let updateInfo = null;
 let updateBusy = false;
 let updateBusyAction = null;
+let updatePillHideTimer = null;
 let appSettings = null;
 let appPaths = null;
 let usageGuideAutoHandled = false;
@@ -908,6 +924,38 @@ function renderUpdateButton() {
   }
 
   hintEl.textContent = currentSupportHint();
+  renderUpdatePill();
+}
+
+function renderUpdatePill() {
+  const banner = $("updatePillBanner");
+  const textEl = $("updatePillText");
+  const actionEl = $("updatePillAction");
+  if (!banner || !textEl || !actionEl) return;
+
+  if (!updateInfo?.hasUpdate || !updateInfo.latestVersion) {
+    banner.hidden = true;
+    return;
+  }
+
+  textEl.textContent = t("updatePillText", {
+    version: formatVersionTag(updateInfo.latestVersion)
+  });
+  actionEl.textContent = t("updatePillAction");
+  banner.hidden = false;
+}
+
+function hideUpdatePillSoon() {
+  if (updatePillHideTimer) {
+    clearTimeout(updatePillHideTimer);
+  }
+  updatePillHideTimer = setTimeout(() => {
+    const banner = $("updatePillBanner");
+    if (banner) {
+      banner.hidden = true;
+    }
+    updatePillHideTimer = null;
+  }, 3000);
 }
 
 function openUsageGuide() {
@@ -976,6 +1024,7 @@ async function checkForUpdates() {
         }),
         "success"
       );
+      hideUpdatePillSoon();
     } else {
       showToast(t("toastAlreadyLatest"), "success");
     }
@@ -988,10 +1037,29 @@ async function checkForUpdates() {
   }
 }
 
+async function checkForUpdatesOnStartup() {
+  if (updateBusy) return;
+  updateBusy = true;
+  updateBusyAction = "startup";
+  renderUpdateButton();
+
+  try {
+    updateInfo = await invoke("check_app_update");
+  } catch (error) {
+    console.warn("Startup update check failed:", error);
+  } finally {
+    updateBusy = false;
+    updateBusyAction = null;
+    renderUpdateButton();
+    if (updateInfo?.hasUpdate) {
+      hideUpdatePillSoon();
+    }
+  }
+}
+
 async function openUpdateReleasePage() {
   try {
-    const target = updateInfo?.releaseUrl || `${APP_REPOSITORY_URL}/releases`;
-    await invoke("open_external_target", { target });
+    await invoke("open_external_target", { target: APP_DOWNLOAD_PAGE_URL });
     showToast(t("toastReleaseOpened"), "success");
   } catch (error) {
     showToast(String(error), "error");
@@ -1209,10 +1277,15 @@ function applyLanguage() {
   $("settingsMinTrayDesc").textContent = t("settingsMinTrayDesc");
   $("settingsConfigDirLabel").textContent = t("settingsConfigDir");
   $("settingsClaudePathLabel").textContent = t("settingsClaudePath");
+  $("settingsLogsLabel").textContent = t("settingsLogs");
+  $("settingsLogsValue").textContent = t("settingsLogsDesc");
   $("settingsOpenConfigDir").textContent = t("settingsOpen");
   $("settingsOpenClaudeDir").textContent = t("settingsOpen");
   $("settingsExportBtn").textContent = t("settingsExport");
   $("settingsImportBtn").textContent = t("settingsImport");
+  $("settingsAutoBackupLabel").textContent = t("settingsAutoBackup");
+  $("settingsAutoBackupDesc").textContent = t("settingsAutoBackupDesc");
+  $("settingsViewBackupsBtn").textContent = t("settingsViewBackups");
   $("settingsSilentStartLabel").textContent = t("settingsSilentStart");
   $("settingsSilentStartDesc").textContent = t("settingsSilentStartDesc");
   if ($("settingsOverlay").classList.contains("open")) {
@@ -3611,6 +3684,7 @@ $("mcpPresetSearch").addEventListener("keydown", (e) => {
 
 $("usageGuideBtn").addEventListener("click", openUsageGuide);
 $("updateBtn").addEventListener("click", handleUpdateButton);
+$("updatePillBtn").addEventListener("click", openUpdateReleasePage);
 $("githubRepoBtn").addEventListener("click", openGitHubRepo);
 $("usageGuideCloseBtn").addEventListener("click", closeUsageGuide);
 $("usageGuideCloseIcon").addEventListener("click", closeUsageGuide);
@@ -3877,6 +3951,7 @@ async function openSettingsPanel() {
     await refreshSettingsPanelData();
   } catch (e) {
     console.error("加载设置失败:", e);
+    showToast("设置面板加载失败：" + String(e), "error");
   }
 }
 
@@ -3948,8 +4023,70 @@ $("settingsOpenConfigDir").addEventListener("click", () => {
 $("settingsOpenClaudeDir").addEventListener("click", () => {
   if (appPaths) invoke("open_folder", { path: appPaths.claudeSettings });
 });
+$("settingsOpenLogsDir").addEventListener("click", () => {
+  invoke("open_logs_folder").catch((error) => showToast(String(error), "error"));
+});
 $("settingsExportBtn").addEventListener("click", handleExportProfiles);
 $("settingsImportBtn").addEventListener("click", handleImportProfiles);
+$("settingsOpenBackupsBtn").addEventListener("click", () => {
+  invoke("open_backups_folder").catch((error) => showToast(String(error), "error"));
+});
+$("settingsViewBackupsBtn").addEventListener("click", toggleBackupList);
+$("settingsBackupList").addEventListener("click", async (event) => {
+  const btn = event.target.closest("[data-restore-backup]");
+  if (!btn) return;
+  const name = btn.getAttribute("data-restore-backup");
+  if (!window.confirm("确定用这个备份覆盖当前配置吗？当前配置会先自动备份。")) return;
+  try {
+    await invoke("restore_config_backup", { name });
+    showToast("已从备份恢复配置", "success");
+    await loadProfiles();
+    await loadCodexProfiles();
+    $("settingsBackupList").style.display = "none";
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+});
+
+// 把紧凑时间戳 20260624-143025 格式化为 2026-06-24 14:30:25
+function formatBackupStamp(stamp) {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(stamp || "");
+  if (!m) return stamp || "";
+  return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}`;
+}
+
+// 展开/收起备份列表，每项可一键回滚
+async function toggleBackupList() {
+  const box = $("settingsBackupList");
+  if (box.style.display !== "none") {
+    box.style.display = "none";
+    return;
+  }
+  try {
+    const backups = await invoke("list_config_backups");
+    if (!backups || backups.length === 0) {
+      box.innerHTML = `<div class="mgmt-item-desc">暂无备份（首次切换配置后会自动生成）</div>`;
+    } else {
+      box.innerHTML = backups
+        .map((b) => {
+          const label = formatBackupStamp(b.stamp);
+          const kindLabel = b.kind === "codex" ? "Codex" : "Claude";
+          return `<div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">${kindLabel} · ${esc(label)}</div>
+            </div>
+            <div class="settings-row-action">
+              <button class="btn btn-secondary btn-sm" data-restore-backup="${esc(b.name)}">恢复</button>
+            </div>
+          </div>`;
+        })
+        .join("");
+    }
+    box.style.display = "block";
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
 
 (async function init() {
   applyTheme();
@@ -3970,6 +4107,7 @@ $("settingsImportBtn").addEventListener("click", handleImportProfiles);
     loadAppSettings(),
   ]);
   renderUpdateButton();
+  checkForUpdatesOnStartup();
 
   // 启动动画：等加载条填满后淡出
   const splash = $('splashScreen');

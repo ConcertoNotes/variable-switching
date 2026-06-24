@@ -64,6 +64,14 @@
     </div>
   </header>
 
+  <div class="update-pill-banner" id="updatePillBanner" hidden>
+    <button class="update-pill" id="updatePillBtn" type="button">
+      <span class="update-pill-dot" aria-hidden="true"></span>
+      <span id="updatePillText">New version available</span>
+      <span class="update-pill-action" id="updatePillAction">Download</span>
+    </button>
+  </div>
+
   <div class="page-tabs" id="pageTabs">
     <button class="page-tab active" data-page="claude" type="button">Claude Code</button>
     <button class="page-tab" data-page="codex" type="button">Codex CLI</button>
@@ -595,6 +603,15 @@
                 <button class="btn btn-secondary btn-sm" id="settingsOpenClaudeDir" type="button">Open</button>
               </div>
             </div>
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsLogsLabel">运行日志</div>
+                <div class="settings-row-value" id="settingsLogsValue">出现问题时可打开日志文件夹查看或反馈</div>
+              </div>
+              <div class="settings-row-action">
+                <button class="btn btn-secondary btn-sm" id="settingsOpenLogsDir" type="button">Open</button>
+              </div>
+            </div>
             <!-- 动态编辑器路径列表 -->
             <div id="settingsEditorPaths"></div>
           </div>
@@ -608,6 +625,17 @@
               <button class="btn btn-secondary" id="settingsExportBtn" type="button">Export Profiles</button>
               <button class="btn btn-secondary" id="settingsImportBtn" type="button">Import Profiles</button>
             </div>
+            <div class="settings-row" style="margin-top:8px">
+              <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsAutoBackupLabel">自动备份</div>
+                <div class="settings-row-value" id="settingsAutoBackupDesc">每次切换配置前自动快照，误操作可回滚</div>
+              </div>
+              <div class="settings-row-action" style="display:flex;gap:8px">
+                <button class="btn btn-secondary btn-sm" id="settingsViewBackupsBtn" type="button">回滚</button>
+                <button class="btn btn-secondary btn-sm" id="settingsOpenBackupsBtn" type="button">Open</button>
+              </div>
+            </div>
+            <div id="settingsBackupList" style="display:none;margin-top:8px"></div>
           </div>
         </div>
       </div>

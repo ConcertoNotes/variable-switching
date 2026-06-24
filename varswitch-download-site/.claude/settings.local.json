@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/邢郅琦/.claude/skills/ui-ux-pro-max-skill/**)",
+      "mcp__Playwright__browser_navigate",
+      "mcp__Playwright__browser_console_messages",
+      "mcp__Playwright__browser_take_screenshot",
+      "mcp__Playwright__browser_resize",
+      "Bash(python -m http.server 8731)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8731/index.html)",
+      "Bash(curl -s -o /dev/null -w \"ready:%{http_code}\\\\n\" http://localhost:8731/index.html)",
+      "mcp__Playwright__browser_evaluate"
+    ]
+  }
+}

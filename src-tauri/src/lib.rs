@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use qrcode::{QrCode, EcLevel};
 use image::{DynamicImage, Luma};
@@ -413,10 +414,114 @@ struct AppState {
 // ── Helpers ─────────────────────────────────────────
 
 fn data_dir(app: &tauri::AppHandle) -> PathBuf {
-    let dir = app.path().app_data_dir().expect("no app data dir");
+    // app_data_dir 理论上不会失败，但若系统异常返回错误，
+    // 退回到 用户主目录/.varswitch，避免直接 panic 崩溃整个应用。
+    let dir = app.path().app_data_dir().unwrap_or_else(|_| {
+        let fallback = home_dir().join(".varswitch");
+        eprintln!("[data_dir] app_data_dir 不可用，退回到 {fallback:?}");
+        fallback
+    });
     fs::create_dir_all(&dir).ok();
     dir
 }
+
+// ── 日志模块 ─────────────────────────────────────────
+// 统一日志：同时输出到控制台和文件 app_data_dir/logs/varswitch.log。
+// 打包后 stdout/stderr 用户看不到，日志文件方便用户截图反馈或自行排查。
+
+/// 全局日志文件路径，在 app 启动时 init_logging 设置一次。
+static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
+/// 日志文件滚动阈值：超过 5MB 转存为 .old。
+const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+/// 在应用启动时初始化日志文件路径（setup 阶段调用一次）。
+fn init_logging(app: &tauri::AppHandle) {
+    let dir = data_dir(app).join("logs");
+    if fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("varswitch.log");
+    let _ = LOG_FILE_PATH.set(path);
+    app_log("INFO", "VarSwitch 启动，日志系统已就绪");
+}
+
+/// 把 Unix 毫秒时间戳格式化为本地时间字符串（UTC+8，面向中国用户）。
+fn format_log_time(millis: u128) -> String {
+    let total_secs = (millis / 1000) as i64 + 8 * 3600; // 东八区偏移
+    let ms = (millis % 1000) as u64;
+    let days = total_secs.div_euclid(86400);
+    let secs_of_day = total_secs.rem_euclid(86400);
+    let hour = secs_of_day / 3600;
+    let minute = (secs_of_day % 3600) / 60;
+    let second = secs_of_day % 60;
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}.{ms:03}"
+    )
+}
+
+/// 把"从 1970-01-01 起的天数"转成 (年, 月, 日)。
+/// 采用 Howard Hinnant 的 civil_from_days 算法，正确处理闰年。
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as i64; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// 把 Unix 毫秒时间戳格式化为紧凑的本地时间字符串（用于备份文件名，无非法字符）。
+/// 例如 "20260624-143025"（UTC+8）。
+fn format_compact_time(millis: u128) -> String {
+    let total_secs = (millis / 1000) as i64 + 8 * 3600;
+    let secs_of_day = total_secs.rem_euclid(86400);
+    let hour = secs_of_day / 3600;
+    let minute = (secs_of_day % 3600) / 60;
+    let second = secs_of_day % 60;
+    let (year, month, day) = civil_from_days(total_secs.div_euclid(86400));
+    format!("{year:04}{month:02}{day:02}-{hour:02}{minute:02}{second:02}")
+}
+
+/// 写一条日志：同时输出到控制台（开发期可见）和日志文件（打包后可查）。
+fn app_log(level: &str, msg: &str) {
+    let line = format!("[{}] [{level}] {msg}", format_log_time(chrono_timestamp_millis()));
+    // 控制台输出（dev 模式可见）
+    eprintln!("{line}");
+    // 文件输出
+    if let Some(path) = LOG_FILE_PATH.get() {
+        // 简单滚动：超过阈值就把当前日志转存为 .old
+        if let Ok(meta) = fs::metadata(path) {
+            if meta.len() > LOG_MAX_BYTES {
+                let old = path.with_file_name("varswitch.log.old");
+                let _ = fs::rename(path, &old);
+            }
+        }
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(file, "{line}");
+        }
+    }
+}
+
+/// 便捷日志宏，用法同 println!：log_info!("xxx {}", v)。
+macro_rules! log_info {
+    ($($arg:tt)*) => { app_log("INFO", &format!($($arg)*)) };
+}
+macro_rules! log_warn {
+    ($($arg:tt)*) => { app_log("WARN", &format!($($arg)*)) };
+}
+macro_rules! log_error {
+    ($($arg:tt)*) => { app_log("ERROR", &format!($($arg)*)) };
+}
+
 
 fn profiles_path(app: &tauri::AppHandle) -> PathBuf {
     data_dir(app).join("profiles.json")
@@ -823,7 +928,7 @@ fn default_plugin_marketplace_name() -> &'static str {
 }
 
 fn lark_create_bot_launcher_url() -> &'static str {
-    "https://open.feishu.cn/page/launcher?from=sdk&source=node-sdk%2Fhi-codex&tp=sdk&addons=H4sIAAAAAAAC_2XLMQqAMAwF0LtkloJrriJSav1Ih6RiQpfSuyvi5v5eJ8v1hBF3cmhSJ16oCAvM0gE26B6Txa06rWMiNKi_vDjk98L3woWM0hDb_LQxbv9jmpZoAAAA&createOnly=true&name=Hi+Codex&desc=%E6%8A%8A%E9%A3%9E%E4%B9%A6%E6%B6%88%E6%81%AF%E8%BD%AC%E5%8F%91%E7%BB%99+Hi+Codex%EF%BC%8C%E5%B9%B6%E6%8A%8A+Codex+%E5%9B%9E%E5%A4%8D%E5%90%8C%E6%AD%A5%E5%9B%9E%E9%A3%9E%E4%B9%A6%E3%80%82"
+    "https://open.feishu.cn/page/launcher?from=sdk&source=node-sdk%2Fvarswitch&tp=sdk&addons=H4sIAAAAAAAC_2XLMQqAMAwF0LtkloJrriJSav1Ih6RiQpfSuyvi5v5eJ8v1hBF3cmhSJ16oCAvM0gE26B6Txa06rWMiNKi_vDjk98L3woWM0hDb_LQxbv9jmpZoAAAA&createOnly=true&name=VarSwitch+%E6%99%BA%E8%83%BD%E4%BD%93&desc=%E6%8A%8A%E9%A3%9E%E4%B9%A6%E6%B6%88%E6%81%AF%E8%BD%AC%E5%8F%91%E7%BB%99+Codex%EF%BC%8C%E5%B9%B6%E6%8A%8A+Codex+%E5%9B%9E%E5%A4%8D%E5%90%8C%E6%AD%A5%E5%9B%9E%E9%A3%9E%E4%B9%A6%E3%80%82"
 }
 
 fn lark_registration_base_url() -> &'static str {
@@ -910,212 +1015,6 @@ fn generate_qr_code_data_url(content: &str) -> Result<String, String> {
         .map_err(|e| format!("PNG 编码失败: {e}"))?;
     let b64 = base64_encode_bytes(&png_bytes);
     Ok(format!("data:image/png;base64,{b64}"))
-}
-
-fn image_content_type_from_body(content_type: &str, body: &[u8]) -> Option<String> {
-    let raw = content_type
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    if raw.starts_with("image/") {
-        return Some(raw);
-    }
-    if body.starts_with(b"\x89PNG\r\n\x1a\n") {
-        Some("image/png".into())
-    } else if body.starts_with(b"\xff\xd8\xff") {
-        Some("image/jpeg".into())
-    } else if body.starts_with(b"GIF87a") || body.starts_with(b"GIF89a") {
-        Some("image/gif".into())
-    } else if body.starts_with(b"RIFF") && body.get(8..12) == Some(b"WEBP") {
-        Some("image/webp".into())
-    } else if body
-        .iter()
-        .copied()
-        .skip_while(|byte| byte.is_ascii_whitespace())
-        .take(4)
-        .collect::<Vec<_>>()
-        .as_slice()
-        == b"<svg"
-    {
-        Some("image/svg+xml".into())
-    } else {
-        None
-    }
-}
-
-fn image_body_to_data_url(content_type: &str, body: &[u8]) -> String {
-    if body.is_empty() || body.len() > 2 * 1024 * 1024 {
-        return String::new();
-    }
-    image_content_type_from_body(content_type, body)
-        .map(|mime| format!("data:{mime};base64,{}", base64_encode_bytes(body)))
-        .unwrap_or_default()
-}
-
-fn fetch_image_as_data_url(client: &reqwest::blocking::Client, url: &str) -> String {
-    let trimmed = url.trim();
-    if trimmed.is_empty() || !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
-        return String::new();
-    }
-    let Ok(response) = client.get(trimmed).send() else {
-        return String::new();
-    };
-    if !response.status().is_success() {
-        return String::new();
-    }
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
-    response
-        .bytes()
-        .ok()
-        .map(|bytes| image_body_to_data_url(&content_type, &bytes))
-        .unwrap_or_default()
-}
-
-fn decode_basic_html_entities(value: &str) -> String {
-    value
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
-}
-
-fn normalize_page_asset_url(value: &str, base_url: &str) -> String {
-    let mut raw = decode_basic_html_entities(value)
-        .trim()
-        .trim_matches(['"', '\''])
-        .to_string();
-    if raw.is_empty() {
-        return String::new();
-    }
-    raw = raw.replace("\\/", "/");
-    let lower = raw.to_ascii_lowercase();
-    if lower.starts_with("data:image/")
-        || lower.starts_with("http://")
-        || lower.starts_with("https://")
-    {
-        return raw;
-    }
-    if raw.starts_with("//") {
-        let scheme = reqwest::Url::parse(base_url)
-            .ok()
-            .map(|url| url.scheme().to_string())
-            .unwrap_or_else(|| "https".into());
-        return format!("{scheme}:{raw}");
-    }
-    reqwest::Url::parse(base_url)
-        .ok()
-        .and_then(|base| base.join(&raw).ok())
-        .map(|url| url.to_string())
-        .unwrap_or_default()
-}
-
-fn push_html_attr_candidates(html: &str, attr: &str, candidates: &mut Vec<String>) {
-    let lower = html.to_ascii_lowercase();
-    let needle = format!("{attr}=");
-    let mut offset = 0usize;
-    while let Some(pos) = lower[offset..].find(&needle) {
-        let mut index = offset + pos + needle.len();
-        let bytes = html.as_bytes();
-        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
-            index += 1;
-        }
-        if index >= bytes.len() {
-            break;
-        }
-        let quote = bytes[index];
-        let (value_start, value_end) = if quote == b'"' || quote == b'\'' {
-            let value_start = index + 1;
-            let mut value_end = value_start;
-            while value_end < bytes.len() && bytes[value_end] != quote {
-                value_end += 1;
-            }
-            (value_start, value_end)
-        } else {
-            let value_start = index;
-            let mut value_end = value_start;
-            while value_end < bytes.len()
-                && !bytes[value_end].is_ascii_whitespace()
-                && bytes[value_end] != b'>'
-            {
-                value_end += 1;
-            }
-            (value_start, value_end)
-        };
-        if value_end > value_start {
-            candidates.push(html[value_start..value_end].to_string());
-        }
-        offset = value_end.saturating_add(1);
-    }
-}
-
-fn fetch_qr_image_or_page_data_url(client: &reqwest::blocking::Client, url: &str) -> String {
-    let trimmed = url.trim();
-    if trimmed.is_empty() || !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
-        return String::new();
-    }
-    let Ok(response) = client.get(trimmed).send() else {
-        return String::new();
-    };
-    if !response.status().is_success() {
-        return String::new();
-    }
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
-    let Ok(bytes) = response.bytes() else {
-        return String::new();
-    };
-    let direct = image_body_to_data_url(&content_type, &bytes);
-    if !direct.is_empty() {
-        return direct;
-    }
-    let Ok(html) = String::from_utf8(bytes.to_vec()) else {
-        return String::new();
-    };
-    let mut candidates = Vec::new();
-    for attr in [
-        "data-qrcode",
-        "data-qr",
-        "data-image",
-        "data-src",
-        "data-original",
-        "src",
-    ] {
-        push_html_attr_candidates(&html, attr, &mut candidates);
-    }
-    candidates.sort_by_key(|candidate| {
-        let lower = candidate.to_ascii_lowercase();
-        if lower.contains("qrcode") || lower.contains("qr") {
-            0
-        } else {
-            1
-        }
-    });
-    candidates.dedup();
-    for candidate in candidates {
-        let normalized = normalize_page_asset_url(&candidate, trimmed);
-        let lower = normalized.to_ascii_lowercase();
-        if lower.starts_with("data:image/") {
-            return normalized;
-        }
-        let data_url = fetch_image_as_data_url(client, &normalized);
-        if !data_url.is_empty() {
-            return data_url;
-        }
-    }
-    String::new()
 }
 
 fn official_plugin_marketplace_names() -> &'static [&'static str] {
@@ -2863,13 +2762,13 @@ fn request_lark_registration(
     }
     let mut params = vec![
         ("from", "sdk"),
-        ("source", "node-sdk/hi-codex"),
+        ("source", "node-sdk/varswitch"),
         ("tp", "sdk"),
         ("addons", lark_registration_addons()),
-        ("name", "Hi Codex"),
+        ("name", "VarSwitch 智能体"),
         (
             "desc",
-            "把飞书消息转发给 Hi Codex，并把 Codex 回复同步回飞书。",
+            "把飞书消息转发给 Codex，并把 Codex 回复同步回飞书。",
         ),
     ];
     if create_only {
@@ -3305,13 +3204,13 @@ fn codex_debug_port_or_relaunch() -> Result<u16, String> {
         return Ok(port);
     }
     // 没有调试端口 —— 尝试带调试端口重启 Codex App。
-    eprintln!("[mobile-control][codex-app] 未检测到调试端口，尝试用调试端口重启 Codex App");
+    log_info!("[mobile-control][codex-app] 未检测到调试端口，尝试用调试端口重启 Codex App");
     relaunch_codex_with_debug_port(CODEX_PREFERRED_DEBUG_PORT)?;
     // 重启后轮询等待端口起来(最多约 20 秒)。
     for _ in 0..40 {
         std::thread::sleep(Duration::from_millis(500));
         if let Some(port) = codex_debug_port() {
-            eprintln!("[mobile-control][codex-app] Codex 已带调试端口 {port} 重启成功");
+            log_info!("[mobile-control][codex-app] Codex 已带调试端口 {port} 重启成功");
             return Ok(port);
         }
     }
@@ -3859,7 +3758,7 @@ fn send_prompt_to_codex_app(thread_id: &str, prompt: &str) -> Result<String, Str
     let port = codex_debug_port_or_relaunch()?;
     // 2) 切到选中的对话(thread_id 为空则注入当前打开的对话)。
     if let Err(error) = activate_codex_thread(thread_id) {
-        eprintln!("[mobile-control][codex-app] 切换对话失败(继续尝试注入当前对话): {error}");
+        log_warn!("[mobile-control][codex-app] 切换对话失败(继续尝试注入当前对话): {error}");
     }
     // 3) 找页面 target。
     let ws_url = codex_find_page_target(port)?;
@@ -3892,7 +3791,7 @@ fn dispatch_codex_reply(thread_id: &str, text: &str, cwd: &str) -> Result<String
     match send_prompt_to_codex_app(thread_id, text) {
         Ok(reply) => Ok(reply),
         Err(app_err) => {
-            eprintln!("[mobile-control][codex-app] 注入失败，降级到 CLI: {app_err}");
+            log_warn!("[mobile-control][codex-app] 注入失败，降级到 CLI: {app_err}");
             run_codex_cli_reply(text, cwd, thread_id).map_err(|cli_err| {
                 format!("Codex App 注入失败({app_err})；CLI 兜底也失败：{cli_err}")
             })
@@ -4294,9 +4193,9 @@ fn send_wechat_text_reply(
 
 fn update_channel_status(app: &tauri::AppHandle, channel: &str, status: &str, error: &str) {
     if error.trim().is_empty() {
-        println!("[mobile-control][status][{}] {}", channel, status);
+        log_info!("[mobile-control][status][{}] {}", channel, status);
     } else {
-        eprintln!(
+        log_info!(
             "[mobile-control][status][{}] {} | error={}",
             channel, status, error
         );
@@ -4323,14 +4222,14 @@ fn handle_lark_bridge_message(
     let chat_id = json_string(payload, &["chatId", "chat_id"]);
     let text = json_string(payload, &["text", "content"]);
     if message_id.is_empty() || text.is_empty() {
-        println!(
+        log_info!(
             "[mobile-control][lark] ignored empty message: message_id_empty={}, text_empty={}",
             message_id.is_empty(),
             text.is_empty()
         );
         return Ok(());
     }
-    println!(
+    log_info!(
         "[mobile-control][lark] received message: message_id={}, text_len={}",
         message_id,
         text.chars().count()
@@ -4353,7 +4252,7 @@ fn handle_lark_bridge_message(
         .as_ref()
         .map(|thread| thread.cwd.as_str())
         .unwrap_or("");
-    println!(
+    log_info!(
         "[mobile-control][lark] dispatching to codex: thread_id={}, thread_name={}, cwd={}",
         selected_thread
             .as_ref()
@@ -4372,7 +4271,7 @@ fn handle_lark_bridge_message(
         .unwrap_or("");
     let reply = dispatch_codex_reply(thread_id, &text, cwd)
         .map_err(|error| format!("Codex 执行失败：{error}"))?;
-    println!(
+    log_info!(
         "[mobile-control][lark] codex replied: message_id={}, reply_len={}",
         message_id,
         reply.chars().count()
@@ -4386,10 +4285,10 @@ fn handle_lark_bridge_message(
 
 fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Result<(), String> {
     if LARK_BRIDGE_ACTIVE.swap(true, Ordering::SeqCst) {
-        println!("[mobile-control][lark] bridge already active, skip start");
+        log_info!("[mobile-control][lark] bridge already active, skip start");
         return Ok(());
     }
-    println!(
+    log_info!(
         "[mobile-control][lark] starting bridge: thread_id={}, thread_name={}, app_id={}",
         binding.thread_id, binding.thread_name, binding.app_id
     );
@@ -4426,7 +4325,7 @@ fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Re
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines().flatten() {
-                eprintln!("[mobile-control][lark][stderr] {}", line);
+                log_info!("[mobile-control][lark][stderr] {}", line);
             }
         });
     }
@@ -4437,10 +4336,10 @@ fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Re
                 break;
             }
             let Ok(payload) = serde_json::from_str::<serde_json::Value>(&line) else {
-                println!("[mobile-control][lark][stdout] {}", line);
+                log_info!("[mobile-control][lark][stdout] {}", line);
                 continue;
             };
-            println!("[mobile-control][lark][event] {}", payload);
+            log_info!("[mobile-control][lark][event] {}", payload);
             match json_string(&payload, &["type"]).as_str() {
                 "ready" => {
                     update_channel_status(&app, "lark", "飞书智能体已在线，等待手机消息", "")
@@ -4465,13 +4364,13 @@ fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Re
         if let Ok(mut guard) = LARK_BRIDGE_CHILD.lock() {
             let _ = guard.take().map(|mut child| child.wait());
         }
-        println!("[mobile-control][lark] bridge worker exited");
+        log_info!("[mobile-control][lark] bridge worker exited");
     });
     Ok(())
 }
 
 fn stop_lark_bridge() {
-    println!("[mobile-control][lark] stopping bridge");
+    log_info!("[mobile-control][lark] stopping bridge");
     LARK_BRIDGE_ACTIVE.store(false, Ordering::SeqCst);
     if let Ok(mut guard) = LARK_BRIDGE_CHILD.lock() {
         if let Some(mut child) = guard.take() {
@@ -5771,6 +5670,130 @@ fn cancel_switch(state: State<'_, AppState>) {
     state.cancel_flag.store(true, Ordering::SeqCst);
 }
 
+// ── 配置自动备份 ─────────────────────────────────────
+// 切换配置前自动快照 profiles.json / codex_profiles.json，误操作可回滚。
+
+/// 返回给前端的备份信息。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigBackupInfo {
+    name: String,  // 备份文件名
+    kind: String,  // "claude" | "codex"
+    stamp: String, // 紧凑时间戳，如 20260624-143025（前端格式化展示）
+}
+
+fn backups_dir(app: &tauri::AppHandle) -> PathBuf {
+    let dir = data_dir(app).join("backups");
+    fs::create_dir_all(&dir).ok();
+    dir
+}
+
+/// 把单个配置文件复制到备份目录（带时间戳）。
+fn backup_one_config(dir: &PathBuf, src: &PathBuf, prefix: &str, stamp: &str) {
+    if !src.exists() {
+        return;
+    }
+    let dst = dir.join(format!("{prefix}-{stamp}.json"));
+    let _ = fs::copy(src, &dst);
+}
+
+/// 清理同类备份，只保留最近 keep 个（文件名时间戳字典序==时间序）。
+fn prune_backups(dir: &PathBuf, prefix: &str, keep: usize) {
+    let mut files: Vec<PathBuf> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with(&format!("{prefix}-")) && n.ends_with(".json"))
+                .unwrap_or(false)
+        })
+        .collect();
+    if files.len() <= keep {
+        return;
+    }
+    files.sort();
+    let remove_count = files.len() - keep;
+    for old in files.iter().take(remove_count) {
+        let _ = fs::remove_file(old);
+    }
+}
+
+/// 切换配置前自动备份。失败不阻断切换，仅记录日志。
+fn auto_backup_configs(app: &tauri::AppHandle) {
+    let dir = backups_dir(app);
+    let stamp = format_compact_time(chrono_timestamp_millis());
+    backup_one_config(&dir, &profiles_path(app), "profiles", &stamp);
+    backup_one_config(&dir, &codex_profiles_path(app), "codex", &stamp);
+    prune_backups(&dir, "profiles", 20);
+    prune_backups(&dir, "codex", 20);
+    log_info!("[backup] 已自动备份配置 stamp={stamp}");
+}
+
+/// 列出所有配置备份，最新的在前。
+#[tauri::command]
+fn list_config_backups(app: tauri::AppHandle) -> Vec<ConfigBackupInfo> {
+    let dir = backups_dir(&app);
+    let mut out: Vec<ConfigBackupInfo> = Vec::new();
+    for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Some(fname) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !fname.ends_with(".json") {
+            continue;
+        }
+        let (kind, stamp) = if let Some(rest) = fname.strip_prefix("profiles-") {
+            ("claude", rest.trim_end_matches(".json"))
+        } else if let Some(rest) = fname.strip_prefix("codex-") {
+            ("codex", rest.trim_end_matches(".json"))
+        } else {
+            continue;
+        };
+        out.push(ConfigBackupInfo {
+            name: fname.to_string(),
+            kind: kind.to_string(),
+            stamp: stamp.to_string(),
+        });
+    }
+    out.sort_by(|a, b| b.stamp.cmp(&a.stamp));
+    out
+}
+
+/// 从指定备份恢复配置。恢复前会先备份当前状态，避免回滚错了无法挽回。
+#[tauri::command]
+fn restore_config_backup(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    // 安全校验：防止目录穿越
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("非法的备份名".into());
+    }
+    let src = backups_dir(&app).join(&name);
+    if !src.exists() {
+        return Err("备份文件不存在".into());
+    }
+    let dst = if name.starts_with("profiles-") {
+        profiles_path(&app)
+    } else if name.starts_with("codex-") {
+        codex_profiles_path(&app)
+    } else {
+        return Err("无法识别的备份类型".into());
+    };
+    // 恢复前先备份当前，留一条后悔路
+    auto_backup_configs(&app);
+    fs::copy(&src, &dst).map_err(|e| format!("恢复失败: {e}"))?;
+    log_info!("[backup] 已从备份恢复配置: {name}");
+    Ok(())
+}
+
+/// 打开备份文件夹。
+#[tauri::command]
+fn open_backups_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = backups_dir(&app);
+    open_folder(dir.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 fn switch_profile(
     app: tauri::AppHandle,
@@ -5787,6 +5810,9 @@ fn switch_profile(
         .clone();
 
     state.cancel_flag.store(false, Ordering::SeqCst);
+
+    // 切换前自动备份当前配置，误操作可在设置里回滚
+    auto_backup_configs(&app);
 
     let mut errors: Vec<String> = Vec::new();
     let mut details = SwitchDetails {
@@ -6162,6 +6188,9 @@ fn switch_codex_profile(app: tauri::AppHandle, id: String) -> Result<(), String>
         .ok_or("配置未找到")?
         .clone();
 
+    // 切换前自动备份当前配置
+    auto_backup_configs(&app);
+
     write_codex_config(&profile)?;
 
     for p in data.profiles.iter_mut() {
@@ -6409,7 +6438,7 @@ fn start_lark_bot_registration(
         binding.qr_url = binding.launcher_url.clone();
         binding.qr_device_code = device_code.clone();
         binding.qr_status = if create_only {
-            "已打开飞书创建页面，创建完成后会自动填充 AppID/AppSecret".into()
+            "已打开飞书创建页面，建议命名为 VarSwitch 智能体，创建完成后会自动填充 AppID/AppSecret".into()
         } else {
             "已打开飞书换绑页面，完成授权后会自动读取 AppID/AppSecret".into()
         };
@@ -6931,7 +6960,7 @@ fn bind_codex_thread(
     note: Option<String>,
 ) -> Result<ToolboxSnapshot, String> {
     let normalized_channel = normalize_mobile_channel(&channel);
-    println!(
+    log_info!(
         "[mobile-control][bind] request: channel={}, normalized={}, thread_id={}, sync_enabled={}, note={}",
         channel,
         normalized_channel,
@@ -6940,7 +6969,7 @@ fn bind_codex_thread(
         note.as_deref().unwrap_or("")
     );
     if normalized_channel.is_empty() {
-        eprintln!("[mobile-control][bind] failed: empty channel");
+        log_error!("[mobile-control][bind] failed: empty channel");
         return Err("绑定通道不能为空".into());
     }
     let state = read_toolbox_state(&app);
@@ -6953,7 +6982,7 @@ fn bind_codex_thread(
         .into_iter()
         .find(|item| item.id == thread_id)
         .ok_or("会话未找到")?;
-    println!(
+    log_info!(
         "[mobile-control][bind] found thread: channel={}, thread_id={}, thread_name={}, session_file={}, cwd={}",
         normalized_channel,
         thread.id,
@@ -7007,7 +7036,7 @@ fn bind_codex_thread(
     state.mobile_remote.active_thread_id = thread_id_value;
     state.mobile_remote.active_thread_name = thread_name_value;
     write_toolbox_state(&app, &state)?;
-    println!(
+    log_info!(
         "[mobile-control][bind] saved: channel={}, thread_id={}",
         normalized_channel, state.mobile_remote.active_thread_id
     );
@@ -7017,7 +7046,7 @@ fn bind_codex_thread(
 #[tauri::command]
 fn unbind_codex_thread(app: tauri::AppHandle, channel: String) -> Result<ToolboxSnapshot, String> {
     let normalized_channel = normalize_mobile_channel(&channel);
-    println!(
+    log_info!(
         "[mobile-control][unbind] request: channel={}, normalized={}",
         channel, normalized_channel
     );
@@ -7040,7 +7069,7 @@ fn unbind_codex_thread(app: tauri::AppHandle, channel: String) -> Result<Toolbox
         binding.updated_at = chrono_now();
     }
     write_toolbox_state(&app, &state)?;
-    println!(
+    log_info!(
         "[mobile-control][unbind] saved: channel={}",
         normalized_channel
     );
@@ -7055,7 +7084,7 @@ fn start_mobile_remote(
 ) -> Result<ToolboxSnapshot, String> {
     let _ = state;
     let _ = port;
-    println!("[mobile-control][start] start_mobile_remote requested");
+    log_info!("[mobile-control][start] start_mobile_remote requested");
     MOBILE_REMOTE_CANCEL_REQUESTED.store(false, Ordering::SeqCst);
     let already_starting = MOBILE_REMOTE_START_ACTIVE.swap(true, Ordering::SeqCst);
     let mut toolbox_state = read_toolbox_state(&app);
@@ -7076,17 +7105,17 @@ fn start_mobile_remote(
     }
     write_toolbox_state(&app, &toolbox_state)?;
     if !already_starting {
-        println!("[mobile-control][start] spawning platform connection worker");
+        log_info!("[mobile-control][start] spawning platform connection worker");
         let app_for_thread = app.clone();
         std::thread::spawn(move || run_mobile_remote_start(app_for_thread));
     } else {
-        println!("[mobile-control][start] worker already starting, skip spawn");
+        log_info!("[mobile-control][start] worker already starting, skip spawn");
     }
     Ok(build_toolbox_snapshot(&app))
 }
 
 fn run_mobile_remote_start(app: tauri::AppHandle) {
-    println!("[mobile-control][start-worker] begin");
+    log_info!("[mobile-control][start-worker] begin");
     let mut toolbox_state = read_toolbox_state(&app);
     let mut connected_count = 0usize;
     let mut last_error = String::new();
@@ -7095,12 +7124,12 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
     let mut wechat_listener_binding: Option<MobileChannelBinding> = None;
     for channel in toolbox_state.mobile_channels.iter_mut() {
         if MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst) {
-            println!("[mobile-control][start-worker] cancelled before channel probe");
+            log_info!("[mobile-control][start-worker] cancelled before channel probe");
             MOBILE_REMOTE_START_ACTIVE.store(false, Ordering::SeqCst);
             return;
         }
         if channel.enabled && !channel.thread_id.trim().is_empty() {
-            println!(
+            log_info!(
                 "[mobile-control][start-worker] probing channel: channel={}, thread_id={}, thread_name={}",
                 channel.channel, channel.thread_id, channel.thread_name
             );
@@ -7111,7 +7140,7 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                 channel.status = "缺少平台凭据，无法开启连接".into();
                 channel.updated_at = chrono_now();
                 last_error = channel.last_error.clone();
-                eprintln!(
+                log_info!(
                     "[mobile-control][start-worker] missing credentials: channel={}, error={}",
                     channel.channel, channel.last_error
                 );
@@ -7119,7 +7148,7 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
             }
             match probe_mobile_channel(channel) {
                 Ok((gateway_url, status)) => {
-                    println!(
+                    log_info!(
                         "[mobile-control][start-worker] probe ok: channel={}, gateway={}, status={}",
                         channel.channel, gateway_url, status
                     );
@@ -7139,7 +7168,7 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                     }
                 }
                 Err(error) => {
-                    eprintln!(
+                    log_info!(
                         "[mobile-control][start-worker] probe failed: channel={}, error={}",
                         channel.channel, error
                     );
@@ -7154,12 +7183,12 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
         }
     }
     if MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst) {
-        println!("[mobile-control][start-worker] cancelled after channel probe");
+        log_info!("[mobile-control][start-worker] cancelled after channel probe");
         MOBILE_REMOTE_START_ACTIVE.store(false, Ordering::SeqCst);
         return;
     }
     if connected_count == 0 {
-        eprintln!(
+        log_info!(
             "[mobile-control][start-worker] no channels connected: last_error={}",
             last_error
         );
@@ -7171,15 +7200,15 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
         };
     }
     let _ = write_toolbox_state(&app, &toolbox_state);
-    println!(
+    log_info!(
         "[mobile-control][start-worker] state saved: enabled={}, connected_count={}",
         toolbox_state.mobile_remote.enabled, connected_count
     );
     if toolbox_state.mobile_remote.enabled {
         if let Some(binding) = lark_bridge_binding {
-            println!("[mobile-control][start-worker] starting lark bridge");
+            log_info!("[mobile-control][start-worker] starting lark bridge");
             if let Err(error) = start_lark_bridge(app.clone(), binding) {
-                eprintln!(
+                log_info!(
                     "[mobile-control][start-worker] lark bridge failed: {}",
                     error
                 );
@@ -7187,9 +7216,9 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
             }
         }
         if let Some(binding) = qq_gateway_binding {
-            println!("[mobile-control][start-worker] starting qq gateway");
+            log_info!("[mobile-control][start-worker] starting qq gateway");
             if let Err(error) = start_qq_gateway(app.clone(), binding) {
-                eprintln!(
+                log_info!(
                     "[mobile-control][start-worker] qq gateway failed: {}",
                     error
                 );
@@ -7197,9 +7226,9 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
             }
         }
         if let Some(binding) = wechat_listener_binding {
-            println!("[mobile-control][start-worker] starting wechat listener");
+            log_info!("[mobile-control][start-worker] starting wechat listener");
             if let Err(error) = start_wechat_listener(app.clone(), binding) {
-                eprintln!(
+                log_info!(
                     "[mobile-control][start-worker] wechat listener failed: {}",
                     error
                 );
@@ -7208,7 +7237,73 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
         }
     }
     MOBILE_REMOTE_START_ACTIVE.store(false, Ordering::SeqCst);
-    println!("[mobile-control][start-worker] finished");
+    log_info!("[mobile-control][start-worker] finished");
+
+    // 看门狗：后台持续监控各平台连接，断线后自动重启（最多等 5 分钟才重试）
+    if toolbox_state.mobile_remote.enabled {
+        let watchdog_app = app.clone();
+        std::thread::spawn(move || {
+            let mut fail_counts: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+            loop {
+                // 每 30 秒轮询一次
+                std::thread::sleep(Duration::from_secs(30));
+                if MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst) {
+                    log_info!("[mobile-control][watchdog] 已停止（用户取消）");
+                    break;
+                }
+                let state = read_toolbox_state(&watchdog_app);
+                if !state.mobile_remote.enabled {
+                    log_info!("[mobile-control][watchdog] remote 已禁用，看门狗退出");
+                    break;
+                }
+                // 检查飞书
+                if !LARK_BRIDGE_ACTIVE.load(Ordering::SeqCst) {
+                    if let Some(binding) = state.mobile_channels.iter().find(|b| b.channel == "lark" && mobile_channel_has_credentials(b)).cloned() {
+                        let cnt = fail_counts.entry("lark").or_insert(0);
+                        let delay = (30u64 * (1 << (*cnt).min(4))).min(300);
+                        log_info!("[mobile-control][watchdog] 飞书断线，{}s 后重启（第{}次）", delay, *cnt + 1);
+                        std::thread::sleep(Duration::from_secs(delay));
+                        match start_lark_bridge(watchdog_app.clone(), binding) {
+                            Ok(_) => { *cnt = 0; update_channel_status(&watchdog_app, "lark", "飞书已自动重连", ""); }
+                            Err(e) => { *cnt += 1; update_channel_status(&watchdog_app, "lark", "飞书自动重连失败", &e); }
+                        }
+                    }
+                } else {
+                    fail_counts.remove("lark");
+                }
+                // 检查 QQ
+                if !QQ_GATEWAY_ACTIVE.load(Ordering::SeqCst) {
+                    if let Some(binding) = state.mobile_channels.iter().find(|b| b.channel == "qq" && mobile_channel_has_credentials(b)).cloned() {
+                        let cnt = fail_counts.entry("qq").or_insert(0);
+                        let delay = (30u64 * (1 << (*cnt).min(4))).min(300);
+                        log_info!("[mobile-control][watchdog] QQ 断线，{}s 后重启（第{}次）", delay, *cnt + 1);
+                        std::thread::sleep(Duration::from_secs(delay));
+                        match start_qq_gateway(watchdog_app.clone(), binding) {
+                            Ok(_) => { *cnt = 0; update_channel_status(&watchdog_app, "qq", "QQ 已自动重连", ""); }
+                            Err(e) => { *cnt += 1; update_channel_status(&watchdog_app, "qq", "QQ 自动重连失败", &e); }
+                        }
+                    }
+                } else {
+                    fail_counts.remove("qq");
+                }
+                // 检查微信
+                if !WECHAT_LISTENER_ACTIVE.load(Ordering::SeqCst) {
+                    if let Some(binding) = state.mobile_channels.iter().find(|b| b.channel == "wechat" && mobile_channel_has_credentials(b)).cloned() {
+                        let cnt = fail_counts.entry("wechat").or_insert(0);
+                        let delay = (30u64 * (1 << (*cnt).min(4))).min(300);
+                        log_info!("[mobile-control][watchdog] 微信断线，{}s 后重启（第{}次）", delay, *cnt + 1);
+                        std::thread::sleep(Duration::from_secs(delay));
+                        match start_wechat_listener(watchdog_app.clone(), binding) {
+                            Ok(_) => { *cnt = 0; update_channel_status(&watchdog_app, "wechat", "微信已自动重连", ""); }
+                            Err(e) => { *cnt += 1; update_channel_status(&watchdog_app, "wechat", "微信自动重连失败", &e); }
+                        }
+                    }
+                } else {
+                    fail_counts.remove("wechat");
+                }
+            }
+        });
+    }
 }
 
 #[tauri::command]
@@ -7217,7 +7312,7 @@ fn stop_mobile_remote(
     state: State<AppState>,
 ) -> Result<ToolboxSnapshot, String> {
     let _ = state;
-    println!("[mobile-control][stop] stop_mobile_remote requested");
+    log_info!("[mobile-control][stop] stop_mobile_remote requested");
     MOBILE_REMOTE_CANCEL_REQUESTED.store(true, Ordering::SeqCst);
     MOBILE_REMOTE_START_ACTIVE.store(false, Ordering::SeqCst);
     stop_lark_bridge();
@@ -7235,7 +7330,7 @@ fn stop_mobile_remote(
         }
     }
     write_toolbox_state(&app, &toolbox_state)?;
-    println!("[mobile-control][stop] stopped and state saved");
+    log_info!("[mobile-control][stop] stopped and state saved");
     Ok(build_toolbox_snapshot(&app))
 }
 
@@ -7404,6 +7499,14 @@ fn open_external_target(target: String) -> Result<(), String> {
         return Err("Target is required".into());
     }
     open_with_system(trimmed)
+}
+
+/// 打开日志文件夹，方便用户查看/反馈日志。
+#[tauri::command]
+fn open_logs_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = data_dir(&app).join("logs");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建日志目录失败: {e}"))?;
+    open_folder(dir.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -9621,6 +9724,9 @@ pub fn run() {
             cancel_flag: AtomicBool::new(false),
         })
         .setup(|app| {
+            // 初始化日志系统（写入 app_data_dir/logs/varswitch.log）
+            init_logging(&app.handle());
+
             // 读取应用设置
             let settings = read_app_settings(&app.handle());
             let silent_startup = settings.silent_startup;
@@ -9633,10 +9739,16 @@ pub fn run() {
                 .build()?;
 
             // Build tray icon
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+            let tray_builder = TrayIconBuilder::new()
                 .tooltip("VarSwitch")
-                .menu(&menu)
+                .menu(&menu);
+            // 图标不可用时不阻断启动，仅无图标显示
+            let tray_builder = if let Some(icon) = app.default_window_icon() {
+                tray_builder.icon(icon.clone())
+            } else {
+                tray_builder
+            };
+            tray_builder
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
@@ -9668,20 +9780,23 @@ pub fn run() {
                 .build(app)?;
 
             // 窗口关闭行为：根据设置决定隐藏到托盘还是退出
-            let window = app.get_webview_window("main").unwrap();
-            let window_clone = window.clone();
-            let app_handle = app.handle().clone();
-            window.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    // 运行时重新读取设置，以便用户更改后立即生效
-                    let current_settings = read_app_settings(&app_handle);
-                    if current_settings.minimize_to_tray {
-                        api.prevent_close();
-                        let _ = window_clone.hide();
+            if let Some(window) = app.get_webview_window("main") {
+                let window_clone = window.clone();
+                let app_handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        // 运行时重新读取设置，以便用户更改后立即生效
+                        let current_settings = read_app_settings(&app_handle);
+                        if current_settings.minimize_to_tray {
+                            api.prevent_close();
+                            let _ = window_clone.hide();
+                        }
+                        // 否则不阻止关闭，正常退出
                     }
-                    // 否则不阻止关闭，正常退出
-                }
-            });
+                });
+            } else {
+                log_error!("[setup] 未找到主窗口 main，跳过窗口事件绑定");
+            }
 
             // 静默启动：启动时隐藏窗口到托盘
             if silent_startup {
@@ -9704,6 +9819,9 @@ pub fn run() {
             import_current,
             snapshot_config,
             restore_config,
+            list_config_backups,
+            restore_config_backup,
+            open_backups_folder,
             cancel_switch,
             get_codex_profiles,
             add_codex_profile,
@@ -9732,6 +9850,7 @@ pub fn run() {
             save_app_settings,
             get_app_paths,
             open_folder,
+            open_logs_folder,
             open_external_target,
             check_app_update,
             download_and_open_update,
