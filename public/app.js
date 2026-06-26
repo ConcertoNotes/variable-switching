@@ -156,9 +156,14 @@ const I18N = {
     toolboxTabMarket: "Plugin Market",
     toolboxTabSession: "Session Sync",
     toolboxTabRemote: "Mobile Control",
-    toolboxMarketHint: "Write the Cooper plugin marketplace source to ~/.codex/config.toml. Other marketplace entries are removed when applying.",
-    toolboxMarketInputLabel: "Marketplace Source",
-    toolboxMarketApply: "Apply to Codex",
+    toolboxMarketHint: "Choose a plugin marketplace and install it into Codex. Other marketplace entries are removed when applying.",
+    toolboxMarketInputLabel: "Plugin Marketplace",
+    toolboxMarketApply: "Install to Codex",
+    toolboxMarketplaceInstalling: "Installing plugin marketplace...",
+    toolboxMarketplaceProgressPrepare: "Preparing Codex config...",
+    toolboxMarketplaceProgressInstall: "Installing marketplace with Codex CLI...",
+    toolboxMarketplaceProgressVerify: "Verifying marketplace...",
+    toolboxMarketplaceProgressDone: "Installation complete",
     toolboxCurrentMarket: "Current",
     toolboxMarketType: "Type",
     toolboxMarketSource: "Source",
@@ -213,7 +218,7 @@ const I18N = {
     toolboxLastError: "Last Error",
     toolboxChannelSaved: "Mobile channel saved",
     toolboxDraftSaved: "Toolbox draft saved",
-    toolboxMarketplaceApplied: "Plugin marketplace applied",
+    toolboxMarketplaceApplied: "Plugin marketplace installed",
     toolboxMarketplaceRemoved: "Plugin marketplace removed",
     toolboxBindingSaved: "Session binding saved",
     toolboxBindingRemoved: "Session binding removed",
@@ -490,9 +495,14 @@ const I18N = {
     toolboxTabMarket: "插件市场",
     toolboxTabSession: "会话同步",
     toolboxTabRemote: "手机控制",
-    toolboxMarketHint: "把 Cooper 插件市场地址写入 `~/.codex/config.toml`；写入时会移除其它插件市场源。",
-    toolboxMarketInputLabel: "插件市场地址",
-    toolboxMarketApply: "写入 Codex",
+    toolboxMarketHint: "选择一个插件市场并安装到 Codex；安装时会移除其它插件市场源。",
+    toolboxMarketInputLabel: "插件市场",
+    toolboxMarketApply: "安装到 Codex",
+    toolboxMarketplaceInstalling: "正在安装插件市场...",
+    toolboxMarketplaceProgressPrepare: "正在准备 Codex 配置...",
+    toolboxMarketplaceProgressInstall: "正在通过 Codex CLI 安装插件市场...",
+    toolboxMarketplaceProgressVerify: "正在校验插件市场...",
+    toolboxMarketplaceProgressDone: "安装完成",
     toolboxCurrentMarket: "当前",
     toolboxMarketType: "类型",
     toolboxMarketSource: "地址",
@@ -547,7 +557,7 @@ const I18N = {
     toolboxLastError: "最近错误",
     toolboxChannelSaved: "手机通道已保存",
     toolboxDraftSaved: "工具箱草稿已保存",
-    toolboxMarketplaceApplied: "插件市场已写入",
+    toolboxMarketplaceApplied: "插件市场已安装",
     toolboxMarketplaceRemoved: "插件市场已移除",
     toolboxBindingSaved: "会话绑定已保存",
     toolboxBindingRemoved: "会话绑定已解除",
@@ -805,6 +815,8 @@ let toolboxRefreshTimer = null;
 let toolboxRefreshBusy = false;
 let larkCredentialSaveTimer = null;
 let toolboxRemoteBusy = false;
+let marketplaceInstallBusy = false;
+let marketplaceProgressUnlisten = null;
 
 function t(key, params) {
   const dict = I18N[currentLang] || I18N.en;
@@ -1395,10 +1407,33 @@ function stopToolboxRefresh() {
 
 function renderCodexToolbox() {
   if (!codexToolbox) return;
-  $("toolboxMarketplaceInput").value =
+  const marketplaceValue =
     helpers.normalizeCodexPluginMarketplaceInput?.(codexToolbox.pluginMarketplaceInput) ||
     helpers.CODEX_PLUGIN_MARKETPLACE_URL ||
-    "https://gitcode.com/weixin_65003717/codex-plugin.git";
+    "https://gitcode.com/2301_79703673/codex-plugins.git";
+  const marketplaceSelect = $("toolboxMarketplaceInput");
+  const marketplaces = helpers.CODEX_PLUGIN_MARKETPLACES || [
+    {
+      name: "VarSwitch 插件合集",
+      url: marketplaceValue,
+      count: 189,
+      zh: "覆盖官方常用服务和桌面能力，适合默认安装。",
+      en: "Broad official-style service and desktop coverage; best default choice.",
+    },
+  ];
+  marketplaceSelect.innerHTML = marketplaces
+    .map((item) => {
+      const label = `${item.name} · ${item.count || "--"} plugins`;
+      return `<option value="${esc(item.url)}">${esc(label)}</option>`;
+    })
+    .join("");
+  marketplaceSelect.value = marketplaceValue;
+  const option =
+    helpers.getCodexPluginMarketplaceOption?.(marketplaceValue) ||
+    marketplaces.find((item) => item.url === marketplaceValue) ||
+    marketplaces[0];
+  $("toolboxMarketplaceDesc").textContent =
+    currentLang === "zh" ? option.zh || "" : option.en || option.zh || "";
   renderToolboxSessionSync();
   renderToolboxSyncedThreads();
   renderToolboxMobileControl();
@@ -1835,6 +1870,46 @@ function updateSwitchProgress(payload) {
       el.className = "switch-step";
     }
   }
+}
+
+function marketplaceProgressLabel(label, step) {
+  const labelMap = {
+    prepare: t("toolboxMarketplaceProgressPrepare"),
+    install: t("toolboxMarketplaceProgressInstall"),
+    verify: t("toolboxMarketplaceProgressVerify"),
+    done: t("toolboxMarketplaceProgressDone"),
+  };
+  if (label && labelMap[label]) return labelMap[label];
+  if (step <= 1) return t("toolboxMarketplaceProgressPrepare");
+  if (step === 2) return t("toolboxMarketplaceProgressInstall");
+  if (step === 3) return t("toolboxMarketplaceProgressVerify");
+  return t("toolboxMarketplaceProgressDone");
+}
+
+function showMarketplaceProgress() {
+  const progress = $("toolboxMarketProgress");
+  progress.hidden = false;
+  $("toolboxMarketProgressBar").style.width = "0%";
+  $("toolboxMarketProgressPercent").textContent = "0%";
+  $("toolboxMarketProgressLabel").textContent = t("toolboxMarketplaceProgressPrepare");
+}
+
+function updateMarketplaceProgress(payload) {
+  const step = Math.max(1, Number(payload?.step || 1));
+  const total = Math.max(1, Number(payload?.total || 4));
+  const pct = Math.min(100, Math.round((step / total) * 100));
+  $("toolboxMarketProgressBar").style.width = `${pct}%`;
+  $("toolboxMarketProgressPercent").textContent = `${pct}%`;
+  $("toolboxMarketProgressLabel").textContent = marketplaceProgressLabel(payload?.label, step);
+}
+
+function setMarketplaceInstallBusy(isBusy) {
+  marketplaceInstallBusy = isBusy;
+  $("toolboxMarketApplyBtn").disabled = isBusy;
+  $("toolboxMarketplaceInput").disabled = isBusy;
+  $("toolboxMarketApplyBtn").textContent = isBusy
+    ? t("toolboxMarketplaceInstalling")
+    : t("toolboxMarketApply");
 }
 
 async function loadStatus() {
@@ -3524,15 +3599,39 @@ $("toolboxSessionSyncBtn").addEventListener("click", async () => {
   }
 });
 $("toolboxMarketApplyBtn").addEventListener("click", async () => {
+  if (marketplaceInstallBusy) return;
+  setMarketplaceInstallBusy(true);
+  showMarketplaceProgress();
   try {
+    if (marketplaceProgressUnlisten) {
+      marketplaceProgressUnlisten();
+      marketplaceProgressUnlisten = null;
+    }
+    marketplaceProgressUnlisten = await listen("plugin-marketplace-progress", (event) => {
+      updateMarketplaceProgress(event.payload);
+    });
     codexToolbox = await invoke("apply_plugin_marketplace", {
       source: $("toolboxMarketplaceInput").value.trim(),
     });
+    updateMarketplaceProgress({ step: 4, total: 4, label: "done" });
     showToast(t("toolboxMarketplaceApplied"), "success");
     renderCodexToolbox();
   } catch (error) {
     showToast(String(error), "error");
+  } finally {
+    if (marketplaceProgressUnlisten) {
+      marketplaceProgressUnlisten();
+      marketplaceProgressUnlisten = null;
+    }
+    setMarketplaceInstallBusy(false);
   }
+});
+$("toolboxMarketplaceInput").addEventListener("change", () => {
+  const option =
+    helpers.getCodexPluginMarketplaceOption?.($("toolboxMarketplaceInput").value) ||
+    {};
+  $("toolboxMarketplaceDesc").textContent =
+    currentLang === "zh" ? option.zh || "" : option.en || option.zh || "";
 });
 $("toolboxRemoteStartBtn").addEventListener("click", async () => {
   if (toolboxRemoteBusy) return;

@@ -920,11 +920,40 @@ fn write_toolbox_state(app: &tauri::AppHandle, state: &ToolboxState) -> Result<(
 }
 
 fn default_plugin_marketplace_url() -> &'static str {
+    "https://gitcode.com/2301_79703673/codex-plugins.git"
+}
+
+fn varswitch_github_plugin_marketplace_url() -> &'static str {
+    "https://github.com/ConcertoNotes/codex-plugins.git"
+}
+
+fn upstream_gitcode_plugin_marketplace_url() -> &'static str {
     "https://gitcode.com/weixin_65003717/codex-plugin.git"
 }
 
+fn awesome_plugin_marketplace_url() -> &'static str {
+    "https://github.com/hashgraph-online/awesome-codex-plugins.git"
+}
+
 fn default_plugin_marketplace_name() -> &'static str {
-    "CooperAPI-Plugin"
+    "VarSwitch-Plugin"
+}
+
+fn supported_plugin_marketplace_source(source: &str) -> &'static str {
+    let trimmed = source.trim();
+    if trimmed == varswitch_github_plugin_marketplace_url()
+        || trimmed == "git@github.com:ConcertoNotes/codex-plugins.git"
+    {
+        varswitch_github_plugin_marketplace_url()
+    } else if trimmed == upstream_gitcode_plugin_marketplace_url() {
+        upstream_gitcode_plugin_marketplace_url()
+    } else if trimmed == awesome_plugin_marketplace_url()
+        || trimmed == "git@github.com:hashgraph-online/awesome-codex-plugins.git"
+    {
+        awesome_plugin_marketplace_url()
+    } else {
+        default_plugin_marketplace_url()
+    }
 }
 
 fn lark_create_bot_launcher_url() -> &'static str {
@@ -1424,6 +1453,44 @@ fn plugin_marketplace_source_type(source: &str) -> &'static str {
     } else {
         "local"
     }
+}
+
+fn run_codex_plugin_marketplace_add(source: &str) -> Result<(), String> {
+    let executable = resolve_codex_command()?;
+    let mut command = codex_command(&executable);
+    command
+        .args(["plugin", "marketplace", "add", source, "--json"])
+        .env("CODEX_HOME", codex_config_dir())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = command
+        .output()
+        .map_err(|e| format!("启动 Codex CLI 安装插件市场失败({}): {e}", executable.display()))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let detail = [stdout, stderr]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Err(format!(
+        "Codex CLI 安装插件市场失败(exit {})：{}",
+        output.status.code().unwrap_or(-1),
+        if detail.is_empty() {
+            "无错误输出".to_string()
+        } else {
+            detail
+        }
+    ))
+}
+
+fn config_has_plugin_marketplace_source(config_text: &str, source: &str) -> bool {
+    list_plugin_marketplaces(config_text, source)
+        .iter()
+        .any(|item| item.source.trim() == source.trim())
 }
 
 fn normalize_mobile_base_url(value: &str, channel: &str) -> String {
@@ -5434,6 +5501,17 @@ fn emit_switch_progress(app: &tauri::AppHandle, step: u32, label: &str) {
     );
 }
 
+fn emit_plugin_marketplace_progress(app: &tauri::AppHandle, step: u32, label: &str) {
+    let _ = app.emit(
+        "plugin-marketplace-progress",
+        ProgressEvent {
+            step,
+            total: 4,
+            label: label.to_string(),
+        },
+    );
+}
+
 fn sanitize_endpoint_timeout(timeout_secs: Option<u64>) -> u64 {
     timeout_secs
         .unwrap_or(ENDPOINT_TEST_DEFAULT_TIMEOUT_SECS)
@@ -6264,28 +6342,49 @@ fn apply_plugin_marketplace(
     app: tauri::AppHandle,
     source: String,
 ) -> Result<ToolboxSnapshot, String> {
-    let _ = source;
-    let trimmed = default_plugin_marketplace_url();
+    let trimmed = supported_plugin_marketplace_source(&source);
+    emit_plugin_marketplace_progress(&app, 1, "prepare");
     let config_path = codex_config_path();
     let existing = fs::read_to_string(&config_path).unwrap_or_default();
-    let source_type = plugin_marketplace_source_type(trimmed);
     let cleaned = remove_all_plugin_marketplace_sections(&existing);
-    let next = ensure_plugin_marketplace_section(
-        &cleaned,
-        default_plugin_marketplace_name(),
-        trimmed,
-        source_type,
-    );
     let parent = config_path
         .parent()
         .ok_or("Codex 配置目录不存在")?
         .to_path_buf();
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    fs::write(&config_path, next).map_err(|e| e.to_string())?;
+    fs::write(&config_path, cleaned).map_err(|e| e.to_string())?;
+
+    emit_plugin_marketplace_progress(&app, 2, "install");
+    if let Err(error) = run_codex_plugin_marketplace_add(trimmed) {
+        let fallback_existing = fs::read_to_string(&config_path).unwrap_or_default();
+        let fallback_next = ensure_plugin_marketplace_section(
+            &fallback_existing,
+            default_plugin_marketplace_name(),
+            trimmed,
+            plugin_marketplace_source_type(trimmed),
+        );
+        let _ = fs::write(&config_path, fallback_next);
+        return Err(format!(
+            "{error}\n已尝试把 VarSwitch-Plugin 写入 config.toml 作为兜底；请确认 Codex CLI 和 Git 可用后重试。"
+        ));
+    }
+
+    emit_plugin_marketplace_progress(&app, 3, "verify");
+    let updated = fs::read_to_string(&config_path).unwrap_or_default();
+    if !config_has_plugin_marketplace_source(&updated, trimmed) {
+        let fallback_next = ensure_plugin_marketplace_section(
+            &updated,
+            default_plugin_marketplace_name(),
+            trimmed,
+            plugin_marketplace_source_type(trimmed),
+        );
+        fs::write(&config_path, fallback_next).map_err(|e| e.to_string())?;
+    }
 
     let mut state = read_toolbox_state(&app);
-    state.plugin_marketplace_input = default_plugin_marketplace_url().to_string();
+    state.plugin_marketplace_input = trimmed.to_string();
     write_toolbox_state(&app, &state)?;
+    emit_plugin_marketplace_progress(&app, 4, "done");
     Ok(build_toolbox_snapshot(&app))
 }
 
@@ -9391,6 +9490,33 @@ source_type = "local"
             default_plugin_marketplace_url()
         );
         assert_eq!(state.mobile_remote.mode, "platform_bot");
+    }
+
+    #[test]
+    fn default_plugin_marketplace_uses_varswitch_gitcode_mirror() {
+        assert_eq!(default_plugin_marketplace_name(), "VarSwitch-Plugin");
+        assert_eq!(
+            default_plugin_marketplace_url(),
+            "https://gitcode.com/2301_79703673/codex-plugins.git"
+        );
+    }
+
+    #[test]
+    fn supported_plugin_marketplace_normalizes_known_sources() {
+        assert_eq!(
+            supported_plugin_marketplace_source("git@github.com:ConcertoNotes/codex-plugins.git"),
+            varswitch_github_plugin_marketplace_url()
+        );
+        assert_eq!(
+            supported_plugin_marketplace_source(
+                "git@github.com:hashgraph-online/awesome-codex-plugins.git"
+            ),
+            awesome_plugin_marketplace_url()
+        );
+        assert_eq!(
+            supported_plugin_marketplace_source("https://example.test/custom.git"),
+            default_plugin_marketplace_url()
+        );
     }
 
     #[test]

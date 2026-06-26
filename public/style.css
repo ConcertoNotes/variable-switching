@@ -2181,6 +2181,14 @@ body::before {
   max-width: 980px;
 }
 
+.toolbox-market-progress {
+  margin: 12px 0 4px;
+}
+
+.toolbox-market-progress .switch-progress-meta {
+  margin-bottom: 0;
+}
+
 .toolbox-sync-bar {
   display: flex;
   align-items: center;

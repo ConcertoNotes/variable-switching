@@ -8,9 +8,13 @@ const {
   getEditorPathMode,
   validateEditorPathInput,
   normalizeCodexPluginMarketplaceInput,
+  getCodexPluginMarketplaceOption,
   getCodexToolboxLayout,
   shouldRenderChannelQr,
   CODEX_PLUGIN_MARKETPLACE_URL,
+  VARSWITCH_GITHUB_PLUGIN_MARKETPLACE_URL,
+  AWESOME_CODEX_PLUGIN_MARKETPLACE_URL,
+  CODEX_PLUGIN_MARKETPLACES,
 } = require("./app-helpers.js");
 
 test("shouldAutoOpenUsageGuide defaults to showing the guide", () => {
@@ -81,11 +85,27 @@ test("validateEditorPathInput rejects empty path drafts", () => {
   });
 });
 
-test("normalizeCodexPluginMarketplaceInput falls back to the GitCode marketplace", () => {
+test("normalizeCodexPluginMarketplaceInput falls back to the VarSwitch GitCode marketplace", () => {
   assert.equal(normalizeCodexPluginMarketplaceInput(""), CODEX_PLUGIN_MARKETPLACE_URL);
   assert.equal(
-    normalizeCodexPluginMarketplaceInput(" https://gitcode.com/weixin_65003717/codex-plugin.git "),
+    normalizeCodexPluginMarketplaceInput(" https://gitcode.com/2301_79703673/codex-plugins.git "),
     CODEX_PLUGIN_MARKETPLACE_URL
+  );
+});
+
+test("normalizeCodexPluginMarketplaceInput supports alternate plugin marketplaces", () => {
+  assert.equal(
+    normalizeCodexPluginMarketplaceInput("git@github.com:ConcertoNotes/codex-plugins.git"),
+    VARSWITCH_GITHUB_PLUGIN_MARKETPLACE_URL
+  );
+  assert.equal(
+    normalizeCodexPluginMarketplaceInput("git@github.com:hashgraph-online/awesome-codex-plugins.git"),
+    AWESOME_CODEX_PLUGIN_MARKETPLACE_URL
+  );
+  assert.equal(CODEX_PLUGIN_MARKETPLACES.length, 4);
+  assert.equal(
+    getCodexPluginMarketplaceOption(AWESOME_CODEX_PLUGIN_MARKETPLACE_URL).id,
+    "awesome"
   );
 });
 

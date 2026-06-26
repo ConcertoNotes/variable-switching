@@ -284,7 +284,17 @@
         <div class="mgmt-hint" id="toolboxMarketHint">Manage the Codex plugin marketplace source persisted in `~/.codex/config.toml`.</div>
         <div class="form-group">
           <label id="toolboxMarketInputLabel" for="toolboxMarketplaceInput">Marketplace Source</label>
-          <input type="text" id="toolboxMarketplaceInput" value="https://gitcode.com/weixin_65003717/codex-plugin.git" readonly>
+          <select class="form-select" id="toolboxMarketplaceInput"></select>
+          <div class="form-hint" id="toolboxMarketplaceDesc"></div>
+        </div>
+        <div class="toolbox-market-progress" id="toolboxMarketProgress" hidden>
+          <div class="switch-progress-track">
+            <div class="switch-progress-bar" id="toolboxMarketProgressBar"></div>
+          </div>
+          <div class="switch-progress-meta">
+            <div class="switch-step-label" id="toolboxMarketProgressLabel">Preparing...</div>
+            <div class="switch-progress-percent" id="toolboxMarketProgressPercent">0%</div>
+          </div>
         </div>
         <div class="form-actions">
           <button class="btn btn-primary" id="toolboxMarketApplyBtn" type="button">Apply to Codex</button>
