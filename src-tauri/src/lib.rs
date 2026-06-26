@@ -3758,8 +3758,14 @@ fn codex_inject_send_script(prompt_json: &str) -> String {
     input.dispatchEvent(new KeyboardEvent("keyup", opts));
   }
   const before = assistantTexts();
-  const input = findInput();
-  if (!input) return { ok: false, error: "未找到 Codex 输入框" };
+  // 等待输入框出现（重启 Codex 后页面需要时间加载，最多等约 15 秒）。
+  let input = null;
+  for (let i = 0; i < 100; i++) {
+    input = findInput();
+    if (input) break;
+    await sleep(150);
+  }
+  if (!input) return { ok: false, error: "未找到 Codex 输入框（页面可能还在加载）" };
   setInputValue(input, prompt);
   let sent = false;
   for (let i = 0; i < 20; i++) {
@@ -3770,32 +3776,69 @@ fn codex_inject_send_script(prompt_json: &str) -> String {
   if (!sent) submitByKeyboard(input);
   // 给输入框清空留足时间(逐字符输入+发送后 Codex 清空输入框需要时间)。
   await sleep(1500);
+  // 检测 Codex 是否仍在生成/思考。综合多种信号，任一命中即认为忙碌。
+  function isGenerating() {
+    // 1) 停止/取消按钮（生成中常出现，结束后变回发送按钮）。
+    const stopBtn = document.querySelector(
+      "[data-testid*='stop'], [data-testid*='Stop'], " +
+      "button[aria-label*='Stop'], button[aria-label*='停止'], " +
+      "button[aria-label*='Cancel'], button[aria-label*='取消'], " +
+      "button[aria-label*='中断']"
+    );
+    if (stopBtn) {
+      const s = getComputedStyle(stopBtn);
+      const r = stopBtn.getBoundingClientRect();
+      if (s.visibility !== "hidden" && s.display !== "none" && r.width > 0 && r.height > 0) return true;
+    }
+    // 2) 思考/加载文案与转圈指示器。
+    const thinking = document.querySelector(
+      "[class*='thinking'], [class*='Thinking'], [class*='loading'], " +
+      "[class*='spinner'], [class*='Spinner'], [role='progressbar'], " +
+      "[class*='generating'], [class*='Generating'], [aria-busy='true']"
+    );
+    if (thinking) return true;
+    // 3) 页面文本里出现“正在思考/Thinking…”等提示。
+    const bodyText = (document.body.innerText || "");
+    if (/正在思考|思考中|Thinking…|Thinking\.\.\.|Generating|正在生成/.test(bodyText)) return true;
+    return false;
+  }
   const startedAt = Date.now();
   const beforeCount = before.length;
+  const baseLast = before[before.length - 1] || "";
   let latest = "";
   let lastChangeAt = 0;
   let everChanged = false;
-  while (Date.now() - startedAt < 180000) {
-    await sleep(800);
+  while (Date.now() - startedAt < 300000) {
+    await sleep(700);
     const after = assistantTexts();
-    // 获取新增的所有助手回复块（跳过发送前已存在的块）
-    const newBlocks = after.slice(beforeCount);
-    const current = newBlocks.join("\n\n").trim();
-    // 出现了新回复
-    if (current && after.length > beforeCount) {
-      everChanged = true;
-      if (current !== latest) {
-        latest = current;
-        lastChangeAt = Date.now();
+    const lastBlock = after[after.length - 1] || "";
+    // 检测新回复：块数量增加，或末块内容相对发送前发生变化（流式更新同一块）。
+    const hasNew = after.length > beforeCount || (lastBlock && lastBlock !== baseLast);
+    if (hasNew) {
+      // 拿完整回复：若有新增块则合并所有新增块；
+      // 若数量没增加（Codex 在同一块内流式输出），则取末块本身。
+      let current;
+      if (after.length > beforeCount) {
+        current = after.slice(beforeCount).join("\n\n").trim();
+      } else {
+        current = lastBlock;
+      }
+      if (current) {
+        everChanged = true;
+        if (current !== latest) {
+          latest = current;
+          lastChangeAt = Date.now();
+        }
       }
     }
     if (everChanged && latest) {
-      // 以"回复文本连续稳定"为主判据；不再死等 Stop 按钮消失，
-      // 因为 Codex 界面可能常驻停止类按钮，会导致永远判不了稳定。
-      const busy = Boolean(document.querySelector("[data-testid*='stop-button'], button[aria-label='Stop generating'], button[aria-label='停止生成']"));
+      const busy = isGenerating();
       const stableFor = Date.now() - lastChangeAt;
-      if (!busy && stableFor > 2500) return { ok: true, text: latest };
-      if (busy && stableFor > 8000) return { ok: true, text: latest };
+      // 只有在“不忙 + 文本连续稳定 4 秒”时才判定完成；
+      // 思考停顿期间 busy 为真会持续等待，避免只回传摘要就结束。
+      if (!busy && stableFor > 4000) return { ok: true, text: latest };
+      // 极端兜底：即使一直判忙，但文本已 45 秒没变，也返回当前结果。
+      if (busy && stableFor > 45000) return { ok: true, text: latest };
     }
   }
   return { ok: !!latest, text: latest, error: latest ? "" : "Codex 没有产生回复" };
