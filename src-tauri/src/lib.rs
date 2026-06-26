@@ -22,6 +22,12 @@ use tauri::{
 use winreg::enums::HKEY_CURRENT_USER;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+// Windows 常量：CREATE_NO_WINDOW 标志，用于隐藏子进程窗口
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const AUTH_TOKEN_ENV: &str = "ANTHROPIC_AUTH_TOKEN";
 const AUTH_KEY_ENV: &str = "ANTHROPIC_AUTH_KEY";
@@ -4365,8 +4371,8 @@ fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Re
         .parent()
         .ok_or("飞书 connector 运行目录不存在")?
         .to_path_buf();
-    let mut child = Command::new(node)
-        .arg(&runner)
+    let mut cmd = Command::new(node);
+    cmd.arg(&runner)
         .current_dir(connector_dir)
         .env("LARK_APP_ID", binding.app_id.trim())
         .env("LARK_APP_SECRET", binding.app_secret.trim())
@@ -4377,8 +4383,10 @@ fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Re
         .env("LARK_BOT_OPEN_ID", binding.bot_open_id.trim())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut child = cmd.spawn()
         .map_err(|e| {
             LARK_BRIDGE_ACTIVE.store(false, Ordering::SeqCst);
             format!("启动飞书消息桥失败: {e}")
@@ -4507,15 +4515,17 @@ fn start_qq_gateway(app: tauri::AppHandle, binding: MobileChannelBinding) -> Res
         .parent()
         .ok_or("QQ 网关运行目录不存在")?
         .to_path_buf();
-    let mut child = Command::new(node)
-        .arg(&runner)
+    let mut cmd = Command::new(node);
+    cmd.arg(&runner)
         .current_dir(connector_dir)
         .env("QQ_APP_ID", binding.app_id.trim())
         .env("QQ_APP_SECRET", binding.app_secret.trim())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut child = cmd.spawn()
         .map_err(|e| {
             QQ_GATEWAY_ACTIVE.store(false, Ordering::SeqCst);
             format!("启动 QQ 网关失败: {e}")
@@ -6700,13 +6710,15 @@ fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
                 return;
             }
         };
-        let mut child = match Command::new(node)
-            .arg(&runner)
+        let mut cmd = Command::new(node);
+        cmd.arg(&runner)
             .current_dir(connector_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+            .stderr(Stdio::piped());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let mut child = match cmd.spawn()
         {
             Ok(child) => child,
             Err(error) => {
