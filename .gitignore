@@ -79,3 +79,4 @@ hi-codex-src-test/
 # Project local files
 PLAN.md
 src-tauri/varswitch-profiles.json
+codex-plugins/
