@@ -1754,11 +1754,13 @@ fn probe_mobile_channel(binding: &MobileChannelBinding) -> Result<(String, Strin
 }
 
 fn command_available(name: &str) -> bool {
-    Command::new(name)
-        .arg("--version")
+    let mut cmd = Command::new(name);
+    cmd.arg("--version")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.status()
         .map(|status| status.success())
         .unwrap_or(false)
 }
@@ -2595,8 +2597,8 @@ fn ensure_lark_bridge_connector(app: &tauri::AppHandle) -> Result<PathBuf, Strin
     let ws_module = connector_dir.join("node_modules").join("ws");
     if !ws_module.exists() {
         let npm = npm_command_name()?;
-        let output = Command::new(npm)
-            .args([
+        let mut cmd = Command::new(npm);
+        cmd.args([
                 "install",
                 "--omit=dev",
                 "--no-audit",
@@ -2605,8 +2607,10 @@ fn ensure_lark_bridge_connector(app: &tauri::AppHandle) -> Result<PathBuf, Strin
             ])
             .current_dir(&connector_dir)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
+            .stderr(Stdio::piped());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let output = cmd.output()
             .map_err(|e| format!("启动 npm 安装飞书 WebSocket 依赖失败: {e}"))?;
         if !output.status.success() {
             let mut detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -2645,8 +2649,8 @@ fn ensure_qq_qr_connector(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let ws_module = connector_dir.join("node_modules").join("ws");
     if !connector_module.exists() || !qrcode_module.exists() || !ws_module.exists() {
         let npm = npm_command_name()?;
-        let output = Command::new(npm)
-            .args([
+        let mut cmd = Command::new(npm);
+        cmd.args([
                 "install",
                 "--omit=dev",
                 "--no-audit",
@@ -2655,8 +2659,10 @@ fn ensure_qq_qr_connector(app: &tauri::AppHandle) -> Result<PathBuf, String> {
             ])
             .current_dir(&connector_dir)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
+            .stderr(Stdio::piped());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let output = cmd.output()
             .map_err(|e| format!("启动 npm 安装 QQ 扫码依赖失败: {e}"))?;
         if !output.status.success() {
             let mut detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -3196,13 +3202,16 @@ fn codex_command(executable: &std::path::Path) -> Command {
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase());
-    if cfg!(windows) && matches!(ext.as_deref(), Some("cmd") | Some("bat")) {
-        let mut cmd = Command::new("cmd");
-        cmd.arg("/C").arg(executable);
-        cmd
+    let mut cmd = if cfg!(windows) && matches!(ext.as_deref(), Some("cmd") | Some("bat")) {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg(executable);
+        c
     } else {
         Command::new(executable)
-    }
+    };
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
 }
 
 // ===================== Codex 桌面 App CDP 注入 =====================
@@ -3236,16 +3245,17 @@ fn codex_debug_port() -> Option<u16> {
 /// 从正在运行的 Codex.exe 命令行里解析 `--remote-debugging-port=<port>`。
 #[cfg(windows)]
 fn codex_debug_port_from_process() -> Option<u16> {
-    let output = Command::new("powershell")
-        .args([
+    let mut cmd = Command::new("powershell");
+    cmd.args([
             "-NoProfile",
             "-Command",
             "Get-CimInstance Win32_Process -Filter \"name='Codex.exe'\" | Select-Object -ExpandProperty CommandLine",
         ])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd.output().ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
     let marker = "--remote-debugging-port=";
     for line in text.lines() {
@@ -3293,17 +3303,18 @@ fn codex_debug_port_or_relaunch() -> Result<u16, String> {
 /// 从正在运行的 Codex 主进程拿到其可执行文件完整路径(动态获取，不写死安装位置)。
 #[cfg(windows)]
 fn running_codex_exe_path() -> Option<String> {
-    let output = Command::new("powershell")
-        .args([
+    let mut cmd = Command::new("powershell");
+    cmd.args([
             "-NoProfile",
             "-Command",
             // 主进程:名为 Codex.exe、命令行不含 --type= (排除 GPU/渲染子进程) 且不在 resources 下。
             "Get-CimInstance Win32_Process -Filter \"name='Codex.exe'\" | Where-Object { $_.CommandLine -notlike '*--type=*' -and $_.CommandLine -notlike '*resources*' } | Select-Object -First 1 -ExpandProperty ExecutablePath",
         ])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd.output().ok()?;
     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if path.is_empty() {
         None
@@ -3319,21 +3330,25 @@ fn relaunch_codex_with_debug_port(port: u16) -> Result<(), String> {
     let exe_path = running_codex_exe_path()
         .ok_or("未找到正在运行的 Codex App，请先手动打开 Codex 桌面应用")?;
     // 2) 关闭所有 Codex.exe(taskkill /F /T 连子进程一并结束)。
-    let _ = Command::new("taskkill")
-        .args(["/F", "/T", "/IM", "Codex.exe"])
+    let mut kill_cmd = Command::new("taskkill");
+    kill_cmd.args(["/F", "/T", "/IM", "Codex.exe"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    kill_cmd.creation_flags(CREATE_NO_WINDOW);
+    let _ = kill_cmd.status();
     // 等待进程退出，端口释放。
     std::thread::sleep(Duration::from_millis(1500));
     // 3) 用调试端口重启。--remote-allow-origins 允许本地 CDP 连接。
     let allow_origin = format!("http://127.0.0.1:{port}");
-    Command::new(&exe_path)
-        .arg(format!("--remote-debugging-port={port}"))
+    let mut launch_cmd = Command::new(&exe_path);
+    launch_cmd.arg(format!("--remote-debugging-port={port}"))
         .arg(format!("--remote-allow-origins={allow_origin}"))
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    launch_cmd.creation_flags(CREATE_NO_WINDOW);
+    launch_cmd.spawn()
         .map_err(|e| format!("重启 Codex App 失败({exe_path}): {e}"))?;
     Ok(())
 }
@@ -3756,16 +3771,18 @@ fn codex_inject_send_script(prompt_json: &str) -> String {
   // 给输入框清空留足时间(逐字符输入+发送后 Codex 清空输入框需要时间)。
   await sleep(1500);
   const startedAt = Date.now();
-  const baseLast = before[before.length - 1] || "";
+  const beforeCount = before.length;
   let latest = "";
   let lastChangeAt = 0;
   let everChanged = false;
   while (Date.now() - startedAt < 180000) {
     await sleep(800);
     const after = assistantTexts();
-    const current = after[after.length - 1] || "";
-    // 出现了新回复(数量变化或末条内容变化)。
-    if ((after.length !== before.length || current !== baseLast) && current) {
+    // 获取新增的所有助手回复块（跳过发送前已存在的块）
+    const newBlocks = after.slice(beforeCount);
+    const current = newBlocks.join("\n\n").trim();
+    // 出现了新回复
+    if (current && after.length > beforeCount) {
       everChanged = true;
       if (current !== latest) {
         latest = current;
@@ -3797,11 +3814,13 @@ fn activate_codex_thread(thread_id: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
         // 用 cmd 的 start 触发系统协议处理(start 的首个引号参数是窗口标题，故留空)。
-        Command::new("cmd")
-            .args(["/C", "start", "", &deep_link])
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "start", "", &deep_link])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+            .stderr(Stdio::null());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.spawn()
             .map_err(|e| format!("打开 Codex 对话失败: {e}"))?;
     }
     #[cfg(not(windows))]
@@ -7584,9 +7603,10 @@ fn open_folder(path: String) -> Result<(), String> {
     };
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .arg(dir.to_string_lossy().to_string())
-            .spawn()
+        let mut cmd = std::process::Command::new("explorer");
+        cmd.arg(dir.to_string_lossy().to_string());
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(not(target_os = "windows"))]
@@ -9345,9 +9365,10 @@ fn fetch_latest_release() -> Result<GitHubRelease, String> {
 fn open_with_system(target: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", target])
-            .spawn()
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", target]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.spawn()
             .map_err(|e| e.to_string())?;
     }
 
