@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VarSwitch</title>
+  <link rel="icon" type="image/png" href="app-icon.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -70,34 +71,62 @@
       <span id="updatePillText">New version available</span>
       <span class="update-pill-action" id="updatePillAction">Download</span>
     </button>
+    <div class="update-download-progress" id="updateDownloadProgress" hidden>
+      <div class="update-download-progress-bar" id="updateDownloadProgressBar"></div>
+    </div>
   </div>
 
-  <div class="page-tabs" id="pageTabs">
-    <button class="page-tab active" data-page="claude" type="button">Claude Code</button>
-    <button class="page-tab" data-page="codex" type="button">Codex CLI</button>
-    <button class="page-tab page-tab-toolbox" id="codexToolboxBtn" type="button">Toolbox</button>
+  <div class="control-shell" id="controlShell">
+    <div class="control-hero">
+      <div class="control-hero-main">
+        <div class="control-kicker">Unified Control Center</div>
+        <h1>VarSwitch Console</h1>
+        <p>集中管理 Claude Code、Codex CLI、插件市场、移动端控制与诊断状态。</p>
+      </div>
+      <div class="control-hero-actions control-command-grid console-command-grid">
+        <button class="command-tile" id="usageGuideBtn" type="button">
+          <span class="command-icon" aria-hidden="true"><img src="icon-guide.svg" alt=""></span>
+          <span id="usageGuideBtnText">Usage Guide</span>
+        </button>
+        <button class="command-tile" id="updateBtn" type="button">
+          <span class="command-icon" aria-hidden="true"><img src="icon-update.svg" alt=""></span>
+          <span id="updateBtnText">Check for Updates</span>
+        </button>
+        <button class="command-tile" id="downloadSiteBtn" type="button">
+          <span class="command-icon" aria-hidden="true"><img src="icon-download.svg" alt=""></span>
+          <span id="downloadSiteBtnText">Download Site</span>
+        </button>
+        <button class="command-tile" id="githubRepoBtn" type="button">
+          <span class="command-icon" aria-hidden="true"><img src="icon-github.svg" alt=""></span>
+          <span id="githubRepoBtnText">GitHub Repo</span>
+        </button>
+        <button class="command-tile command-tile-toolbox" id="heroToolboxBtn" type="button">
+          <span class="command-icon" aria-hidden="true"><img src="icon-toolbox.svg" alt=""></span>
+          <span>Codex Toolbox</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="page-tabs" id="pageTabs">
+      <button class="page-tab active" data-page="claude" type="button">
+        <span class="page-tab-icon page-tab-icon-anthropic" aria-hidden="true">
+          <img src="anthropic-color.svg" width="15" height="15" alt="">
+        </span>
+        <span>Claude Code</span>
+      </button>
+      <button class="page-tab" data-page="codex" type="button">
+        <span class="page-tab-icon page-tab-icon-codex" aria-hidden="true">
+          <img src="OpenAI-black-monoblossom.svg" width="15" height="15" alt="">
+        </span>
+        <span>Codex CLI</span>
+      </button>
+    </div>
   </div>
 
   <div class="page-content active" id="pageClaudeCode">
   <div class="app">
-    <section class="support-section">
-      <div class="support-card">
-        <div class="support-copy">
-          <h2 class="section-title" id="supportSectionTitle">Quick Actions</h2>
-          <p class="support-hint" id="supportHint">Open the usage guide, check GitHub Releases for updates, or jump to the repository.</p>
-        </div>
-        <div class="support-actions">
-          <button class="btn btn-secondary" id="usageGuideBtn" type="button">
-            <span id="usageGuideBtnText">Usage Guide</span>
-          </button>
-          <button class="btn btn-secondary" id="updateBtn" type="button">
-            <span id="updateBtnText">Check for Updates</span>
-          </button>
-          <button class="btn btn-secondary" id="githubRepoBtn" type="button">
-            <span id="githubRepoBtnText">GitHub Repo</span>
-          </button>
-        </div>
-      </div>
+    <section class="support-section control-panel-section console-hint-section">
+      <p class="support-hint" id="supportHint">Open the usage guide, check GitHub Releases for updates, or jump to the repository.</p>
     </section>
 
     <section class="status-section">
@@ -131,8 +160,16 @@
   <div class="page-content" id="pageCodex">
   <div class="app">
     <section class="status-section">
-      <h2 class="section-title" id="codexStatusSectionTitle">Current Status</h2>
+      <div class="section-header-row">
+        <h2 class="section-title" id="codexStatusSectionTitle">Current Status</h2>
+        <div class="section-header-actions">
+          <button class="btn btn-secondary btn-sm" id="codexRefreshDiagnosticsBtn" type="button">刷新诊断</button>
+          <button class="btn btn-secondary btn-sm" id="codexBackupRuntimeBtn" type="button">备份 Codex 文件</button>
+          <button class="btn btn-primary btn-sm" id="codexToolboxOpenBtn" type="button">打开 Codex Toolbox</button>
+        </div>
+      </div>
       <div class="status-grid" id="codexStatusGrid"></div>
+      <div class="diagnostics-panel" id="codexDiagnosticsPanel"></div>
     </section>
 
     <section class="active-config-section" id="codexActiveConfigSection" style="display:none;">
@@ -299,6 +336,21 @@
         <div class="form-actions">
           <button class="btn btn-primary" id="toolboxMarketApplyBtn" type="button">Apply to Codex</button>
         </div>
+        <div class="builtin-plugin-panel" id="builtinPluginPanel">
+          <div class="builtin-plugin-header">
+            <div>
+              <div class="builtin-plugin-kicker">Codex App Built-ins</div>
+              <h3>Computer Use / Chrome 插件修复</h3>
+              <p>自动发现 Codex App 自带 openai-bundled 插件，挂载本地市场并启用关键能力。</p>
+            </div>
+            <div class="builtin-plugin-actions">
+              <button class="btn btn-secondary btn-sm" id="builtinPluginRepairBtn" type="button">修复内置市场</button>
+              <button class="btn btn-primary btn-sm" id="builtinPluginEnableImportantBtn" type="button">启用关键插件</button>
+            </div>
+          </div>
+          <div class="builtin-plugin-summary" id="builtinPluginSummary">--</div>
+          <div class="builtin-plugin-list" id="builtinPluginList"></div>
+        </div>
       </div>
 
       <div class="skills-tab-content" id="toolboxSessionContent" style="display:none;">
@@ -307,7 +359,41 @@
           <div class="settings-row-value" id="toolboxSessionSummary">--</div>
           <button class="btn btn-primary btn-sm" id="toolboxSessionSyncBtn" type="button">Sync Now</button>
         </div>
+        <div class="toolbox-session-progress" id="toolboxSessionProgress" hidden>
+          <div class="switch-progress-track">
+            <div class="switch-progress-bar" id="toolboxSessionProgressBar"></div>
+          </div>
+          <div class="switch-progress-meta">
+            <div class="switch-step-label" id="toolboxSessionProgressLabel">Preparing...</div>
+            <div class="switch-progress-percent" id="toolboxSessionProgressPercent">0%</div>
+          </div>
+        </div>
         <div class="toolbox-subtitle" id="toolboxSyncedThreadsTitle">Synced Codex Threads</div>
+        <div class="toolbox-session-safe-note" id="toolboxSessionSafeNote">Session operations in this toolbox do not delete Codex App history files.</div>
+        <div class="toolbox-session-manager-toolbar">
+          <label class="toolbox-session-search" for="toolboxSessionSearchInput">
+            <span aria-hidden="true">⌕</span>
+            <input type="search" id="toolboxSessionSearchInput" placeholder="Search sessions">
+          </label>
+          <button class="btn btn-secondary btn-sm" id="toolboxSessionSelectAllBtn" type="button">Select All</button>
+          <button class="btn btn-secondary btn-sm" id="toolboxSessionCopyIdsBtn" type="button">Copy IDs</button>
+          <button class="btn btn-secondary btn-sm" id="toolboxSessionRestoreOpenBtn" type="button">Trash</button>
+          <button class="btn btn-secondary btn-sm danger-text" id="toolboxSessionTrashBtn" type="button">Move to Trash</button>
+        </div>
+        <div class="toolbox-session-manager-status" id="toolboxSessionManagerStatus"></div>
+        <div class="toolbox-session-trash-drawer" id="toolboxSessionTrashDrawer" hidden>
+          <div class="toolbox-session-trash-header">
+            <div>
+              <div class="toolbox-session-trash-title" id="toolboxSessionTrashTitle">Session Trash</div>
+              <div class="toolbox-session-trash-hint" id="toolboxSessionTrashHint">Restore sessions hidden from this toolbox.</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="toolboxSessionTrashCloseBtn" type="button">Close</button>
+          </div>
+          <div class="toolbox-session-trash-list" id="toolboxSessionTrashList"></div>
+          <div class="form-actions">
+            <button class="btn btn-primary btn-sm" id="toolboxSessionRestoreBtn" type="button">Restore Selected</button>
+          </div>
+        </div>
         <div class="mgmt-body" id="toolboxSyncedThreadsList"></div>
       </div>
 
@@ -615,6 +701,15 @@
             </div>
             <div class="settings-row">
               <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsCodexPathLabel">Codex settings</div>
+                <div class="settings-row-value" id="settingsCodexPathValue">--</div>
+              </div>
+              <div class="settings-row-action">
+                <button class="btn btn-secondary btn-sm" id="settingsOpenCodexDir" type="button">Open</button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-info">
                 <div class="settings-row-label" id="settingsLogsLabel">运行日志</div>
                 <div class="settings-row-value" id="settingsLogsValue">出现问题时可打开日志文件夹查看或反馈</div>
               </div>
@@ -667,29 +762,43 @@
           <div class="guide-step-card">
             <div class="guide-step-index">1</div>
             <div>
-              <div class="guide-step-title" id="usageGuideStep1Title">Add or import a config</div>
-              <div class="guide-step-desc" id="usageGuideStep1Desc">Use Add Config or Import Current to prepare your API key and base URL.</div>
+              <div class="guide-step-title" id="usageGuideStep1Title">Claude Code configs</div>
+              <div class="guide-step-desc" id="usageGuideStep1Desc">Add or import Token/Base URL configs, then switch to sync system env, editors, and Claude settings.</div>
             </div>
           </div>
           <div class="guide-step-card">
             <div class="guide-step-index">2</div>
             <div>
-              <div class="guide-step-title" id="usageGuideStep2Title">Switch the active config</div>
-              <div class="guide-step-desc" id="usageGuideStep2Desc">Click Switch on a config card and wait for System, Editors, and Claude to finish syncing.</div>
+              <div class="guide-step-title" id="usageGuideStep2Title">Codex CLI configs</div>
+              <div class="guide-step-desc" id="usageGuideStep2Desc">Manage Codex API Key, Base URL, model, provider, auth mode, diagnostics, and runtime backups.</div>
             </div>
           </div>
           <div class="guide-step-card">
             <div class="guide-step-index">3</div>
             <div>
-              <div class="guide-step-title" id="usageGuideStep3Title">Restart terminals and editors</div>
-              <div class="guide-step-desc" id="usageGuideStep3Desc">After switching, restart your terminal and editor windows so the new environment variables take effect.</div>
+              <div class="guide-step-title" id="usageGuideStep3Title">Codex Toolbox</div>
+              <div class="guide-step-desc" id="usageGuideStep3Desc">Install plugin marketplaces, repair bundled plugins, sync Codex sessions, and bind mobile control.</div>
             </div>
           </div>
           <div class="guide-step-card">
             <div class="guide-step-index">4</div>
             <div>
-              <div class="guide-step-title" id="usageGuideStep4Title">Manage Claude-related files</div>
-              <div class="guide-step-desc" id="usageGuideStep4Desc">The toolbar lets you manage Skills, Prompts, MCP servers, and app settings in one place.</div>
+              <div class="guide-step-title" id="usageGuideStep4Title">Skills, prompts, and MCP</div>
+              <div class="guide-step-desc" id="usageGuideStep4Desc">Use toolbar entries to edit Claude Skills, CLAUDE.md prompt templates, and MCP server JSON.</div>
+            </div>
+          </div>
+          <div class="guide-step-card">
+            <div class="guide-step-index">5</div>
+            <div>
+              <div class="guide-step-title" id="usageGuideStep5Title">Settings and backups</div>
+              <div class="guide-step-desc" id="usageGuideStep5Desc">Set language, theme, tray behavior, editor paths, export/import profiles, and roll back backups.</div>
+            </div>
+          </div>
+          <div class="guide-step-card">
+            <div class="guide-step-index">6</div>
+            <div>
+              <div class="guide-step-title" id="usageGuideStep6Title">Updates and restart tips</div>
+              <div class="guide-step-desc" id="usageGuideStep6Desc">Check updates from the home page. After switching configs, restart terminals and editors to apply env vars.</div>
             </div>
           </div>
         </div>

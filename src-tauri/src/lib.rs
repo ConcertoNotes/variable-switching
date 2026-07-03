@@ -1,29 +1,32 @@
+use base64::Engine;
+use image::{DynamicImage, Luma};
+use qrcode::{EcLevel, QrCode};
 use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpStream, UdpSocket};
-use std::path::PathBuf;
+use std::net::{TcpListener, TcpStream, UdpSocket};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 use std::sync::OnceLock;
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
-use qrcode::{QrCode, EcLevel};
-use image::{DynamicImage, Luma};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, State,
 };
+use tauri_plugin_updater::UpdaterExt;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 use winreg::enums::HKEY_CURRENT_USER;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 // Windows 常量：CREATE_NO_WINDOW 标志，用于隐藏子进程窗口
 #[cfg(target_os = "windows")]
@@ -34,9 +37,7 @@ const AUTH_KEY_ENV: &str = "ANTHROPIC_AUTH_KEY";
 const LEGACY_AUTH_ENV: &str = "ANTHROPIC_API_KEY";
 const BASE_URL_ENV: &str = "ANTHROPIC_BASE_URL";
 const SWITCH_TOTAL_STEPS: u32 = 6;
-const GITHUB_REPO_URL: &str = "https://github.com/ConcertoNotes/variable-switching";
-const GITHUB_LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/ConcertoNotes/variable-switching/releases/latest";
+const APP_DOWNLOAD_PAGE_URL: &str = "https://download.varswitch.strova.top/";
 const ENDPOINT_TEST_DEFAULT_TIMEOUT_SECS: u64 = 8;
 const ENDPOINT_TEST_MIN_TIMEOUT_SECS: u64 = 2;
 const ENDPOINT_TEST_MAX_TIMEOUT_SECS: u64 = 30;
@@ -50,6 +51,22 @@ static LARK_BRIDGE_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static QQ_GATEWAY_ACTIVE: AtomicBool = AtomicBool::new(false);
 static QQ_GATEWAY_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static WECHAT_LISTENER_ACTIVE: AtomicBool = AtomicBool::new(false);
+static SMART_CONTROL_STATUS_CACHE: Mutex<Option<SmartControlStatus>> = Mutex::new(None);
+static SMART_CONTROL_SERVER_ACTIVE: AtomicBool = AtomicBool::new(false);
+static SMART_CONTROL_SERVER_CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
+static SMART_CONTROL_REMOTE_CONNECTED: AtomicBool = AtomicBool::new(false);
+static SMART_CONTROL_LAST_EVENT: Mutex<Option<SmartControlEvent>> = Mutex::new(None);
+static SMART_CONTROL_WS_WRITER: Mutex<Option<TcpStream>> = Mutex::new(None);
+static SMART_CONTROL_NEXT_REQUEST_ID: OnceLock<Mutex<u64>> = OnceLock::new();
+static SMART_CONTROL_PENDING: OnceLock<(Mutex<HashMap<u64, SmartControlPendingResult>>, Condvar)> =
+    OnceLock::new();
+static SMART_CONTROL_EVENT_LOG: OnceLock<Mutex<Vec<SmartControlEvent>>> = OnceLock::new();
+static SMART_CONTROL_CLIENT_STATE: OnceLock<Mutex<SmartControlClientState>> = OnceLock::new();
+static SMART_CONTROL_SERVER_CHUNKS: OnceLock<Mutex<HashMap<String, SmartControlChunkAssembly>>> =
+    OnceLock::new();
+static SMART_CONTROL_TURN_STREAMS: OnceLock<Mutex<HashMap<u64, SmartControlTurnAccumulator>>> =
+    OnceLock::new();
+static SMART_CONTROL_APPROVALS: OnceLock<Mutex<Vec<SmartControlApprovalRequest>>> = OnceLock::new();
 
 // ── Data Structures ─────────────────────────────────
 
@@ -121,6 +138,19 @@ struct CodexThreadRecord {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
+struct TrashedCodexThreadRecord {
+    id: String,
+    thread_name: String,
+    updated_at: String,
+    session_file: String,
+    cwd: String,
+    last_user_message: String,
+    last_assistant_message: String,
+    deleted_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 struct CodexSessionSyncState {
     last_synced_at: String,
     total: usize,
@@ -134,6 +164,42 @@ struct PluginMarketplaceItem {
     source_type: String,
     is_official: bool,
     is_current: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct CodexBuiltinPluginSkill {
+    name: String,
+    description: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct CodexBuiltinPluginItem {
+    id: String,
+    name: String,
+    display_name: String,
+    marketplace: String,
+    version: String,
+    description: String,
+    root: String,
+    enabled: bool,
+    important: bool,
+    skills: Vec<CodexBuiltinPluginSkill>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct CodexBuiltinPluginStatus {
+    available: bool,
+    marketplace_source: String,
+    marketplace_configured: bool,
+    enabled_count: usize,
+    total_count: usize,
+    important_enabled_count: usize,
+    important_total_count: usize,
+    plugins: Vec<CodexBuiltinPluginItem>,
+    last_error: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -154,6 +220,111 @@ struct RemoteDeviceState {
     active_thread_id: String,
     #[serde(default)]
     active_thread_name: String,
+    #[serde(default)]
+    remote_control_preferred: bool,
+    #[serde(default)]
+    remote_control_status: String,
+    #[serde(default)]
+    remote_control_backend_url: String,
+    #[serde(default)]
+    remote_control_connected: bool,
+    #[serde(default)]
+    remote_control_detail: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct SmartControlStatus {
+    available: bool,
+    connected: bool,
+    backend_url: String,
+    status: String,
+    detail: String,
+    checked_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct SmartControlEvent {
+    received_at: String,
+    event_type: String,
+    message_id: String,
+    method: String,
+    raw_preview: String,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct SmartControlDebugSnapshot {
+    connected: bool,
+    pending_count: usize,
+    last_event: Option<SmartControlEvent>,
+    events: Vec<SmartControlEvent>,
+    client: SmartControlClientState,
+    approvals: Vec<SmartControlApprovalRequest>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SmartControlPendingResult {
+    done: bool,
+    text: String,
+    error: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct SmartControlClientState {
+    client_id: String,
+    stream_id: String,
+    next_seq_id: u64,
+    initialized: bool,
+    cursor: String,
+    last_pong_status: String,
+    last_initialize_id: u64,
+    active_thread_id: String,
+}
+
+impl Default for SmartControlClientState {
+    fn default() -> Self {
+        Self {
+            client_id: format!("varswitch-client-{}", uuid::Uuid::new_v4()),
+            stream_id: format!("varswitch-stream-{}", uuid::Uuid::new_v4()),
+            next_seq_id: 1,
+            initialized: false,
+            cursor: String::new(),
+            last_pong_status: String::new(),
+            last_initialize_id: 0,
+            active_thread_id: String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct SmartControlChunkAssembly {
+    segment_count: usize,
+    message_size_bytes: usize,
+    raw: Vec<u8>,
+    next_segment_id: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SmartControlTurnAccumulator {
+    text_parts: Vec<String>,
+    final_text: String,
+    error: String,
+    done: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct SmartControlApprovalRequest {
+    request_id: String,
+    method: String,
+    title: String,
+    body: String,
+    options: Vec<String>,
+    received_at: String,
+    raw_preview: String,
 }
 
 impl Default for RemoteDeviceState {
@@ -171,6 +342,11 @@ impl Default for RemoteDeviceState {
             mode: "platform_bot".into(),
             active_thread_id: String::new(),
             active_thread_name: String::new(),
+            remote_control_preferred: true,
+            remote_control_status: "未检测".into(),
+            remote_control_backend_url: "http://127.0.0.1:3847".into(),
+            remote_control_connected: false,
+            remote_control_detail: String::new(),
         }
     }
 }
@@ -212,6 +388,7 @@ struct ToolboxState {
     mobile_remote: RemoteDeviceState,
     session_bindings: Vec<CodexSessionBinding>,
     synced_codex_threads: Vec<CodexThreadRecord>,
+    trashed_codex_threads: Vec<TrashedCodexThreadRecord>,
     session_sync: CodexSessionSyncState,
     mobile_channels: Vec<MobileChannelBinding>,
     selected_mobile_thread_id: String,
@@ -222,9 +399,11 @@ struct ToolboxState {
 struct ToolboxSnapshot {
     plugin_marketplace_input: String,
     plugin_marketplaces: Vec<PluginMarketplaceItem>,
+    builtin_plugins: CodexBuiltinPluginStatus,
     session_bindings: Vec<CodexSessionBinding>,
     codex_threads: Vec<CodexThreadRecord>,
     synced_codex_threads: Vec<CodexThreadRecord>,
+    trashed_codex_threads: Vec<TrashedCodexThreadRecord>,
     session_sync: CodexSessionSyncState,
     mobile_channels: Vec<MobileChannelBinding>,
     selected_mobile_thread_id: String,
@@ -332,26 +511,6 @@ impl Default for AppSettings {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct ReleaseAsset {
-    name: String,
-    browser_download_url: String,
-    #[serde(default)]
-    size: u64,
-}
-
-#[derive(Deserialize, Clone, Debug)]
-struct GitHubRelease {
-    tag_name: String,
-    html_url: String,
-    #[serde(default)]
-    body: String,
-    #[serde(default)]
-    published_at: String,
-    #[serde(default)]
-    assets: Vec<ReleaseAsset>,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateCheckResult {
@@ -372,6 +531,13 @@ struct UpdateDownloadResult {
     file_name: String,
     file_path: String,
     release_url: String,
+}
+
+#[derive(Clone, Debug)]
+struct DownloadPageRelease {
+    version: String,
+    file_name: String,
+    download_url: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -400,6 +566,7 @@ struct AppPaths {
     config_dir: String,
     profiles_path: String,
     claude_settings: String,
+    codex_settings: String,
     /// 动态编辑器路径: key = 编辑器 id, value = settings.json 路径
     editor_settings: Vec<EditorPathInfo>,
     claude_md: String,
@@ -461,9 +628,7 @@ fn format_log_time(millis: u128) -> String {
     let minute = (secs_of_day % 3600) / 60;
     let second = secs_of_day % 60;
     let (year, month, day) = civil_from_days(days);
-    format!(
-        "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}.{ms:03}"
-    )
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}.{ms:03}")
 }
 
 /// 把"从 1970-01-01 起的天数"转成 (年, 月, 日)。
@@ -495,7 +660,10 @@ fn format_compact_time(millis: u128) -> String {
 
 /// 写一条日志：同时输出到控制台（开发期可见）和日志文件（打包后可查）。
 fn app_log(level: &str, msg: &str) {
-    let line = format!("[{}] [{level}] {msg}", format_log_time(chrono_timestamp_millis()));
+    let line = format!(
+        "[{}] [{level}] {msg}",
+        format_log_time(chrono_timestamp_millis())
+    );
     // 控制台输出（dev 模式可见）
     eprintln!("{line}");
     // 文件输出
@@ -527,7 +695,6 @@ macro_rules! log_warn {
 macro_rules! log_error {
     ($($arg:tt)*) => { app_log("ERROR", &format!($($arg)*)) };
 }
-
 
 fn profiles_path(app: &tauri::AppHandle) -> PathBuf {
     data_dir(app).join("profiles.json")
@@ -626,6 +793,1396 @@ fn toolbox_state_path(app: &tauri::AppHandle) -> PathBuf {
     data_dir(app).join("codex_toolbox_state.json")
 }
 
+fn default_smart_control_backend_url() -> &'static str {
+    "http://127.0.0.1:3847"
+}
+
+fn normalize_smart_control_backend_url(value: &str) -> String {
+    let mut raw = value.trim().trim_end_matches('/').to_string();
+    if raw.is_empty() {
+        raw = default_smart_control_backend_url().to_string();
+    }
+    if !raw.starts_with("http://") && !raw.starts_with("https://") {
+        raw = format!("http://{raw}");
+    }
+    raw.trim_end_matches('/').to_string()
+}
+
+fn smart_control_status_from_cache() -> Option<SmartControlStatus> {
+    SMART_CONTROL_STATUS_CACHE
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+fn set_smart_control_status_cache(status: SmartControlStatus) {
+    if let Ok(mut guard) = SMART_CONTROL_STATUS_CACHE.lock() {
+        *guard = Some(status);
+    }
+}
+
+fn probe_smart_control_backend(base_url: &str) -> SmartControlStatus {
+    let backend_url = normalize_smart_control_backend_url(base_url);
+    let checked_at = chrono_now();
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(1500))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return SmartControlStatus {
+                available: false,
+                connected: false,
+                backend_url,
+                status: "高级控制通道不可用".into(),
+                detail: format!("创建 HTTP 客户端失败: {error}"),
+                checked_at,
+            };
+        }
+    };
+
+    let status_url = format!("{backend_url}/api/remote-control/status");
+    let response = client.get(&status_url).send();
+    let Ok(response) = response else {
+        return SmartControlStatus {
+            available: false,
+            connected: false,
+            backend_url,
+            status: "未连接高级控制通道".into(),
+            detail: "未检测到本机 Codex 控制服务；将自动使用兼容模式。".into(),
+            checked_at,
+        };
+    };
+    let http_status = response.status();
+    let body = response.text().unwrap_or_default();
+    if !http_status.is_success() {
+        return SmartControlStatus {
+            available: false,
+            connected: false,
+            backend_url,
+            status: "高级控制通道响应异常".into(),
+            detail: format!("HTTP {}：{}", http_status.as_u16(), body.trim()),
+            checked_at,
+        };
+    }
+
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_else(|_| {
+        serde_json::json!({
+            "raw": body,
+        })
+    });
+    let connected = json
+        .get("connected")
+        .or_else(|| json.get("remoteControlConnected"))
+        .or_else(|| json.get("ready"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let detail = if connected {
+        json_string(
+            &json,
+            &["clientName", "deviceName", "activeClient", "detail"],
+        )
+    } else {
+        json_string(&json, &["lastError", "error", "message", "detail"])
+    };
+    let last_event_summary = json
+        .get("lastEvent")
+        .and_then(|event| event.as_object())
+        .map(|event| {
+            let method = event
+                .get("method")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            let event_type = event
+                .get("eventType")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            let received_at = event
+                .get("receivedAt")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            [event_type, method, received_at]
+                .into_iter()
+                .filter(|part| !part.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ")
+        })
+        .filter(|summary| !summary.trim().is_empty())
+        .unwrap_or_default();
+    SmartControlStatus {
+        available: true,
+        connected,
+        backend_url,
+        status: if connected {
+            "高级控制通道已连接".into()
+        } else {
+            "高级控制通道等待 Codex 连接".into()
+        },
+        detail: if detail.is_empty() {
+            if connected {
+                if last_event_summary.is_empty() {
+                    "Codex 已连接，可以使用协议级手机控制。".into()
+                } else {
+                    format!("Codex 已连接，最近事件：{last_event_summary}")
+                }
+            } else {
+                "本机控制服务已响应，但尚未检测到 Codex App / CLI remote-control 连接。".into()
+            }
+        } else {
+            detail
+        },
+        checked_at,
+    }
+}
+
+fn refresh_smart_control_status_for_state(state: &mut ToolboxState) -> SmartControlStatus {
+    let backend_url =
+        normalize_smart_control_backend_url(&state.mobile_remote.remote_control_backend_url);
+    let status = probe_smart_control_backend(&backend_url);
+    state.mobile_remote.remote_control_backend_url = status.backend_url.clone();
+    state.mobile_remote.remote_control_connected = status.connected;
+    state.mobile_remote.remote_control_status = status.status.clone();
+    state.mobile_remote.remote_control_detail = status.detail.clone();
+    state.mobile_remote.remote_control_preferred = true;
+    set_smart_control_status_cache(status.clone());
+    status
+}
+
+fn smart_control_bind_addr_from_url(base_url: &str) -> String {
+    let normalized = normalize_smart_control_backend_url(base_url);
+    reqwest::Url::parse(&normalized)
+        .ok()
+        .and_then(|url| {
+            let host = url.host_str()?.to_string();
+            let port = url.port_or_known_default().unwrap_or(3847);
+            Some(format!("{host}:{port}"))
+        })
+        .unwrap_or_else(|| "127.0.0.1:3847".into())
+}
+
+fn smart_control_http_response(status: &str, content_type: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}; charset=utf-8\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: authorization, content-type, openai-sentinel-chat-requirements-token\r\nConnection: close\r\n\r\n{body}",
+        body.as_bytes().len()
+    )
+}
+
+fn http_header_value<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+    let target = name.to_ascii_lowercase();
+    for line in head.lines().skip(1) {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        if key.trim().to_ascii_lowercase() == target {
+            return Some(value.trim());
+        }
+    }
+    None
+}
+
+fn is_websocket_upgrade(head: &str) -> bool {
+    let upgrade = http_header_value(head, "upgrade")
+        .map(|value| value.to_ascii_lowercase().contains("websocket"))
+        .unwrap_or(false);
+    let connection = http_header_value(head, "connection")
+        .map(|value| value.to_ascii_lowercase().contains("upgrade"))
+        .unwrap_or(false);
+    upgrade && connection && http_header_value(head, "sec-websocket-key").is_some()
+}
+
+fn websocket_accept_key(key: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(key.trim().as_bytes());
+    hasher.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    let digest = hasher.finalize();
+    base64_encode_bytes(&digest)
+}
+
+fn websocket_upgrade_response(key: &str) -> String {
+    format!(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
+        websocket_accept_key(key)
+    )
+}
+
+fn websocket_send_text(stream: &mut TcpStream, text: &str) -> Result<(), String> {
+    let data = text.as_bytes();
+    let mut frame = Vec::with_capacity(data.len() + 10);
+    frame.push(0x81);
+    if data.len() < 126 {
+        frame.push(data.len() as u8);
+    } else if data.len() <= u16::MAX as usize {
+        frame.push(126);
+        frame.extend_from_slice(&(data.len() as u16).to_be_bytes());
+    } else {
+        frame.push(127);
+        frame.extend_from_slice(&(data.len() as u64).to_be_bytes());
+    }
+    frame.extend_from_slice(data);
+    stream
+        .write_all(&frame)
+        .map_err(|e| format!("发送 WebSocket 文本帧失败: {e}"))
+}
+
+fn websocket_send_pong(stream: &mut TcpStream, payload: &[u8]) -> Result<(), String> {
+    let payload = &payload[..payload.len().min(125)];
+    let mut frame = Vec::with_capacity(payload.len() + 2);
+    frame.push(0x8a);
+    frame.push(payload.len() as u8);
+    frame.extend_from_slice(payload);
+    stream
+        .write_all(&frame)
+        .map_err(|e| format!("发送 WebSocket pong 失败: {e}"))
+}
+
+fn websocket_read_text_frame(stream: &mut TcpStream) -> Result<Option<String>, String> {
+    let mut head = [0u8; 2];
+    match stream.read_exact(&mut head) {
+        Ok(()) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::ConnectionReset
+            ) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(format!("读取 WebSocket 帧头失败: {error}")),
+    }
+    let opcode = head[0] & 0x0f;
+    let masked = (head[1] & 0x80) != 0;
+    let mut len = (head[1] & 0x7f) as usize;
+    if len == 126 {
+        let mut ext = [0u8; 2];
+        stream
+            .read_exact(&mut ext)
+            .map_err(|e| format!("读取 WebSocket 16-bit 长度失败: {e}"))?;
+        len = u16::from_be_bytes(ext) as usize;
+    } else if len == 127 {
+        let mut ext = [0u8; 8];
+        stream
+            .read_exact(&mut ext)
+            .map_err(|e| format!("读取 WebSocket 64-bit 长度失败: {e}"))?;
+        len = u64::from_be_bytes(ext) as usize;
+        if len > 8 * 1024 * 1024 {
+            return Err("WebSocket 帧过大".into());
+        }
+    }
+    let mut mask = [0u8; 4];
+    if masked {
+        stream
+            .read_exact(&mut mask)
+            .map_err(|e| format!("读取 WebSocket mask 失败: {e}"))?;
+    }
+    let mut payload = vec![0u8; len];
+    if len > 0 {
+        stream
+            .read_exact(&mut payload)
+            .map_err(|e| format!("读取 WebSocket payload 失败: {e}"))?;
+    }
+    if masked {
+        for (idx, byte) in payload.iter_mut().enumerate() {
+            *byte ^= mask[idx % 4];
+        }
+    }
+    match opcode {
+        0x1 => Ok(Some(String::from_utf8_lossy(&payload).to_string())),
+        0x8 => Ok(None),
+        0x9 => {
+            let _ = websocket_send_pong(stream, &payload);
+            Ok(Some(String::new()))
+        }
+        0xA => Ok(Some(String::new())),
+        _ => Ok(Some(String::new())),
+    }
+}
+
+fn smart_control_preview(text: &str, limit: usize) -> String {
+    let mut preview = text.chars().take(limit).collect::<String>();
+    if text.chars().count() > limit {
+        preview.push('…');
+    }
+    preview
+}
+
+fn smart_control_client_state_store() -> &'static Mutex<SmartControlClientState> {
+    SMART_CONTROL_CLIENT_STATE.get_or_init(|| Mutex::new(SmartControlClientState::default()))
+}
+
+fn smart_control_chunk_store() -> &'static Mutex<HashMap<String, SmartControlChunkAssembly>> {
+    SMART_CONTROL_SERVER_CHUNKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn smart_control_turn_store() -> &'static Mutex<HashMap<u64, SmartControlTurnAccumulator>> {
+    SMART_CONTROL_TURN_STREAMS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn smart_control_approval_store() -> &'static Mutex<Vec<SmartControlApprovalRequest>> {
+    SMART_CONTROL_APPROVALS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn smart_control_client_snapshot() -> SmartControlClientState {
+    smart_control_client_state_store()
+        .lock()
+        .map(|state| state.clone())
+        .unwrap_or_default()
+}
+
+fn smart_control_reset_client_state() {
+    if let Ok(mut state) = smart_control_client_state_store().lock() {
+        *state = SmartControlClientState::default();
+    }
+    if let Ok(mut chunks) = smart_control_chunk_store().lock() {
+        chunks.clear();
+    }
+    if let Ok(mut turns) = smart_control_turn_store().lock() {
+        turns.clear();
+    }
+}
+
+fn smart_control_next_envelope_parts() -> (String, String, u64, Option<String>) {
+    let mut state = smart_control_client_state_store()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if state.client_id.trim().is_empty() {
+        state.client_id = format!("varswitch-client-{}", uuid::Uuid::new_v4());
+    }
+    if state.stream_id.trim().is_empty() {
+        state.stream_id = format!("varswitch-stream-{}", uuid::Uuid::new_v4());
+    }
+    let seq_id = state.next_seq_id;
+    state.next_seq_id = state.next_seq_id.saturating_add(1);
+    let cursor = if state.cursor.trim().is_empty() {
+        None
+    } else {
+        Some(state.cursor.clone())
+    };
+    (
+        state.client_id.clone(),
+        state.stream_id.clone(),
+        seq_id,
+        cursor,
+    )
+}
+
+fn smart_control_mark_initialized(request_id: u64, result: &serde_json::Value) {
+    if let Ok(mut state) = smart_control_client_state_store().lock() {
+        if state.last_initialize_id == request_id || state.last_initialize_id == 0 {
+            state.initialized = true;
+        }
+        if let Some(cursor) = result
+            .get("cursor")
+            .or_else(|| result.get("subscribeCursor"))
+            .and_then(|v| v.as_str())
+        {
+            state.cursor = cursor.to_string();
+        }
+    }
+}
+
+fn smart_control_set_stream_identity(client_id: &str, stream_id: &str) {
+    if let Ok(mut state) = smart_control_client_state_store().lock() {
+        if !client_id.trim().is_empty() {
+            state.client_id = client_id.trim().to_string();
+        }
+        if !stream_id.trim().is_empty() {
+            state.stream_id = stream_id.trim().to_string();
+        }
+    }
+}
+
+fn smart_control_update_pong_status(status: &str) {
+    if let Ok(mut state) = smart_control_client_state_store().lock() {
+        state.last_pong_status = status.to_string();
+        if status.eq_ignore_ascii_case("unknown") || status.contains("unknown") {
+            state.initialized = false;
+        }
+    }
+}
+
+fn smart_control_envelope_message(value: &serde_json::Value) -> Option<&serde_json::Value> {
+    value.get("message").or_else(|| {
+        if value.get("type").and_then(|v| v.as_str()) == Some("server_message")
+            || value.get("type").and_then(|v| v.as_str()) == Some("client_message")
+        {
+            value.get("message")
+        } else {
+            None
+        }
+    })
+}
+
+fn smart_control_is_server_envelope(value: &serde_json::Value) -> bool {
+    matches!(
+        value.get("type").and_then(|v| v.as_str()),
+        Some("server_message") | Some("server_message_chunk") | Some("ack") | Some("pong")
+    ) && value.get("client_id").is_some()
+}
+
+fn smart_control_build_client_envelope(
+    client_id: &str,
+    stream_id: &str,
+    seq_id: u64,
+    message: serde_json::Value,
+    cursor: Option<&str>,
+) -> serde_json::Value {
+    let mut envelope = serde_json::json!({
+        "type": "client_message",
+        "client_id": client_id,
+        "stream_id": stream_id,
+        "seq_id": seq_id,
+        "message": message,
+    });
+    if let Some(cursor) = cursor.filter(|value| !value.trim().is_empty()) {
+        envelope["cursor"] = serde_json::json!(cursor);
+    }
+    envelope
+}
+
+fn smart_control_build_ack_envelope(
+    client_id: &str,
+    stream_id: &str,
+    seq_id: u64,
+    segment_id: Option<u64>,
+) -> serde_json::Value {
+    let mut envelope = serde_json::json!({
+        "type": "ack",
+        "client_id": client_id,
+        "stream_id": stream_id,
+        "seq_id": seq_id,
+    });
+    if let Some(segment_id) = segment_id {
+        envelope["segment_id"] = serde_json::json!(segment_id);
+    }
+    envelope
+}
+
+fn smart_control_build_ping_envelope() -> serde_json::Value {
+    let state = smart_control_client_snapshot();
+    let mut envelope = serde_json::json!({
+        "type": "ping",
+        "client_id": state.client_id,
+        "stream_id": state.stream_id,
+    });
+    if !state.cursor.trim().is_empty() {
+        envelope["cursor"] = serde_json::json!(state.cursor);
+    }
+    envelope
+}
+
+fn smart_control_reassemble_server_chunk(value: &serde_json::Value) -> Option<serde_json::Value> {
+    let client_id = value
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let stream_id = value
+        .get("stream_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let seq_id = value.get("seq_id").and_then(|v| v.as_u64()).unwrap_or(0);
+    let segment_id = value
+        .get("segment_id")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let segment_count = value
+        .get("segment_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let message_size_bytes = value
+        .get("message_size_bytes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let chunk_b64 = value
+        .get("message_chunk_base64")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if client_id.is_empty()
+        || stream_id.is_empty()
+        || seq_id == 0
+        || segment_count == 0
+        || segment_id >= segment_count
+        || message_size_bytes == 0
+        || message_size_bytes > 100 * 1024 * 1024
+        || segment_count > 1024
+        || chunk_b64.is_empty()
+    {
+        return None;
+    }
+    let chunk = base64::engine::general_purpose::STANDARD
+        .decode(chunk_b64)
+        .ok()?;
+    let key = format!("{client_id}:{stream_id}:{seq_id}");
+    let mut chunks = smart_control_chunk_store().lock().ok()?;
+    let assembly = chunks
+        .entry(key.clone())
+        .or_insert_with(|| SmartControlChunkAssembly {
+            segment_count,
+            message_size_bytes,
+            raw: Vec::new(),
+            next_segment_id: 0,
+        });
+    if assembly.segment_count != segment_count
+        || assembly.message_size_bytes != message_size_bytes
+        || assembly.next_segment_id != segment_id
+        || assembly.raw.len().saturating_add(chunk.len()) > message_size_bytes
+    {
+        chunks.remove(&key);
+        return None;
+    }
+    assembly.raw.extend_from_slice(&chunk);
+    assembly.next_segment_id = assembly.next_segment_id.saturating_add(1);
+    if assembly.next_segment_id < assembly.segment_count {
+        return None;
+    }
+    let assembly = chunks.remove(&key)?;
+    if assembly.raw.len() != assembly.message_size_bytes {
+        return None;
+    }
+    serde_json::from_slice::<serde_json::Value>(&assembly.raw).ok()
+}
+
+fn json_u64(value: &serde_json::Value, keys: &[&str]) -> Option<u64> {
+    for key in keys {
+        if let Some(number) = value.get(*key).and_then(|item| item.as_u64()) {
+            return Some(number);
+        }
+        if let Some(text) = value.get(*key).and_then(|item| item.as_str()) {
+            if let Ok(number) = text.trim().parse::<u64>() {
+                return Some(number);
+            }
+        }
+    }
+    None
+}
+
+fn smart_control_extract_text(value: &serde_json::Value) -> String {
+    if let Some(message) = smart_control_envelope_message(value) {
+        let nested = smart_control_extract_text(message);
+        if !nested.trim().is_empty() {
+            return nested;
+        }
+    }
+    for path in [
+        &["result", "text"][..],
+        &["result", "message"][..],
+        &["result", "outputText"][..],
+        &["result", "response", "text"][..],
+        &["response", "text"][..],
+        &["response", "message"][..],
+        &["text"][..],
+        &["message"][..],
+        &["delta", "text"][..],
+        &["delta", "content"][..],
+        &["item", "text"][..],
+        &["item", "content", "text"][..],
+        &["params", "text"][..],
+        &["params", "delta", "text"][..],
+        &["params", "item", "text"][..],
+    ] {
+        let mut current = value;
+        let mut found = true;
+        for key in path {
+            if let Some(next) = current.get(*key) {
+                current = next;
+            } else {
+                found = false;
+                break;
+            }
+        }
+        if found {
+            if let Some(text) = current.as_str() {
+                if !text.trim().is_empty() {
+                    return text.trim().to_string();
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn smart_control_extract_error(value: &serde_json::Value) -> String {
+    if let Some(message) = smart_control_envelope_message(value) {
+        let nested = smart_control_extract_error(message);
+        if !nested.trim().is_empty() {
+            return nested;
+        }
+    }
+    for path in [
+        &["error", "message"][..],
+        &["error"][..],
+        &["result", "error"][..],
+        &["response", "error"][..],
+    ] {
+        let mut current = value;
+        let mut found = true;
+        for key in path {
+            if let Some(next) = current.get(*key) {
+                current = next;
+            } else {
+                found = false;
+                break;
+            }
+        }
+        if found {
+            if let Some(text) = current.as_str() {
+                if !text.trim().is_empty() {
+                    return text.trim().to_string();
+                }
+            }
+            if current.is_object() || current.is_array() {
+                return current.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+fn smart_control_extract_delta_text_lossless(value: &serde_json::Value) -> String {
+    for path in [
+        &["delta", "text"][..],
+        &["delta", "content"][..],
+        &["params", "delta", "text"][..],
+        &["item", "text"][..],
+        &["params", "item", "text"][..],
+    ] {
+        let mut current = value;
+        let mut found = true;
+        for key in path {
+            if let Some(next) = current.get(*key) {
+                current = next;
+            } else {
+                found = false;
+                break;
+            }
+        }
+        if found {
+            if let Some(text) = current.as_str() {
+                if !text.is_empty() {
+                    return text.to_string();
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn smart_control_message_id(value: &serde_json::Value) -> Option<u64> {
+    json_u64(value, &["id", "requestId", "responseTo"]).or_else(|| {
+        smart_control_envelope_message(value)
+            .and_then(|message| json_u64(message, &["id", "requestId", "responseTo"]))
+    })
+}
+
+fn smart_control_message_method(value: &serde_json::Value) -> String {
+    let direct = json_string(value, &["method", "name", "op"]);
+    if !direct.is_empty() {
+        return direct;
+    }
+    smart_control_envelope_message(value)
+        .map(|message| json_string(message, &["method", "name", "op"]))
+        .unwrap_or_default()
+}
+
+fn smart_control_is_turn_done(value: &serde_json::Value) -> bool {
+    let method = smart_control_message_method(value);
+    let status = json_string(value, &["status", "state"]);
+    let event_type = json_string(value, &["type", "event", "kind"]);
+    method.contains("turn/complete")
+        || method.contains("turn/done")
+        || method.contains("turn/finished")
+        || status.eq_ignore_ascii_case("completed")
+        || status.eq_ignore_ascii_case("done")
+        || status.eq_ignore_ascii_case("failed")
+        || event_type.contains("completed")
+        || event_type.contains("done")
+}
+
+fn smart_control_observe_turn_item(value: &serde_json::Value) {
+    let Some(id) = smart_control_message_id(value) else {
+        return;
+    };
+    let lossless_delta = smart_control_extract_delta_text_lossless(value);
+    let text = if lossless_delta.is_empty() {
+        smart_control_extract_text(value)
+    } else {
+        lossless_delta
+    };
+    let error = smart_control_extract_error(value);
+    let done = smart_control_is_turn_done(value)
+        || value
+            .get("result")
+            .is_some_and(|result| result.is_object() || result.is_string());
+    if text.is_empty() && error.is_empty() && !done {
+        return;
+    }
+    let mut turns = match smart_control_turn_store().lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    let acc = turns.entry(id).or_default();
+    if !text.is_empty() {
+        if done && value.get("result").is_some() && value.get("delta").is_none() {
+            acc.final_text = text;
+        } else {
+            acc.text_parts.push(text);
+        }
+    }
+    if !error.is_empty() {
+        acc.error = error;
+    }
+    if done || !acc.error.is_empty() {
+        acc.done = true;
+        let final_text = if !acc.final_text.trim().is_empty() {
+            acc.final_text.trim().to_string()
+        } else {
+            acc.text_parts.join("").trim().to_string()
+        };
+        smart_control_complete_pending(id, final_text, acc.error.clone());
+        turns.remove(&id);
+    }
+}
+
+fn smart_control_extract_approval(
+    value: &serde_json::Value,
+) -> Option<SmartControlApprovalRequest> {
+    let message = smart_control_envelope_message(value).unwrap_or(value);
+    let method = smart_control_message_method(message);
+    let looks_like_approval = method.contains("approval")
+        || method.contains("confirm")
+        || message.get("approval").is_some()
+        || message.get("decisions").is_some()
+        || message.get("options").is_some_and(|v| v.is_array());
+    if !looks_like_approval {
+        return None;
+    }
+    let request_id = message
+        .get("id")
+        .map(|v| v.to_string().trim_matches('"').to_string())
+        .or_else(|| {
+            value
+                .get("seq_id")
+                .map(|v| v.to_string().trim_matches('"').to_string())
+        })
+        .unwrap_or_default();
+    let params = message.get("params").unwrap_or(message);
+    let title = json_string(params, &["title", "name", "command", "action"]);
+    let body = [
+        json_string(params, &["body", "message", "description", "reason"]),
+        params
+            .get("approval")
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .find(|v| !v.trim().is_empty())
+    .unwrap_or_else(|| smart_control_preview(&message.to_string(), 360));
+    let mut options = Vec::new();
+    for key in ["options", "decisions", "choices"] {
+        if let Some(items) = params.get(key).and_then(|v| v.as_array()) {
+            for item in items {
+                if let Some(text) = item.as_str() {
+                    options.push(text.to_string());
+                } else {
+                    let label = json_string(item, &["label", "title", "decision", "value"]);
+                    if !label.is_empty() {
+                        options.push(label);
+                    }
+                }
+            }
+        }
+    }
+    if options.is_empty() {
+        options = vec!["approve".into(), "deny".into()];
+    }
+    Some(SmartControlApprovalRequest {
+        request_id,
+        method,
+        title: if title.is_empty() {
+            "需要审批".into()
+        } else {
+            title
+        },
+        body,
+        options,
+        received_at: chrono_now(),
+        raw_preview: smart_control_preview(&message.to_string(), 800),
+    })
+}
+
+fn smart_control_remember_approval(value: &serde_json::Value) {
+    let Some(approval) = smart_control_extract_approval(value) else {
+        return;
+    };
+    if let Ok(mut approvals) = smart_control_approval_store().lock() {
+        approvals.push(approval);
+        if approvals.len() > 20 {
+            let drain_count = approvals.len().saturating_sub(20);
+            approvals.drain(0..drain_count);
+        }
+    }
+}
+
+fn smart_control_maybe_complete_pending(value: &serde_json::Value) {
+    let Some(id) = smart_control_message_id(value) else {
+        return;
+    };
+    let method = smart_control_message_method(value);
+    if method == "initialize" {
+        if let Some(result) = value.get("result") {
+            smart_control_mark_initialized(id, result);
+        }
+    }
+    smart_control_observe_turn_item(value);
+    if !smart_control_extract_delta_text_lossless(value).is_empty()
+        && value.get("result").is_none()
+        && value.get("response").is_none()
+    {
+        return;
+    }
+    let text = smart_control_extract_text(value);
+    let error = smart_control_extract_error(value);
+    if !text.is_empty() || !error.is_empty() {
+        smart_control_complete_pending(id, text, error);
+    }
+}
+
+fn remember_smart_control_event(text: &str) {
+    let parsed = serde_json::from_str::<serde_json::Value>(text).ok();
+    let event_type = parsed
+        .as_ref()
+        .map(|value| json_string(value, &["type", "event", "kind", "messageType"]))
+        .unwrap_or_default();
+    let message_id = parsed
+        .as_ref()
+        .map(|value| json_string(value, &["id", "messageId", "requestId"]))
+        .unwrap_or_default();
+    let method = parsed
+        .as_ref()
+        .map(|value| json_string(value, &["method", "name", "op"]))
+        .unwrap_or_default();
+    let event = SmartControlEvent {
+        received_at: chrono_now(),
+        event_type,
+        message_id,
+        method,
+        raw_preview: smart_control_preview(text, 800),
+    };
+    push_smart_control_event(event);
+    if let Some(value) = parsed.as_ref() {
+        smart_control_handle_inbound_value(value);
+    }
+}
+
+fn smart_control_handle_inbound_value(value: &serde_json::Value) {
+    if smart_control_is_server_envelope(value) {
+        let client_id = value
+            .get("client_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let stream_id = value
+            .get("stream_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let seq_id = value.get("seq_id").and_then(|v| v.as_u64()).unwrap_or(0);
+        smart_control_set_stream_identity(client_id, stream_id);
+        match value.get("type").and_then(|v| v.as_str()) {
+            Some("pong") => {
+                smart_control_update_pong_status(&json_string(value, &["status"]));
+                let _ = smart_control_send_json(&smart_control_build_ack_envelope(
+                    client_id, stream_id, seq_id, None,
+                ));
+            }
+            Some("ack") => {}
+            Some("server_message") => {
+                let _ = smart_control_send_json(&smart_control_build_ack_envelope(
+                    client_id, stream_id, seq_id, None,
+                ));
+                if let Some(message) = value.get("message") {
+                    smart_control_remember_approval(message);
+                    smart_control_maybe_complete_pending(message);
+                }
+            }
+            Some("server_message_chunk") => {
+                let segment_id = value.get("segment_id").and_then(|v| v.as_u64());
+                let _ = smart_control_send_json(&smart_control_build_ack_envelope(
+                    client_id, stream_id, seq_id, segment_id,
+                ));
+                if let Some(message) = smart_control_reassemble_server_chunk(value) {
+                    smart_control_remember_approval(&message);
+                    smart_control_maybe_complete_pending(&message);
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+    smart_control_remember_approval(value);
+    smart_control_maybe_complete_pending(value);
+}
+
+fn smart_control_last_event() -> Option<SmartControlEvent> {
+    SMART_CONTROL_LAST_EVENT
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+fn smart_control_event_log() -> &'static Mutex<Vec<SmartControlEvent>> {
+    SMART_CONTROL_EVENT_LOG.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn push_smart_control_event(event: SmartControlEvent) {
+    if let Ok(mut last) = SMART_CONTROL_LAST_EVENT.lock() {
+        *last = Some(event.clone());
+    }
+    if let Ok(mut events) = smart_control_event_log().lock() {
+        events.push(event);
+        if events.len() > 80 {
+            let drain_count = events.len().saturating_sub(80);
+            events.drain(0..drain_count);
+        }
+    }
+}
+
+fn smart_control_debug_snapshot() -> SmartControlDebugSnapshot {
+    let pending_count = smart_control_pending_store()
+        .0
+        .lock()
+        .map(|pending| pending.len())
+        .unwrap_or(0);
+    let events = smart_control_event_log()
+        .lock()
+        .map(|events| events.clone())
+        .unwrap_or_default();
+    let approvals = smart_control_approval_store()
+        .lock()
+        .map(|items| items.clone())
+        .unwrap_or_default();
+    SmartControlDebugSnapshot {
+        connected: SMART_CONTROL_REMOTE_CONNECTED.load(Ordering::SeqCst),
+        pending_count,
+        last_event: smart_control_last_event(),
+        events,
+        client: smart_control_client_snapshot(),
+        approvals,
+    }
+}
+
+fn next_smart_control_request_id() -> u64 {
+    let lock = SMART_CONTROL_NEXT_REQUEST_ID.get_or_init(|| Mutex::new(1));
+    let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let id = *guard;
+    *guard = guard.saturating_add(1);
+    id
+}
+
+fn smart_control_pending_store(
+) -> &'static (Mutex<HashMap<u64, SmartControlPendingResult>>, Condvar) {
+    SMART_CONTROL_PENDING.get_or_init(|| (Mutex::new(HashMap::new()), Condvar::new()))
+}
+
+fn smart_control_register_pending(id: u64) {
+    let (lock, _) = smart_control_pending_store();
+    if let Ok(mut guard) = lock.lock() {
+        guard.insert(id, SmartControlPendingResult::default());
+    }
+}
+
+fn smart_control_complete_pending(id: u64, text: String, error: String) {
+    let (lock, condvar) = smart_control_pending_store();
+    if let Ok(mut guard) = lock.lock() {
+        guard.insert(
+            id,
+            SmartControlPendingResult {
+                done: true,
+                text,
+                error,
+            },
+        );
+        condvar.notify_all();
+    }
+}
+
+fn smart_control_wait_pending(id: u64, timeout: Duration) -> Option<SmartControlPendingResult> {
+    let (lock, condvar) = smart_control_pending_store();
+    let guard = lock.lock().ok()?;
+    let (mut guard, _) = condvar
+        .wait_timeout_while(guard, timeout, |pending| {
+            pending.get(&id).map(|result| !result.done).unwrap_or(true)
+        })
+        .ok()?;
+    guard.remove(&id).filter(|result| result.done)
+}
+
+fn smart_control_initialize_message(id: u64) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "method": "initialize",
+        "params": {
+            "clientInfo": {
+                "name": "VarSwitch",
+                "version": env!("CARGO_PKG_VERSION")
+            },
+            "capabilities": {
+                "threads": true,
+                "turns": true,
+                "streaming": true,
+                "approvals": true
+            }
+        }
+    })
+}
+
+fn smart_control_turn_start_message(id: u64, thread_id: &str, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "method": "turn/start",
+        "params": {
+            "threadId": thread_id.trim(),
+            "input": [
+                {
+                    "type": "text",
+                    "text": text.trim()
+                }
+            ]
+        }
+    })
+}
+
+fn smart_control_wrap_client_message(message: serde_json::Value) -> serde_json::Value {
+    let (client_id, stream_id, seq_id, cursor) = smart_control_next_envelope_parts();
+    smart_control_build_client_envelope(&client_id, &stream_id, seq_id, message, cursor.as_deref())
+}
+
+fn smart_control_send_json(value: &serde_json::Value) -> Result<(), String> {
+    let text = serde_json::to_string(value).map_err(|e| format!("序列化协议消息失败: {e}"))?;
+    let mut guard = SMART_CONTROL_WS_WRITER
+        .lock()
+        .map_err(|_| "高级控制通道写入锁已损坏".to_string())?;
+    let Some(stream) = guard.as_mut() else {
+        return Err("高级控制通道未连接".into());
+    };
+    websocket_send_text(stream, &text)?;
+    push_smart_control_event(SmartControlEvent {
+        received_at: chrono_now(),
+        event_type: "outbound".into(),
+        message_id: value
+            .get("id")
+            .or_else(|| value.get("seq_id"))
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
+        method: smart_control_message_method(value),
+        raw_preview: smart_control_preview(&text, 800),
+    });
+    Ok(())
+}
+
+fn smart_control_ensure_initialized() -> Result<(), String> {
+    if smart_control_client_snapshot().initialized {
+        return Ok(());
+    }
+    let request_id = next_smart_control_request_id();
+    {
+        if let Ok(mut state) = smart_control_client_state_store().lock() {
+            state.last_initialize_id = request_id;
+        }
+    }
+    smart_control_register_pending(request_id);
+    let message = smart_control_initialize_message(request_id);
+    let envelope = smart_control_wrap_client_message(message);
+    smart_control_send_json(&envelope)?;
+    match smart_control_wait_pending(request_id, Duration::from_secs(30)) {
+        Some(result) if !result.error.trim().is_empty() => Err(result.error),
+        Some(_) => {
+            if let Ok(mut state) = smart_control_client_state_store().lock() {
+                state.initialized = true;
+            }
+            Ok(())
+        }
+        None => Err("高级控制 initialize 超时".into()),
+    }
+}
+
+fn try_smart_control_dispatch(thread_id: &str, text: &str) -> Result<Option<String>, String> {
+    if !SMART_CONTROL_REMOTE_CONNECTED.load(Ordering::SeqCst) {
+        return Ok(None);
+    }
+    smart_control_ensure_initialized()?;
+    let request_id = next_smart_control_request_id();
+    smart_control_register_pending(request_id);
+    let message = smart_control_turn_start_message(request_id, thread_id, text);
+    let envelope = smart_control_wrap_client_message(message);
+    smart_control_send_json(&envelope)?;
+    log_info!(
+        "[smart-control][dispatch] sent turn/start over protocol channel preview={}",
+        smart_control_preview(text, 240)
+    );
+    match smart_control_wait_pending(request_id, Duration::from_secs(180)) {
+        Some(result) if !result.error.trim().is_empty() => Err(result.error),
+        Some(result) if !result.text.trim().is_empty() => Ok(Some(result.text)),
+        Some(_) => Ok(Some("高级控制通道已完成，但没有返回可显示文本。".into())),
+        None => Err("高级控制通道等待 Codex 回复超时".into()),
+    }
+}
+
+fn smart_control_json_response(value: serde_json::Value) -> String {
+    let body = serde_json::to_string(&value).unwrap_or_else(|_| "{}".into());
+    smart_control_http_response("200 OK", "application/json", &body)
+}
+
+fn smart_control_not_found(path: &str) -> String {
+    smart_control_json_response(serde_json::json!({
+        "ok": false,
+        "error": "not_found",
+        "path": path,
+    }))
+    .replacen("HTTP/1.1 200 OK", "HTTP/1.1 404 Not Found", 1)
+}
+
+fn read_http_request_head(stream: &mut TcpStream) -> Result<String, String> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .map_err(|e| format!("设置读取超时失败: {e}"))?;
+    let mut buf = Vec::new();
+    let mut byte = [0u8; 1];
+    while buf.len() < 64 * 1024 {
+        let n = stream
+            .read(&mut byte)
+            .map_err(|e| format!("读取 HTTP 请求失败: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        buf.push(byte[0]);
+        if buf.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&buf).to_string())
+}
+
+fn handle_smart_control_http_connection(mut stream: TcpStream) -> Result<(), String> {
+    let head = read_http_request_head(&mut stream)?;
+    let request_line = head.lines().next().unwrap_or_default();
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or_default();
+    let raw_path = parts.next().unwrap_or("/");
+    let path = raw_path.split('?').next().unwrap_or(raw_path);
+    if method == "GET"
+        && path == "/backend-api/wham/remote/control/server"
+        && is_websocket_upgrade(&head)
+    {
+        let key = http_header_value(&head, "sec-websocket-key")
+            .ok_or("WebSocket 缺少 Sec-WebSocket-Key")?;
+        let response = websocket_upgrade_response(key);
+        stream
+            .write_all(response.as_bytes())
+            .map_err(|e| format!("写入 WebSocket 握手响应失败: {e}"))?;
+        SMART_CONTROL_REMOTE_CONNECTED.store(true, Ordering::SeqCst);
+        smart_control_reset_client_state();
+        if let Ok(writer) = stream.try_clone() {
+            if let Ok(mut guard) = SMART_CONTROL_WS_WRITER.lock() {
+                *guard = Some(writer);
+            }
+        }
+        set_smart_control_status_cache(SmartControlStatus {
+            available: true,
+            connected: true,
+            backend_url: default_smart_control_backend_url().into(),
+            status: "高级控制通道已连接".into(),
+            detail: "Codex 已建立 remote-control WebSocket，等待协议事件。".into(),
+            checked_at: chrono_now(),
+        });
+        stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+        let _ = smart_control_send_json(&smart_control_build_ping_envelope());
+        loop {
+            match websocket_read_text_frame(&mut stream) {
+                Ok(Some(text)) if text.trim().is_empty() => continue,
+                Ok(Some(text)) => {
+                    log_info!(
+                        "[smart-control][ws] received frame: {}",
+                        smart_control_preview(&text, 240)
+                    );
+                    remember_smart_control_event(&text);
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    log_warn!("[smart-control][ws] frame read failed: {}", error);
+                    break;
+                }
+            }
+        }
+        SMART_CONTROL_REMOTE_CONNECTED.store(false, Ordering::SeqCst);
+        if let Ok(mut guard) = SMART_CONTROL_WS_WRITER.lock() {
+            *guard = None;
+        }
+        return Ok(());
+    }
+    let response = match (method, path) {
+        ("OPTIONS", _) => smart_control_http_response("204 No Content", "text/plain", ""),
+        ("GET", "/api/status") => smart_control_json_response(serde_json::json!({
+            "ok": true,
+            "service": "varswitch-control",
+            "running": true,
+            "time": chrono_now(),
+        })),
+        ("GET", "/api/remote-control/status") => smart_control_json_response(serde_json::json!({
+            "ok": true,
+            "available": true,
+            "connected": SMART_CONTROL_REMOTE_CONNECTED.load(Ordering::SeqCst),
+            "ready": SMART_CONTROL_REMOTE_CONNECTED.load(Ordering::SeqCst) && smart_control_client_snapshot().initialized,
+            "service": "varswitch-control",
+            "lastEvent": smart_control_last_event(),
+            "client": smart_control_client_snapshot(),
+            "approvals": smart_control_approval_store().lock().map(|items| items.clone()).unwrap_or_default(),
+            "message": if SMART_CONTROL_REMOTE_CONNECTED.load(Ordering::SeqCst) {
+                "Codex 已连接 VarSwitch 本机控制服务。"
+            } else {
+                "VarSwitch 本机控制服务已启动，等待 Codex remote-control 连接。"
+            },
+            "time": chrono_now(),
+        })),
+        ("POST", "/backend-api/wham/remote/control/server/enroll") => {
+            smart_control_json_response(serde_json::json!({
+                "ok": true,
+                "server": {
+                    "id": "varswitch-local-control",
+                    "name": "VarSwitch Local Control"
+                },
+                "message": "VarSwitch 已收到 Codex remote-control enroll 请求，完整双向协议将在控制通道建立后接管。"
+            }))
+        }
+        ("GET", "/backend-api/wham/remote/control/server") => {
+            smart_control_json_response(serde_json::json!({
+                "ok": true,
+                "connected": false,
+                "message": "VarSwitch 本机控制服务已就绪，当前轻量接口用于状态探测。"
+            }))
+        }
+        _ => smart_control_not_found(path),
+    };
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|e| format!("写入 HTTP 响应失败: {e}"))?;
+    Ok(())
+}
+
+fn start_smart_control_server(app: tauri::AppHandle, backend_url: String) {
+    if SMART_CONTROL_SERVER_ACTIVE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    SMART_CONTROL_SERVER_CANCEL_REQUESTED.store(false, Ordering::SeqCst);
+    std::thread::spawn(move || {
+        let bind_addr = smart_control_bind_addr_from_url(&backend_url);
+        log_info!("[smart-control] starting local service at {}", bind_addr);
+        let listener = match TcpListener::bind(&bind_addr) {
+            Ok(listener) => listener,
+            Err(error) => {
+                log_warn!("[smart-control] bind failed at {}: {}", bind_addr, error);
+                SMART_CONTROL_SERVER_ACTIVE.store(false, Ordering::SeqCst);
+                let mut state = read_toolbox_state(&app);
+                state.mobile_remote.remote_control_connected = false;
+                state.mobile_remote.remote_control_status = "高级控制服务启动失败".into();
+                state.mobile_remote.remote_control_detail =
+                    format!("监听 {bind_addr} 失败：{error}");
+                let _ = write_toolbox_state(&app, &state);
+                return;
+            }
+        };
+        if let Err(error) = listener.set_nonblocking(true) {
+            log_warn!("[smart-control] set_nonblocking failed: {}", error);
+        }
+        {
+            let mut state = read_toolbox_state(&app);
+            state.mobile_remote.remote_control_backend_url =
+                normalize_smart_control_backend_url(&backend_url);
+            state.mobile_remote.remote_control_status = "高级控制服务已启动".into();
+            state.mobile_remote.remote_control_detail =
+                format!("正在监听 {bind_addr}，等待 Codex 连接。");
+            state.mobile_remote.remote_control_connected = false;
+            let _ = write_toolbox_state(&app, &state);
+        }
+        while !SMART_CONTROL_SERVER_CANCEL_REQUESTED.load(Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((stream, _addr)) => {
+                    std::thread::spawn(move || {
+                        if let Err(error) = handle_smart_control_http_connection(stream) {
+                            log_warn!("[smart-control] request failed: {}", error);
+                        }
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(80));
+                }
+                Err(error) => {
+                    log_warn!("[smart-control] accept failed: {}", error);
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+            }
+        }
+        log_info!("[smart-control] local service stopped");
+        SMART_CONTROL_SERVER_ACTIVE.store(false, Ordering::SeqCst);
+    });
+}
+
+fn stop_smart_control_server() {
+    SMART_CONTROL_SERVER_CANCEL_REQUESTED.store(true, Ordering::SeqCst);
+}
+
+fn smart_control_backend_api_url() -> String {
+    format!("{}/backend-api", default_smart_control_backend_url())
+}
+
+fn codex_config_toml_content(
+    provider: &str,
+    model: &str,
+    base_url: &str,
+    api_key: &str,
+    official_account_mode: bool,
+) -> String {
+    if official_account_mode {
+        format!(
+            r#"model_provider = "customer"
+model = "gpt-5.5"
+review_model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+disable_response_storage = true
+preferred_auth_method = "apikey"
+chatgpt_base_url = "{chatgpt_base_url}"
+
+[model_providers.customer]
+name = "customer"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "{base_url}"
+experimental_bearer_token = "{api_key}"
+"#,
+            base_url = base_url,
+            api_key = api_key,
+            chatgpt_base_url = smart_control_backend_api_url(),
+        )
+    } else {
+        format!(
+            r#"model_provider = "{provider}"
+model = "{model}"
+chatgpt_base_url = "{chatgpt_base_url}"
+
+[model_providers.{provider}]
+name = "{provider}"
+base_url = "{base_url}"
+wire_api = "responses"
+requires_openai_auth = true
+"#,
+            provider = provider,
+            model = model,
+            base_url = base_url,
+            chatgpt_base_url = smart_control_backend_api_url(),
+        )
+    }
+}
+
 /// 写入 Codex 配置文件。
 /// 默认写入 ~/.codex/auth.json 和 ~/.codex/config.toml；
 /// 官方账号登录/API 额度模式只写 ~/.codex/config.toml，不改动 auth.json。
@@ -637,7 +2194,6 @@ fn write_codex_config_with_base_url(profile: &CodexProfile, base_url: &str) -> R
     let dir = codex_config_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("创建 ~/.codex 目录失败: {}", e))?;
     let existing_config = fs::read_to_string(codex_config_path()).unwrap_or_default();
-    let marketplace_sections = extract_marketplace_sections(&existing_config);
 
     // 写入 config.toml
     let official_account_mode = is_codex_official_account_api_quota(&profile.auth_mode);
@@ -656,24 +2212,7 @@ fn write_codex_config_with_base_url(profile: &CodexProfile, base_url: &str) -> R
         profile.model.clone()
     };
     let toml_content = if official_account_mode {
-        format!(
-            r#"model_provider = "customer"
-model = "gpt-5.5"
-review_model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
-disable_response_storage = true
-preferred_auth_method = "apikey"
-
-[model_providers.customer]
-name = "customer"
-wire_api = "responses"
-requires_openai_auth = true
-base_url = "{base_url}"
-experimental_bearer_token = "{api_key}"
-"#,
-            base_url = base_url,
-            api_key = profile.api_key,
-        )
+        codex_config_toml_content(&provider, &model, base_url, &profile.api_key, true)
     } else {
         let auth_path = codex_auth_path();
         let mut auth = if auth_path.exists() {
@@ -696,26 +2235,9 @@ experimental_bearer_token = "{api_key}"
         let auth_str = serde_json::to_string_pretty(&auth).map_err(|e| e.to_string())?;
         fs::write(&auth_path, auth_str).map_err(|e| format!("写入 codex auth.json 失败: {}", e))?;
 
-        format!(
-            r#"model_provider = "{provider}"
-model = "{model}"
-
-[model_providers.{provider}]
-name = "{provider}"
-base_url = "{base_url}"
-wire_api = "responses"
-requires_openai_auth = true
-"#,
-            provider = provider,
-            model = model,
-            base_url = base_url,
-        )
+        codex_config_toml_content(&provider, &model, base_url, &profile.api_key, false)
     };
-    let final_toml = if marketplace_sections.trim().is_empty() {
-        toml_content
-    } else {
-        format!("{}\n{}", toml_content.trim_end(), marketplace_sections)
-    };
+    let final_toml = merge_codex_config_with_preserved_sections(&toml_content, &existing_config);
     fs::write(codex_config_path(), final_toml)
         .map_err(|e| format!("写入 codex config.toml 失败: {}", e))?;
 
@@ -783,6 +2305,76 @@ fn read_toolbox_state(app: &tauri::AppHandle) -> ToolboxState {
     normalize_toolbox_state(state)
 }
 
+fn trashed_codex_thread_ids(state: &ToolboxState) -> HashSet<String> {
+    state
+        .trashed_codex_threads
+        .iter()
+        .map(|thread| thread.id.clone())
+        .filter(|id| !id.trim().is_empty())
+        .collect()
+}
+
+fn visible_codex_threads(state: &ToolboxState) -> Vec<CodexThreadRecord> {
+    let trashed = trashed_codex_thread_ids(state);
+    state
+        .synced_codex_threads
+        .iter()
+        .filter(|thread| !trashed.contains(&thread.id))
+        .cloned()
+        .collect()
+}
+
+fn refresh_selected_mobile_thread_after_session_change(state: &mut ToolboxState) {
+    let visible = visible_codex_threads(state);
+    let selected_visible = visible
+        .iter()
+        .any(|thread| thread.id == state.selected_mobile_thread_id);
+    if !selected_visible {
+        state.selected_mobile_thread_id = visible
+            .first()
+            .map(|thread| thread.id.clone())
+            .unwrap_or_default();
+    }
+    if let Some(thread) = visible
+        .iter()
+        .find(|thread| thread.id == state.selected_mobile_thread_id)
+    {
+        state.mobile_remote.active_thread_id = thread.id.clone();
+        state.mobile_remote.active_thread_name = thread.thread_name.clone();
+    } else {
+        state.mobile_remote.active_thread_id.clear();
+        state.mobile_remote.active_thread_name.clear();
+    }
+}
+
+fn codex_thread_to_trash_record(
+    thread: CodexThreadRecord,
+    deleted_at: &str,
+) -> TrashedCodexThreadRecord {
+    TrashedCodexThreadRecord {
+        id: thread.id,
+        thread_name: thread.thread_name,
+        updated_at: thread.updated_at,
+        session_file: thread.session_file,
+        cwd: thread.cwd,
+        last_user_message: thread.last_user_message,
+        last_assistant_message: thread.last_assistant_message,
+        deleted_at: deleted_at.to_string(),
+    }
+}
+
+fn trash_record_to_codex_thread(thread: &TrashedCodexThreadRecord) -> CodexThreadRecord {
+    CodexThreadRecord {
+        id: thread.id.clone(),
+        thread_name: thread.thread_name.clone(),
+        updated_at: thread.updated_at.clone(),
+        session_file: thread.session_file.clone(),
+        cwd: thread.cwd.clone(),
+        last_user_message: thread.last_user_message.clone(),
+        last_assistant_message: thread.last_assistant_message.clone(),
+    }
+}
+
 fn normalize_toolbox_state(mut state: ToolboxState) -> ToolboxState {
     state.plugin_marketplace_input = default_plugin_marketplace_url().to_string();
     if state.mobile_remote.discovery_token.trim().is_empty() {
@@ -794,6 +2386,18 @@ fn normalize_toolbox_state(mut state: ToolboxState) -> ToolboxState {
     if state.mobile_remote.mode.trim().is_empty() {
         state.mobile_remote.mode = "platform_bot".into();
     }
+    if state
+        .mobile_remote
+        .remote_control_backend_url
+        .trim()
+        .is_empty()
+    {
+        state.mobile_remote.remote_control_backend_url = "http://127.0.0.1:3847".into();
+    }
+    if state.mobile_remote.remote_control_status.trim().is_empty() {
+        state.mobile_remote.remote_control_status = "未检测".into();
+    }
+    state.mobile_remote.remote_control_preferred = true;
     if state.mobile_remote.listen_addr.trim().is_empty() {
         state.mobile_remote.listen_addr = "platform".into();
     }
@@ -823,21 +2427,15 @@ fn normalize_toolbox_state(mut state: ToolboxState) -> ToolboxState {
         normalize_mobile_channel_qr_cache(binding);
     }
 
-    if state.selected_mobile_thread_id.trim().is_empty() {
-        if let Some(first) = state.synced_codex_threads.first() {
-            state.selected_mobile_thread_id = first.id.clone();
-        }
-    }
+    state
+        .trashed_codex_threads
+        .retain(|thread| !thread.id.trim().is_empty());
+    let mut seen_trashed = HashSet::new();
+    state
+        .trashed_codex_threads
+        .retain(|thread| seen_trashed.insert(thread.id.clone()));
 
-    let active = state
-        .synced_codex_threads
-        .iter()
-        .find(|thread| thread.id == state.selected_mobile_thread_id)
-        .cloned();
-    if let Some(thread) = active {
-        state.mobile_remote.active_thread_id = thread.id;
-        state.mobile_remote.active_thread_name = thread.thread_name;
-    }
+    refresh_selected_mobile_thread_after_session_change(&mut state);
 
     state
 }
@@ -882,7 +2480,9 @@ fn normalize_mobile_channel_qr_cache(binding: &mut MobileChannelBinding) {
     }
     match binding.channel.as_str() {
         "qq" => {
-            if !is_qq_authorization_target(&binding.qr_url)
+            let has_image_qr = binding.qr_data_url.trim().starts_with("data:image/");
+            let has_openable_target = is_qq_authorization_target(&binding.qr_url);
+            if !(has_image_qr || has_openable_target)
                 || !mobile_qr_cache_is_fresh(&binding.qr_started_at)
             {
                 clear_stale_mobile_qr(binding, "QQ 二维码已失效，请重新绑定");
@@ -925,6 +2525,572 @@ fn write_toolbox_state(app: &tauri::AppHandle, state: &ToolboxState) -> Result<(
     fs::write(path, json).map_err(|e| e.to_string())
 }
 
+const OPENAI_BUNDLED_MARKETPLACE_NAME: &str = "openai-bundled";
+
+fn codex_plugin_config_id(name: &str, marketplace: &str) -> String {
+    format!("{}@{}", name.trim(), marketplace.trim())
+}
+
+fn important_codex_builtin_plugin(
+    name: &str,
+    description: &str,
+    skills: &[CodexBuiltinPluginSkill],
+) -> bool {
+    let haystack = format!(
+        "{} {} {}",
+        name,
+        description,
+        skills
+            .iter()
+            .map(|skill| format!("{} {}", skill.name, skill.description))
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+    .to_ascii_lowercase();
+    ["computer", "chrome", "browser", "devtools", "fast", "speed"]
+        .iter()
+        .any(|needle| haystack.contains(needle))
+}
+
+fn yaml_front_matter_value(contents: &str, key: &str) -> Option<String> {
+    let mut lines = contents.lines();
+    if lines.next()? != "---" {
+        return None;
+    }
+    for line in lines {
+        if line == "---" {
+            break;
+        }
+        let Some((left, right)) = line.split_once(':') else {
+            continue;
+        };
+        if left.trim() == key {
+            return Some(
+                right
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string(),
+            )
+            .filter(|value| !value.is_empty());
+        }
+    }
+    None
+}
+
+fn load_codex_builtin_plugin_skills(
+    root: &Path,
+    manifest: &serde_json::Value,
+) -> Vec<CodexBuiltinPluginSkill> {
+    let skills_path = manifest
+        .get("skills")
+        .and_then(|value| value.as_str())
+        .map(|value| root.join(value.trim_start_matches("./")))
+        .unwrap_or_else(|| root.join("skills"));
+    let Ok(skill_dirs) = fs::read_dir(skills_path) else {
+        return Vec::new();
+    };
+    let mut skills = skill_dirs
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path().join("SKILL.md");
+            let contents = fs::read_to_string(path).ok()?;
+            let name = yaml_front_matter_value(&contents, "name")
+                .unwrap_or_else(|| entry.file_name().to_string_lossy().to_string());
+            let description =
+                yaml_front_matter_value(&contents, "description").unwrap_or_else(|| name.clone());
+            Some(CodexBuiltinPluginSkill { name, description })
+        })
+        .collect::<Vec<_>>();
+    skills.sort_by(|left, right| left.name.cmp(&right.name));
+    skills
+}
+
+fn codex_builtin_plugin_from_root(
+    marketplace: &str,
+    root: PathBuf,
+    enabled_ids: &HashSet<String>,
+) -> Option<CodexBuiltinPluginItem> {
+    let manifest_path = root.join(".codex-plugin").join("plugin.json");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(manifest_path).ok()?).ok()?;
+    let name = manifest.get("name")?.as_str()?.trim().to_string();
+    if name.is_empty() || manifest.get("apps").is_some() {
+        return None;
+    }
+    let skills = load_codex_builtin_plugin_skills(&root, &manifest);
+    if skills.is_empty() {
+        return None;
+    }
+    let interface = manifest
+        .get("interface")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+    let display_name = interface
+        .get("displayName")
+        .and_then(|value| value.as_str())
+        .or_else(|| manifest.get("displayName").and_then(|value| value.as_str()))
+        .unwrap_or(&name)
+        .to_string();
+    let description = manifest
+        .get("description")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            interface
+                .get("shortDescription")
+                .and_then(|value| value.as_str())
+        })
+        .unwrap_or_default()
+        .to_string();
+    let version = manifest
+        .get("version")
+        .and_then(|value| value.as_str())
+        .unwrap_or("local")
+        .to_string();
+    let id = codex_plugin_config_id(&name, marketplace);
+    let important = important_codex_builtin_plugin(&name, &description, &skills);
+    Some(CodexBuiltinPluginItem {
+        id: id.clone(),
+        name,
+        display_name,
+        marketplace: marketplace.to_string(),
+        version,
+        description,
+        root: root.to_string_lossy().to_string(),
+        enabled: enabled_ids.contains(&id),
+        important,
+        skills,
+    })
+}
+
+fn newest_codex_builtin_plugin_entry(
+    marketplace: &str,
+    plugin_path: &Path,
+    enabled_ids: &HashSet<String>,
+) -> Option<CodexBuiltinPluginItem> {
+    if plugin_path
+        .join(".codex-plugin")
+        .join("plugin.json")
+        .is_file()
+    {
+        return codex_builtin_plugin_from_root(marketplace, plugin_path.to_path_buf(), enabled_ids);
+    }
+    let mut versions = fs::read_dir(plugin_path)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join(".codex-plugin").join("plugin.json").is_file())
+        .collect::<Vec<_>>();
+    versions.sort();
+    versions.reverse();
+    versions
+        .into_iter()
+        .find_map(|root| codex_builtin_plugin_from_root(marketplace, root, enabled_ids))
+}
+
+fn openai_bundled_plugins_root_from_install_location(install_location: PathBuf) -> Option<PathBuf> {
+    let root = install_location
+        .join("app")
+        .join("resources")
+        .join("plugins");
+    root.join(OPENAI_BUNDLED_MARKETPLACE_NAME)
+        .join(".agents")
+        .join("plugins")
+        .join("marketplace.json")
+        .is_file()
+        .then_some(root)
+}
+
+#[cfg(target_os = "windows")]
+fn find_openai_codex_install_locations_from_appx() -> Vec<PathBuf> {
+    let mut command = std::process::Command::new("powershell");
+    command.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "Get-AppxPackage -Name OpenAI.Codex | Select-Object -ExpandProperty InstallLocation",
+    ]);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let Ok(output) = command.output() else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn find_openai_codex_install_locations_from_windows_apps() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let mut bases = Vec::new();
+    if let Some(program_files) = std::env::var_os("ProgramFiles").map(PathBuf::from) {
+        bases.push(program_files.join("WindowsApps"));
+    }
+    bases.push(PathBuf::from("C:/Program Files/WindowsApps"));
+    for windows_apps in bases {
+        let Ok(entries) = fs::read_dir(windows_apps) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("OpenAI.Codex_") {
+                roots.push(entry.path());
+            }
+        }
+    }
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
+fn find_openai_bundled_plugins_root() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut install_locations = find_openai_codex_install_locations_from_appx();
+        install_locations.extend(find_openai_codex_install_locations_from_windows_apps());
+        install_locations.sort();
+        install_locations.dedup();
+        install_locations
+            .into_iter()
+            .rev()
+            .find_map(openai_bundled_plugins_root_from_install_location)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+fn codex_plugin_cache_root() -> PathBuf {
+    codex_config_dir().join("plugins").join("cache")
+}
+
+fn cached_marketplace_has_plugins(path: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(path) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let plugin_path = entry.path();
+        plugin_path.is_dir()
+            && plugin_path.file_name().and_then(|n| n.to_str()) != Some(".agents")
+            && newest_codex_builtin_plugin_entry("probe", &plugin_path, &HashSet::new()).is_some()
+    })
+}
+
+fn find_cached_codex_plugin_marketplaces() -> Vec<(String, PathBuf)> {
+    let cache_root = codex_plugin_cache_root();
+    let Ok(entries) = fs::read_dir(cache_root) else {
+        return Vec::new();
+    };
+    let mut marketplaces = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_dir() || !cached_marketplace_has_plugins(&path) {
+                return None;
+            }
+            let name = entry.file_name().to_string_lossy().trim().to_string();
+            (!name.is_empty()).then_some((name, path))
+        })
+        .collect::<Vec<_>>();
+    marketplaces
+        .sort_by(|left, right| marketplace_priority(&left.0).cmp(&marketplace_priority(&right.0)));
+    marketplaces
+}
+
+fn marketplace_priority(name: &str) -> usize {
+    match name {
+        "openai-bundled" => 0,
+        "varswitch-plugins" => 1,
+        "cooper-plugins" => 2,
+        "openai-primary-runtime" => 3,
+        "openai-curated" | "openai-curated-remote" | "openai-api-curated" => 4,
+        "personal" => 8,
+        _ => 9,
+    }
+}
+
+fn find_openai_bundled_marketplace_root() -> Option<PathBuf> {
+    find_openai_bundled_plugins_root()
+        .map(|root| root.join(OPENAI_BUNDLED_MARKETPLACE_NAME))
+        .or_else(|| {
+            let cached = codex_plugin_cache_root().join(OPENAI_BUNDLED_MARKETPLACE_NAME);
+            cached_marketplace_has_plugins(&cached).then_some(cached)
+        })
+}
+
+fn discover_codex_plugin_marketplaces() -> Vec<(String, PathBuf)> {
+    let mut marketplaces = Vec::new();
+    if let Some(root) = find_openai_bundled_marketplace_root() {
+        marketplaces.push((OPENAI_BUNDLED_MARKETPLACE_NAME.to_string(), root));
+    }
+    marketplaces.extend(find_cached_codex_plugin_marketplaces());
+    marketplaces.sort_by(|left, right| {
+        marketplace_priority(&left.0)
+            .cmp(&marketplace_priority(&right.0))
+            .then_with(|| left.1.cmp(&right.1))
+    });
+    let mut seen = HashSet::new();
+    marketplaces
+        .into_iter()
+        .filter(|(_, path)| seen.insert(path.clone()))
+        .collect()
+}
+
+fn enabled_codex_plugin_ids_from_config(config_text: &str) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    let lines = config_text.lines().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < lines.len() {
+        if lines[index].trim() != "[plugins]" {
+            index += 1;
+            continue;
+        }
+        index += 1;
+        while index < lines.len() {
+            let trimmed = lines[index].trim();
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                break;
+            }
+            if trimmed.contains("enabled") && trimmed.contains("true") {
+                if let Some((left, _)) = trimmed.split_once('=') {
+                    let id = left.trim().trim_matches('"').to_string();
+                    if !id.is_empty() {
+                        ids.insert(id);
+                    }
+                }
+            }
+            index += 1;
+        }
+        break;
+    }
+    ids
+}
+
+fn list_codex_builtin_plugins(config_text: &str) -> CodexBuiltinPluginStatus {
+    let marketplaces = discover_codex_plugin_marketplaces();
+    if marketplaces.is_empty() {
+        return CodexBuiltinPluginStatus {
+            available: false,
+            last_error: "未找到 Codex App 自带插件或本地插件缓存；已检查 Codex App openai-bundled 与 ~/.codex/plugins/cache".into(),
+            ..Default::default()
+        };
+    }
+
+    let enabled_ids = enabled_codex_plugin_ids_from_config(config_text);
+    let mut plugins = Vec::new();
+    let mut sources = Vec::new();
+    let mut configured_any = false;
+    let mut seen_names = HashSet::new();
+
+    for (marketplace, marketplace_root) in marketplaces {
+        let marketplace_source = marketplace_root.to_string_lossy().to_string();
+        sources.push(format!("{}={}", marketplace, marketplace_source));
+        configured_any |= config_has_plugin_marketplace_source(config_text, &marketplace_source);
+
+        let Ok(plugin_dirs) = fs::read_dir(&marketplace_root) else {
+            continue;
+        };
+        for plugin_dir in plugin_dirs.flatten() {
+            let plugin_path = plugin_dir.path();
+            if !plugin_path.is_dir()
+                || plugin_path.file_name().and_then(|n| n.to_str()) == Some(".agents")
+            {
+                continue;
+            }
+            if let Some(entry) =
+                newest_codex_builtin_plugin_entry(&marketplace, &plugin_path, &enabled_ids)
+            {
+                let key = entry.name.clone();
+                if seen_names.insert(key) {
+                    plugins.push(entry);
+                }
+            }
+        }
+    }
+
+    plugins.sort_by(|left, right| {
+        right
+            .important
+            .cmp(&left.important)
+            .then_with(|| {
+                marketplace_priority(&left.marketplace)
+                    .cmp(&marketplace_priority(&right.marketplace))
+            })
+            .then_with(|| left.display_name.cmp(&right.display_name))
+    });
+    let total_count = plugins.len();
+    let enabled_count = plugins.iter().filter(|plugin| plugin.enabled).count();
+    let important_total_count = plugins.iter().filter(|plugin| plugin.important).count();
+    let important_enabled_count = plugins
+        .iter()
+        .filter(|plugin| plugin.important && plugin.enabled)
+        .count();
+    CodexBuiltinPluginStatus {
+        available: total_count > 0,
+        marketplace_source: sources.join("; "),
+        marketplace_configured: configured_any,
+        enabled_count,
+        total_count,
+        important_enabled_count,
+        important_total_count,
+        plugins,
+        last_error: if total_count > 0 {
+            String::new()
+        } else {
+            "已发现插件来源，但没有解析到可启用的 Codex 插件".into()
+        },
+    }
+}
+
+fn ensure_openai_bundled_marketplace_config(config_text: &str) -> Result<String, String> {
+    let root = find_openai_bundled_marketplace_root().ok_or_else(|| {
+        "未找到 Codex App 自带 openai-bundled 插件市场，请确认已安装 OpenAI Codex App 或已有本地 openai-bundled 缓存".to_string()
+    })?;
+    Ok(ensure_plugin_marketplace_section(
+        config_text,
+        OPENAI_BUNDLED_MARKETPLACE_NAME,
+        &root.to_string_lossy(),
+        "local",
+    ))
+}
+
+fn ensure_discovered_plugin_marketplaces_config(config_text: &str) -> Result<String, String> {
+    let marketplaces = discover_codex_plugin_marketplaces();
+    if marketplaces.is_empty() {
+        return Err("未找到可启用的 Codex 本地插件来源".into());
+    }
+    let mut next = config_text.to_string();
+    for (marketplace, root) in marketplaces {
+        next = ensure_plugin_marketplace_section(
+            &next,
+            &marketplace,
+            &root.to_string_lossy(),
+            "local",
+        );
+    }
+    Ok(next)
+}
+
+fn toml_double_quoted_value(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn plugin_inline_entry_matches(line: &str, plugin_id: &str) -> bool {
+    let trimmed = line.trim_start();
+    let quoted = format!("\"{}\"", toml_double_quoted_value(plugin_id));
+    trimmed.starts_with(&quoted) || trimmed.starts_with(plugin_id)
+}
+
+fn plugin_table_header_matches(line: &str, plugin_id: &str) -> bool {
+    let trimmed = line.trim();
+    let double_header = format!("[plugins.\"{}\"]", toml_double_quoted_value(plugin_id));
+    let single_header = format!("[plugins.'{}']", plugin_id.replace('\'', "\\'"));
+    trimmed == double_header || trimmed == single_header
+}
+
+fn write_enabled_codex_plugin_config(config_text: &str, plugin_id: &str) -> String {
+    let plugins_header = "[plugins]";
+    let plugin_line = format!(
+        "\"{}\" = {{ enabled = true }}",
+        toml_double_quoted_value(plugin_id)
+    );
+    let mut lines = config_text.lines().map(str::to_string).collect::<Vec<_>>();
+
+    let mut table_start = None;
+    let mut table_end = lines.len();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if plugin_table_header_matches(trimmed, plugin_id) {
+            table_start = Some(index);
+            table_end = lines.len();
+            continue;
+        }
+        if table_start.is_some() && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            table_end = index;
+            break;
+        }
+    }
+
+    if let Some(start) = table_start {
+        let mut enabled_index = None;
+        for index in (start + 1)..table_end {
+            if lines[index].trim_start().starts_with("enabled") {
+                enabled_index = Some(index);
+                break;
+            }
+        }
+        if let Some(index) = enabled_index {
+            lines[index] = "enabled = true".to_string();
+        } else {
+            lines.insert(table_end, "enabled = true".to_string());
+        }
+
+        let mut plugins_start = None;
+        let mut plugins_end = lines.len();
+        for (index, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed == plugins_header {
+                plugins_start = Some(index);
+                continue;
+            }
+            if plugins_start.is_some() && trimmed.starts_with('[') && trimmed.ends_with(']') {
+                plugins_end = index;
+                break;
+            }
+        }
+        if let Some(start) = plugins_start {
+            for index in ((start + 1)..plugins_end).rev() {
+                if plugin_inline_entry_matches(&lines[index], plugin_id) {
+                    lines.remove(index);
+                }
+            }
+        }
+        return lines.join("\n");
+    }
+
+    let mut plugins_start = None;
+    let mut plugins_end = lines.len();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed == plugins_header {
+            plugins_start = Some(index);
+            continue;
+        }
+        if plugins_start.is_some() && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            plugins_end = index;
+            break;
+        }
+    }
+    if let Some(start) = plugins_start {
+        for index in (start + 1)..plugins_end {
+            if plugin_inline_entry_matches(&lines[index], plugin_id) {
+                lines[index] = plugin_line;
+                return lines.join("\n");
+            }
+        }
+        lines.insert(plugins_end, plugin_line);
+        return lines.join("\n");
+    }
+
+    let mut text = config_text.trim_end().to_string();
+    if !text.is_empty() {
+        text.push_str("\n\n");
+    }
+    text.push_str(plugins_header);
+    text.push('\n');
+    text.push_str(&plugin_line);
+    text.push('\n');
+    text
+}
 fn default_plugin_marketplace_url() -> &'static str {
     "https://gitcode.com/2301_79703673/codex-plugins.git"
 }
@@ -942,7 +3108,7 @@ fn awesome_plugin_marketplace_url() -> &'static str {
 }
 
 fn default_plugin_marketplace_name() -> &'static str {
-    "VarSwitch-Plugin"
+    "varswitch-plugins"
 }
 
 fn supported_plugin_marketplace_source(source: &str) -> &'static str {
@@ -1041,12 +3207,14 @@ fn base64_encode_bytes(bytes: &[u8]) -> String {
 fn generate_qr_code_data_url(content: &str) -> Result<String, String> {
     let code = QrCode::with_error_correction_level(content, EcLevel::M)
         .map_err(|e| format!("生成二维码失败: {e}"))?;
-    let image = code.render::<Luma<u8>>()
-        .min_dimensions(240, 240)
-        .build();
+    let image = code.render::<Luma<u8>>().min_dimensions(240, 240).build();
     let dyn_img = DynamicImage::ImageLuma8(image);
     let mut png_bytes = Vec::new();
-    dyn_img.write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+    dyn_img
+        .write_to(
+            &mut std::io::Cursor::new(&mut png_bytes),
+            image::ImageFormat::Png,
+        )
         .map_err(|e| format!("PNG 编码失败: {e}"))?;
     let b64 = base64_encode_bytes(&png_bytes);
     Ok(format!("data:image/png;base64,{b64}"))
@@ -1328,35 +3496,101 @@ fn list_plugin_marketplaces(config_text: &str, current_source: &str) -> Vec<Plug
     result
 }
 
-fn extract_marketplace_sections(config_text: &str) -> String {
+fn is_toml_section_header(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('[') && trimmed.ends_with(']')
+}
+
+fn toml_root_key(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('[') {
+        return None;
+    }
+    trimmed
+        .split_once('=')
+        .map(|(key, _)| key.trim().trim_matches('"').to_string())
+        .filter(|key| !key.is_empty())
+}
+
+fn split_codex_config_root_and_sections(config_text: &str) -> (String, String) {
+    const MANAGED_ROOT_KEYS: &[&str] = &[
+        "model_provider",
+        "model",
+        "review_model",
+        "model_reasoning_effort",
+        "disable_response_storage",
+        "preferred_auth_method",
+        "chatgpt_base_url",
+    ];
     let lines: Vec<&str> = config_text.lines().collect();
-    let mut index = 0;
+    let mut index = 0usize;
+    let mut root_lines = Vec::new();
     let mut sections = Vec::new();
 
     while index < lines.len() {
-        let line = lines[index].trim();
-        if !(line.starts_with("[marketplaces.") && line.ends_with(']')) {
+        let line = lines[index];
+        let trimmed = line.trim();
+        if is_toml_section_header(trimmed) {
+            break;
+        }
+        if let Some(key) = toml_root_key(line) {
+            if !MANAGED_ROOT_KEYS.contains(&key.as_str()) {
+                root_lines.push(line.to_string());
+            }
+        } else if !trimmed.is_empty() {
+            root_lines.push(line.to_string());
+        }
+        index += 1;
+    }
+
+    while index < lines.len() {
+        let header = lines[index].trim();
+        if !is_toml_section_header(header) {
             index += 1;
             continue;
         }
+        let skip_managed_provider = header.starts_with("[model_providers.");
         let mut block = vec![lines[index].to_string()];
         index += 1;
         while index < lines.len() {
             let current = lines[index].trim();
-            if current.starts_with('[') && current.ends_with(']') {
+            if is_toml_section_header(current) {
                 break;
             }
             block.push(lines[index].to_string());
             index += 1;
         }
-        sections.push(block.join("\n").trim().to_string());
+        if !skip_managed_provider {
+            sections.push(block.join("\n").trim().to_string());
+        }
     }
 
-    if sections.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", sections.join("\n\n"))
+    (
+        root_lines.join("\n").trim().to_string(),
+        sections.join("\n\n").trim().to_string(),
+    )
+}
+
+fn merge_codex_config_with_preserved_sections(generated: &str, existing: &str) -> String {
+    let (preserved_root, preserved_sections) = split_codex_config_root_and_sections(existing);
+    let mut output = generated.trim_end().to_string();
+
+    if !preserved_root.trim().is_empty() {
+        if let Some(pos) = output.find("\n[model_providers.") {
+            output.insert_str(pos, &format!("\n{}", preserved_root.trim()));
+        } else {
+            output.push('\n');
+            output.push_str(preserved_root.trim());
+        }
     }
+
+    if !preserved_sections.trim().is_empty() {
+        output.push_str("\n\n");
+        output.push_str(preserved_sections.trim());
+    }
+
+    output.push('\n');
+    output
 }
 
 fn ensure_plugin_marketplace_section(
@@ -1469,9 +3703,12 @@ fn run_codex_plugin_marketplace_add(source: &str) -> Result<(), String> {
         .env("CODEX_HOME", codex_config_dir())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let output = command
-        .output()
-        .map_err(|e| format!("启动 Codex CLI 安装插件市场失败({}): {e}", executable.display()))?;
+    let output = command.output().map_err(|e| {
+        format!(
+            "启动 Codex CLI 安装插件市场失败({}): {e}",
+            executable.display()
+        )
+    })?;
     if output.status.success() {
         return Ok(());
     }
@@ -1491,6 +3728,146 @@ fn run_codex_plugin_marketplace_add(source: &str) -> Result<(), String> {
             detail
         }
     ))
+}
+
+fn run_codex_plugin_marketplace_remove(name: &str) -> Result<(), String> {
+    let executable = resolve_codex_command()?;
+    let mut command = codex_command(&executable);
+    command
+        .args(["plugin", "marketplace", "remove", name, "--json"])
+        .env("CODEX_HOME", codex_config_dir())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = command.output().map_err(|e| {
+        format!(
+            "启动 Codex CLI 移除插件市场失败({}): {e}",
+            executable.display()
+        )
+    })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let detail = [stdout, stderr]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if detail.to_ascii_lowercase().contains("not found")
+        || detail.to_ascii_lowercase().contains("unknown marketplace")
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "Codex CLI 移除插件市场失败(exit {})：{}",
+        output.status.code().unwrap_or(-1),
+        if detail.is_empty() {
+            "无错误输出".to_string()
+        } else {
+            detail
+        }
+    ))
+}
+
+fn run_codex_plugin_marketplace_upgrade(name: &str) -> Result<(), String> {
+    let executable = resolve_codex_command()?;
+    let mut command = codex_command(&executable);
+    command
+        .args(["plugin", "marketplace", "upgrade", name, "--json"])
+        .env("CODEX_HOME", codex_config_dir())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = command.output().map_err(|e| {
+        format!(
+            "启动 Codex CLI 刷新插件市场失败({}): {e}",
+            executable.display()
+        )
+    })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let detail = [stdout, stderr]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Err(format!(
+        "Codex CLI 刷新插件市场失败(exit {})：{}",
+        output.status.code().unwrap_or(-1),
+        if detail.is_empty() {
+            "无错误输出".to_string()
+        } else {
+            detail
+        }
+    ))
+}
+
+fn configure_git_longpaths_for_windows() {
+    if !cfg!(windows) {
+        return;
+    }
+    let mut command = Command::new("git");
+    command.args(["config", "--global", "core.longpaths", "true"]);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let _ = command.output();
+}
+
+fn clean_plugin_marketplace_cache(name: &str) {
+    let codex_home = codex_config_dir();
+    let paths = [
+        codex_home.join(".tmp").join("marketplaces").join(name),
+        codex_home
+            .join(".tmp")
+            .join("marketplaces")
+            .join(".staging"),
+        codex_home.join("plugins").join("cache").join(name),
+    ];
+    for path in paths {
+        if path.exists() {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+}
+
+fn plugin_marketplace_snapshot_exists(name: &str) -> bool {
+    codex_config_dir()
+        .join(".tmp")
+        .join("marketplaces")
+        .join(name)
+        .join(".agents")
+        .join("plugins")
+        .join("marketplace.json")
+        .is_file()
+}
+
+fn is_marketplace_different_source_error(error: &str) -> bool {
+    let lowered = error.to_ascii_lowercase();
+    lowered.contains("already added from a different source")
+        || (lowered.contains("different source") && lowered.contains("marketplace"))
+}
+
+fn repair_and_add_codex_plugin_marketplace(source: &str) -> Result<(), String> {
+    configure_git_longpaths_for_windows();
+    match run_codex_plugin_marketplace_add(source) {
+        Ok(()) => return Ok(()),
+        Err(first_error) if is_marketplace_different_source_error(&first_error) => {
+            let name = default_plugin_marketplace_name();
+            let _ = run_codex_plugin_marketplace_remove(name);
+            clean_plugin_marketplace_cache(name);
+            configure_git_longpaths_for_windows();
+            run_codex_plugin_marketplace_add(source).map_err(|second_error| {
+                format!(
+                    "{second_error}\n已检测到同名插件市场来源冲突，并自动执行 remove + 清理缓存 + 重新 add，但重新添加仍失败。\n原始错误：{first_error}"
+                )
+            })?;
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn config_has_plugin_marketplace_source(config_text: &str, source: &str) -> bool {
@@ -1725,16 +4102,15 @@ fn probe_wechat_channel(
         if !is_platform_code_ok(&result) {
             let err_msg = platform_error_message(&result, "接口返回异常");
             // 微信 iLink bot_token 有时效性，session timeout 提示用户重新绑定
-            if err_msg.to_lowercase().contains("session timeout") || err_msg.to_lowercase().contains("expired") {
+            if err_msg.to_lowercase().contains("session timeout")
+                || err_msg.to_lowercase().contains("expired")
+            {
                 return Err(format!(
                     "微信 iLink 会话已过期（bot_token 失效），请清除微信绑定后重新扫码，并在扫码成功后立即开启连接。错误详情：{}",
                     err_msg
                 ));
             }
-            return Err(format!(
-                "微信 iLink 启动失败：{}",
-                err_msg
-            ));
+            return Err(format!("微信 iLink 启动失败：{}", err_msg));
         }
     }
     Ok((
@@ -1760,9 +4136,7 @@ fn command_available(name: &str) -> bool {
         .stderr(Stdio::null());
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd.status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    cmd.status().map(|status| status.success()).unwrap_or(false)
 }
 
 fn node_command_name() -> Result<&'static str, String> {
@@ -2599,18 +4973,19 @@ fn ensure_lark_bridge_connector(app: &tauri::AppHandle) -> Result<PathBuf, Strin
         let npm = npm_command_name()?;
         let mut cmd = Command::new(npm);
         cmd.args([
-                "install",
-                "--omit=dev",
-                "--no-audit",
-                "--no-fund",
-                "--registry=https://registry.npmmirror.com",
-            ])
-            .current_dir(&connector_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            "install",
+            "--omit=dev",
+            "--no-audit",
+            "--no-fund",
+            "--registry=https://registry.npmmirror.com",
+        ])
+        .current_dir(&connector_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
         #[cfg(target_os = "windows")]
         cmd.creation_flags(CREATE_NO_WINDOW);
-        let output = cmd.output()
+        let output = cmd
+            .output()
             .map_err(|e| format!("启动 npm 安装飞书 WebSocket 依赖失败: {e}"))?;
         if !output.status.success() {
             let mut detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -2651,18 +5026,19 @@ fn ensure_qq_qr_connector(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         let npm = npm_command_name()?;
         let mut cmd = Command::new(npm);
         cmd.args([
-                "install",
-                "--omit=dev",
-                "--no-audit",
-                "--no-fund",
-                "--registry=https://registry.npmmirror.com",
-            ])
-            .current_dir(&connector_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            "install",
+            "--omit=dev",
+            "--no-audit",
+            "--no-fund",
+            "--registry=https://registry.npmmirror.com",
+        ])
+        .current_dir(&connector_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
         #[cfg(target_os = "windows")]
         cmd.creation_flags(CREATE_NO_WINDOW);
-        let output = cmd.output()
+        let output = cmd
+            .output()
             .map_err(|e| format!("启动 npm 安装 QQ 扫码依赖失败: {e}"))?;
         if !output.status.success() {
             let mut detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -2708,6 +5084,7 @@ fn write_mobile_channel_qr_state(
         .find(|binding| binding.channel == normalized)
     {
         let now = chrono_now();
+        let now_ms = chrono_timestamp_millis().to_string();
         binding.qr_status = status.to_string();
         binding.qr_url = qr_url.to_string();
         binding.qr_data_url = qr_data_url.to_string();
@@ -2720,7 +5097,7 @@ fn write_mobile_channel_qr_state(
                 || !qr_data_url.trim().is_empty()
                 || binding.qr_started_at.trim().is_empty())
         {
-            binding.qr_started_at = now.clone();
+            binding.qr_started_at = now_ms;
         }
         binding.updated_at = now;
     }
@@ -3278,30 +5655,25 @@ fn codex_debug_port_from_process() -> Option<u16> {
 }
 
 /// 用于重启的目标调试端口。
+#[allow(dead_code)]
 const CODEX_PREFERRED_DEBUG_PORT: u16 = 9229;
 
-/// 探测调试端口；若没有，则自动用调试端口重启 Codex App 后再探测。
-/// 这样即使用户的 Codex 以普通模式启动(没带 --remote-debugging-port)，也能用手机控制。
+/// 探测调试端口。
+///
+/// 注意：这里故意不再自动 `taskkill Codex.exe` 后重启。
+/// 首条手机消息如果强制重启 Codex App，会打断用户当前窗口、改变窗口尺寸/布局，
+/// 还可能造成用户看到“第一次发消息需要重启 Codex App”的体验。
+/// 现在策略是：CDP 可用就做兼容注入；不可用则交给高级控制通道或 CLI 兜底。
 fn codex_debug_port_or_relaunch() -> Result<u16, String> {
     if let Some(port) = codex_debug_port() {
         return Ok(port);
     }
-    // 没有调试端口 —— 尝试带调试端口重启 Codex App。
-    log_info!("[mobile-control][codex-app] 未检测到调试端口，尝试用调试端口重启 Codex App");
-    relaunch_codex_with_debug_port(CODEX_PREFERRED_DEBUG_PORT)?;
-    // 重启后轮询等待端口起来(最多约 20 秒)。
-    for _ in 0..40 {
-        std::thread::sleep(Duration::from_millis(500));
-        if let Some(port) = codex_debug_port() {
-            log_info!("[mobile-control][codex-app] Codex 已带调试端口 {port} 重启成功");
-            return Ok(port);
-        }
-    }
-    Err("已尝试重启 Codex App，但调试端口仍未就绪，请手动重启 Codex 后重试".into())
+    Err("Codex App 当前没有开启本地调试端口，已跳过会改变窗口状态的兼容注入".into())
 }
 
 /// 从正在运行的 Codex 主进程拿到其可执行文件完整路径(动态获取，不写死安装位置)。
 #[cfg(windows)]
+#[allow(dead_code)]
 fn running_codex_exe_path() -> Option<String> {
     let mut cmd = Command::new("powershell");
     cmd.args([
@@ -3325,13 +5697,15 @@ fn running_codex_exe_path() -> Option<String> {
 
 /// 关闭所有 Codex.exe 进程，再用 `--remote-debugging-port` 重启同一个可执行文件。
 #[cfg(windows)]
+#[allow(dead_code)]
 fn relaunch_codex_with_debug_port(port: u16) -> Result<(), String> {
     // 1) 先拿到当前运行的 Codex.exe 路径(重启后要用同一个版本)。
     let exe_path = running_codex_exe_path()
         .ok_or("未找到正在运行的 Codex App，请先手动打开 Codex 桌面应用")?;
     // 2) 关闭所有 Codex.exe(taskkill /F /T 连子进程一并结束)。
     let mut kill_cmd = Command::new("taskkill");
-    kill_cmd.args(["/F", "/T", "/IM", "Codex.exe"])
+    kill_cmd
+        .args(["/F", "/T", "/IM", "Codex.exe"])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     #[cfg(target_os = "windows")]
@@ -3342,18 +5716,21 @@ fn relaunch_codex_with_debug_port(port: u16) -> Result<(), String> {
     // 3) 用调试端口重启。--remote-allow-origins 允许本地 CDP 连接。
     let allow_origin = format!("http://127.0.0.1:{port}");
     let mut launch_cmd = Command::new(&exe_path);
-    launch_cmd.arg(format!("--remote-debugging-port={port}"))
+    launch_cmd
+        .arg(format!("--remote-debugging-port={port}"))
         .arg(format!("--remote-allow-origins={allow_origin}"))
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     #[cfg(target_os = "windows")]
     launch_cmd.creation_flags(CREATE_NO_WINDOW);
-    launch_cmd.spawn()
+    launch_cmd
+        .spawn()
         .map_err(|e| format!("重启 Codex App 失败({exe_path}): {e}"))?;
     Ok(())
 }
 
 #[cfg(not(windows))]
+#[allow(dead_code)]
 fn relaunch_codex_with_debug_port(_port: u16) -> Result<(), String> {
     Err("当前平台暂不支持自动重启 Codex App".into())
 }
@@ -3435,19 +5812,19 @@ impl CdpClient {
             .ok_or("仅支持 ws:// 的 CDP 地址")?;
         let slash = rest.find('/').unwrap_or(rest.len());
         let host_port = &rest[..slash];
-        let path = if slash < rest.len() { &rest[slash..] } else { "/" };
+        let path = if slash < rest.len() {
+            &rest[slash..]
+        } else {
+            "/"
+        };
         let (host, port) = match host_port.rsplit_once(':') {
             Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(9229)),
             None => (host_port.to_string(), 9229),
         };
         let mut stream = TcpStream::connect((host.as_str(), port))
             .map_err(|e| format!("连接 Codex 调试端口失败: {e}"))?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(180)))
-            .ok();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(10)))
-            .ok();
+        stream.set_read_timeout(Some(Duration::from_secs(180))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
         // 随机 16 字节做握手 key。
         let key_bytes = uuid::Uuid::new_v4().into_bytes();
         let key = base64_encode_bytes(&key_bytes);
@@ -3482,10 +5859,7 @@ impl CdpClient {
                 header_text.lines().next().unwrap_or("")
             ));
         }
-        Ok(CdpClient {
-            stream,
-            next_id: 0,
-        })
+        Ok(CdpClient { stream, next_id: 0 })
     }
 
     /// 发送一个带掩码的文本帧(客户端→服务端必须带掩码)。
@@ -3598,7 +5972,10 @@ impl CdpClient {
                 if let Some(err) = value.get("error") {
                     return Err(format!("CDP 命令 {method} 失败: {err}"));
                 }
-                return Ok(value.get("result").cloned().unwrap_or(serde_json::Value::Null));
+                return Ok(value
+                    .get("result")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null));
             }
             // 否则是事件(method 字段)，继续等。
         }
@@ -3607,10 +5984,7 @@ impl CdpClient {
 }
 
 /// 在 Codex 页面执行一段 JS 表达式，返回其(已 returnByValue 的)结果值。
-fn cdp_evaluate(
-    client: &mut CdpClient,
-    expression: &str,
-) -> Result<serde_json::Value, String> {
+fn cdp_evaluate(client: &mut CdpClient, expression: &str) -> Result<serde_json::Value, String> {
     client.command("Runtime.enable", serde_json::json!({}))?;
     let result = client.command(
         "Runtime.evaluate",
@@ -3746,7 +6120,7 @@ fn codex_inject_send_script(prompt_json: &str) -> String {
   }
   function activateButton(button) {
     if (!button) return false;
-    button.scrollIntoView?.({ block: "center", inline: "center" });
+    // 不再强制滚动按钮到视口中央，避免兼容注入时改变用户当前 Codex 窗口滚动位置/视觉布局。
     // 直接调 click(),不触发冗余的鼠标事件链(可能导致重复提交)。
     button.click();
     return true;
@@ -3868,7 +6242,11 @@ fn activate_codex_thread(thread_id: &str) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
         Command::new(opener)
             .arg(&deep_link)
             .stdout(Stdio::null())
@@ -3899,8 +6277,7 @@ fn send_prompt_to_codex_app(thread_id: &str, prompt: &str) -> Result<String, Str
     let ws_url = codex_find_page_target(port)?;
     // 4) 连接 CDP 并注入。
     let mut client = CdpClient::connect(&ws_url)?;
-    let prompt_json = serde_json::to_string(text)
-        .map_err(|e| format!("序列化消息失败: {e}"))?;
+    let prompt_json = serde_json::to_string(text).map_err(|e| format!("序列化消息失败: {e}"))?;
     let script = codex_inject_send_script(&prompt_json);
     let value = cdp_evaluate(&mut client, &script)?;
     // 4) 解析脚本返回 {ok, text, error}。
@@ -3921,20 +6298,49 @@ fn send_prompt_to_codex_app(thread_id: &str, prompt: &str) -> Result<String, Str
     }
 }
 
-/// 统一的回复分发:优先注入 Codex 桌面 App，失败时降级到后台 CLI(resume 续接)。
+/// 统一的回复分发：
+/// 1) 优先走高级控制 WebSocket，完全不触碰 Codex App 窗口；
+/// 2) 不可用时优先走后台 Codex CLI resume，避免 deep link / CDP 改变桌面窗口；
+/// 3) 只有 CLI 也失败时，才最后尝试 CDP 兼容注入。
 fn dispatch_codex_reply(thread_id: &str, text: &str, cwd: &str) -> Result<String, String> {
-    match send_prompt_to_codex_app(thread_id, text) {
-        Ok(reply) => Ok(reply),
-        Err(app_err) => {
-            log_warn!("[mobile-control][codex-app] 注入失败，降级到 CLI: {app_err}");
-            run_codex_cli_reply(text, cwd, thread_id).map_err(|cli_err| {
-                format!("Codex App 注入失败({app_err})；CLI 兜底也失败：{cli_err}")
-            })
+    match try_smart_control_dispatch(thread_id, text) {
+        Ok(Some(reply)) => return Ok(reply),
+        Ok(None) => {}
+        Err(error) => {
+            log_warn!(
+                "[smart-control][dispatch] protocol dispatch failed, fallback to compatibility mode: {}",
+                error
+            );
+        }
+    }
+    if let Some(status) = smart_control_status_from_cache() {
+        if status.connected {
+            log_info!(
+                "[mobile-control][smart-control] 高级控制通道已连接，当前版本保留兼容分发；backend={}",
+                status.backend_url
+            );
+        } else if status.available {
+            log_info!(
+                "[mobile-control][smart-control] 高级控制服务已响应但 Codex 未连接，使用兼容分发；detail={}",
+                status.detail
+            );
+        }
+    }
+    match run_codex_cli_reply(text, cwd, thread_id) {
+        Ok(reply) => return Ok(reply),
+        Err(cli_err) => {
+            log_warn!(
+                "[mobile-control][codex-cli] 后台回复失败，最后尝试 Codex App 兼容注入: {cli_err}"
+            );
+            match send_prompt_to_codex_app(thread_id, text) {
+                Ok(reply) => Ok(reply),
+                Err(app_err) => Err(format!(
+                    "后台 CLI 回复失败({cli_err})；Codex App 兼容注入也失败：{app_err}"
+                )),
+            }
         }
     }
 }
-
-
 
 fn lark_tenant_access_token(
     client: &reqwest::blocking::Client,
@@ -4332,7 +6738,9 @@ fn update_channel_status(app: &tauri::AppHandle, channel: &str, status: &str, er
     } else {
         log_info!(
             "[mobile-control][status][{}] {} | error={}",
-            channel, status, error
+            channel,
+            status,
+            error
         );
     }
     let normalized = normalize_mobile_channel(channel);
@@ -4425,7 +6833,9 @@ fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Re
     }
     log_info!(
         "[mobile-control][lark] starting bridge: thread_id={}, thread_name={}, app_id={}",
-        binding.thread_id, binding.thread_name, binding.app_id
+        binding.thread_id,
+        binding.thread_name,
+        binding.app_id
     );
     let runner = ensure_lark_bridge_connector(&app)?;
     let node = node_command_name()?;
@@ -4448,11 +6858,10 @@ fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Re
         .stderr(Stdio::piped());
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    let mut child = cmd.spawn()
-        .map_err(|e| {
-            LARK_BRIDGE_ACTIVE.store(false, Ordering::SeqCst);
-            format!("启动飞书消息桥失败: {e}")
-        })?;
+    let mut child = cmd.spawn().map_err(|e| {
+        LARK_BRIDGE_ACTIVE.store(false, Ordering::SeqCst);
+        format!("启动飞书消息桥失败: {e}")
+    })?;
     let stdout = child.stdout.take().ok_or("飞书消息桥没有输出通道")?;
     let stderr = child.stderr.take();
     if let Ok(mut guard) = LARK_BRIDGE_CHILD.lock() {
@@ -4587,11 +6996,10 @@ fn start_qq_gateway(app: tauri::AppHandle, binding: MobileChannelBinding) -> Res
         .stderr(Stdio::piped());
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    let mut child = cmd.spawn()
-        .map_err(|e| {
-            QQ_GATEWAY_ACTIVE.store(false, Ordering::SeqCst);
-            format!("启动 QQ 网关失败: {e}")
-        })?;
+    let mut child = cmd.spawn().map_err(|e| {
+        QQ_GATEWAY_ACTIVE.store(false, Ordering::SeqCst);
+        format!("启动 QQ 网关失败: {e}")
+    })?;
     let stdout = child.stdout.take().ok_or("QQ 网关没有输出通道")?;
     if let Ok(mut guard) = QQ_GATEWAY_CHILD.lock() {
         *guard = Some(child);
@@ -4776,12 +7184,7 @@ fn start_wechat_listener(
                         &format!("错误详情：{}", err_msg),
                     );
                 } else {
-                    update_channel_status(
-                        &app,
-                        "wechat",
-                        "微信监听启动失败",
-                        &err_msg,
-                    );
+                    update_channel_status(&app, "wechat", "微信监听启动失败", &err_msg);
                 }
                 WECHAT_LISTENER_ACTIVE.store(false, Ordering::SeqCst);
                 return;
@@ -4867,17 +7270,24 @@ fn stop_wechat_listener(app: &tauri::AppHandle) {
 }
 
 fn build_toolbox_snapshot(app: &tauri::AppHandle) -> ToolboxSnapshot {
-    let state = read_toolbox_state(app);
+    let mut state = read_toolbox_state(app);
+    let _ = refresh_smart_control_status_for_state(&mut state);
     let config_path = codex_config_path();
     let config_text = fs::read_to_string(&config_path).unwrap_or_default();
     let current_source = state.plugin_marketplace_input.clone();
+    let visible_threads = visible_codex_threads(&state);
     ToolboxSnapshot {
         plugin_marketplace_input: current_source.clone(),
         plugin_marketplaces: list_plugin_marketplaces(&config_text, &current_source),
+        builtin_plugins: list_codex_builtin_plugins(&config_text),
         session_bindings: state.session_bindings.clone(),
         codex_threads: Vec::new(),
-        synced_codex_threads: state.synced_codex_threads.clone(),
-        session_sync: state.session_sync.clone(),
+        synced_codex_threads: visible_threads.clone(),
+        trashed_codex_threads: state.trashed_codex_threads.clone(),
+        session_sync: CodexSessionSyncState {
+            last_synced_at: state.session_sync.last_synced_at.clone(),
+            total: visible_threads.len(),
+        },
         mobile_channels: state.mobile_channels.clone(),
         selected_mobile_thread_id: state.selected_mobile_thread_id.clone(),
         mobile_remote: state.mobile_remote.clone(),
@@ -4915,34 +7325,10 @@ const KNOWN_EDITORS: &[EditorDef] = &[
         win_program_dirs: &["Microsoft VS Code"],
     },
     EditorDef {
-        id: "vscode-insiders",
-        display_name: "VS Code Insiders",
-        win_appdata_dir: "Code - Insiders",
-        win_program_dirs: &["Microsoft VS Code Insiders"],
-    },
-    EditorDef {
         id: "cursor",
         display_name: "Cursor",
         win_appdata_dir: "Cursor",
         win_program_dirs: &["Cursor"],
-    },
-    EditorDef {
-        id: "windsurf",
-        display_name: "Windsurf",
-        win_appdata_dir: "Windsurf",
-        win_program_dirs: &["Windsurf"],
-    },
-    EditorDef {
-        id: "trae",
-        display_name: "Trae",
-        win_appdata_dir: "Trae",
-        win_program_dirs: &["Trae"],
-    },
-    EditorDef {
-        id: "vscodium",
-        display_name: "VSCodium",
-        win_appdata_dir: "VSCodium",
-        win_program_dirs: &["VSCodium"],
     },
 ];
 
@@ -4954,29 +7340,9 @@ const KNOWN_EDITORS: &[EditorDef] = &[
         mac_app_support_dir: "Code",
     },
     EditorDef {
-        id: "vscode-insiders",
-        display_name: "VS Code Insiders",
-        mac_app_support_dir: "Code - Insiders",
-    },
-    EditorDef {
         id: "cursor",
         display_name: "Cursor",
         mac_app_support_dir: "Cursor",
-    },
-    EditorDef {
-        id: "windsurf",
-        display_name: "Windsurf",
-        mac_app_support_dir: "Windsurf",
-    },
-    EditorDef {
-        id: "trae",
-        display_name: "Trae",
-        mac_app_support_dir: "Trae",
-    },
-    EditorDef {
-        id: "vscodium",
-        display_name: "VSCodium",
-        mac_app_support_dir: "VSCodium",
     },
 ];
 
@@ -4988,29 +7354,9 @@ const KNOWN_EDITORS: &[EditorDef] = &[
         linux_config_dir: "Code",
     },
     EditorDef {
-        id: "vscode-insiders",
-        display_name: "VS Code Insiders",
-        linux_config_dir: "Code - Insiders",
-    },
-    EditorDef {
         id: "cursor",
         display_name: "Cursor",
         linux_config_dir: "Cursor",
-    },
-    EditorDef {
-        id: "windsurf",
-        display_name: "Windsurf",
-        linux_config_dir: "Windsurf",
-    },
-    EditorDef {
-        id: "trae",
-        display_name: "Trae",
-        linux_config_dir: "Trae",
-    },
-    EditorDef {
-        id: "vscodium",
-        display_name: "VSCodium",
-        linux_config_dir: "VSCodium",
     },
 ];
 
@@ -5578,7 +7924,7 @@ fn emit_plugin_marketplace_progress(app: &tauri::AppHandle, step: u32, label: &s
         "plugin-marketplace-progress",
         ProgressEvent {
             step,
-            total: 4,
+            total: 6,
             label: label.to_string(),
         },
     );
@@ -5832,6 +8178,36 @@ struct ConfigBackupInfo {
     stamp: String, // 紧凑时间戳，如 20260624-143025（前端格式化展示）
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CodexConfigDiagnostics {
+    config_path: String,
+    auth_path: String,
+    config_exists: bool,
+    auth_exists: bool,
+    has_model_provider: bool,
+    has_model: bool,
+    has_base_url: bool,
+    has_api_key: bool,
+    provider_name: String,
+    model: String,
+    base_url: String,
+    auth_mode: String,
+    active_profile_name: String,
+    plugin_marketplaces: Vec<String>,
+    issues: Vec<String>,
+    suggestions: Vec<String>,
+    last_checked_at: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CodexConfigBackupResult {
+    config_backup: Option<String>,
+    auth_backup: Option<String>,
+    created_at: String,
+}
+
 fn backups_dir(app: &tauri::AppHandle) -> PathBuf {
     let dir = data_dir(app).join("backups");
     fs::create_dir_all(&dir).ok();
@@ -5845,6 +8221,69 @@ fn backup_one_config(dir: &PathBuf, src: &PathBuf, prefix: &str, stamp: &str) {
     }
     let dst = dir.join(format!("{prefix}-{stamp}.json"));
     let _ = fs::copy(src, &dst);
+}
+
+fn backup_one_file_with_ext(
+    dir: &PathBuf,
+    src: &PathBuf,
+    prefix: &str,
+    stamp: &str,
+    ext: &str,
+) -> Option<String> {
+    if !src.exists() {
+        return None;
+    }
+    let safe_ext = ext.trim_start_matches('.');
+    let dst = dir.join(format!("{prefix}-{stamp}.{safe_ext}"));
+    match fs::copy(src, &dst) {
+        Ok(_) => Some(dst.to_string_lossy().to_string()),
+        Err(err) => {
+            log_warn!("[backup] 备份文件失败 src={} err={err}", src.display());
+            None
+        }
+    }
+}
+
+fn backup_codex_runtime_files(app: &tauri::AppHandle) -> CodexConfigBackupResult {
+    let dir = backups_dir(app).join("codex-runtime");
+    let _ = fs::create_dir_all(&dir);
+    let stamp = format_compact_time(chrono_timestamp_millis());
+    let config_backup =
+        backup_one_file_with_ext(&dir, &codex_config_path(), "config", &stamp, "toml");
+    let auth_backup = backup_one_file_with_ext(&dir, &codex_auth_path(), "auth", &stamp, "json");
+    CodexConfigBackupResult {
+        config_backup,
+        auth_backup,
+        created_at: chrono_now(),
+    }
+}
+
+fn backup_codex_session_inventory(app: &tauri::AppHandle, stamp: &str) -> Option<String> {
+    let dir = backups_dir(app).join("codex-sessions");
+    if fs::create_dir_all(&dir).is_err() {
+        return None;
+    }
+    let inventory_path = dir.join(format!("session-inventory-{stamp}.json"));
+    let payload = serde_json::json!({
+        "createdAt": chrono_now(),
+        "codexHome": codex_config_dir().to_string_lossy().to_string(),
+        "sessionIndexPath": codex_session_index_path().to_string_lossy().to_string(),
+        "sessionsRoot": codex_sessions_root().to_string_lossy().to_string(),
+        "threads": read_codex_threads(5000),
+    });
+    if let Ok(text) = serde_json::to_string_pretty(&payload) {
+        if fs::write(&inventory_path, text).is_ok() {
+            let _ = backup_one_file_with_ext(
+                &dir,
+                &codex_session_index_path(),
+                "session-index",
+                stamp,
+                "jsonl",
+            );
+            return Some(inventory_path.to_string_lossy().to_string());
+        }
+    }
+    None
 }
 
 /// 清理同类备份，只保留最近 keep 个（文件名时间戳字典序==时间序）。
@@ -5877,9 +8316,163 @@ fn auto_backup_configs(app: &tauri::AppHandle) {
     let stamp = format_compact_time(chrono_timestamp_millis());
     backup_one_config(&dir, &profiles_path(app), "profiles", &stamp);
     backup_one_config(&dir, &codex_profiles_path(app), "codex", &stamp);
+    let runtime_backup = backup_codex_runtime_files(app);
+    let session_inventory = backup_codex_session_inventory(app, &stamp);
     prune_backups(&dir, "profiles", 20);
     prune_backups(&dir, "codex", 20);
-    log_info!("[backup] 已自动备份配置 stamp={stamp}");
+    prune_backups(&dir.join("codex-sessions"), "session-inventory", 30);
+    log_info!(
+        "[backup] 已自动备份配置 stamp={stamp} codex_config={:?} codex_auth={:?} codex_sessions={:?}",
+        runtime_backup.config_backup,
+        runtime_backup.auth_backup,
+        session_inventory
+    );
+}
+
+fn toml_line_value(config: &str, key: &str) -> String {
+    let prefix = format!("{key} =");
+    config
+        .lines()
+        .find(|line| line.trim().starts_with(&prefix))
+        .and_then(|line| line.split_once('=').map(|(_, value)| value))
+        .map(|value| value.trim().trim_matches('"').to_string())
+        .unwrap_or_default()
+}
+
+fn detect_codex_plugin_marketplaces(config: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut in_marketplace = false;
+    let mut current = String::new();
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("[marketplaces.") {
+            in_marketplace = true;
+            current.clear();
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            if in_marketplace && !current.is_empty() {
+                out.push(current.clone());
+            }
+            in_marketplace = false;
+            current.clear();
+            continue;
+        }
+        if in_marketplace && trimmed.starts_with("source") {
+            if let Some((_, value)) = trimmed.split_once('=') {
+                current = value.trim().trim_matches('"').to_string();
+            }
+        }
+    }
+    if in_marketplace && !current.is_empty() {
+        out.push(current);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn read_codex_config_diagnostics(app: &tauri::AppHandle) -> CodexConfigDiagnostics {
+    let config_path = codex_config_path();
+    let auth_path = codex_auth_path();
+    let config = fs::read_to_string(&config_path).unwrap_or_default();
+    let status = read_codex_status().unwrap_or(LocationStatus {
+        api_key: String::new(),
+        base_url: String::new(),
+    });
+    let model_provider = toml_line_value(&config, "model_provider");
+    let model = toml_line_value(&config, "model");
+    let provider_name = if model_provider.is_empty() {
+        toml_line_value(&config, "name")
+    } else {
+        model_provider.clone()
+    };
+    let auth_mode = if config
+        .lines()
+        .any(|l| l.trim().starts_with("experimental_bearer_token"))
+    {
+        "official_account_api_quota".to_string()
+    } else if auth_path.exists() {
+        "auth_json".to_string()
+    } else {
+        "unknown".to_string()
+    };
+    let active_profile_name = read_codex_profiles(app)
+        .profiles
+        .into_iter()
+        .find(|profile| profile.is_active)
+        .map(|profile| profile.name)
+        .unwrap_or_default();
+    let plugin_marketplaces = detect_codex_plugin_marketplaces(&config);
+    let config_exists = config_path.exists();
+    let auth_exists = auth_path.exists();
+    let has_model_provider = !model_provider.is_empty() || config.contains("[model_providers.");
+    let has_model = !model.is_empty();
+    let has_base_url = !status.base_url.is_empty();
+    let has_api_key = !status.api_key.is_empty();
+    let mut issues = Vec::new();
+    let mut suggestions = Vec::new();
+    if !config_exists {
+        issues.push("未找到 ~/.codex/config.toml".into());
+        suggestions.push("在 Codex CLI 页面添加并切换一个配置".into());
+    }
+    if !has_model_provider {
+        issues.push("config.toml 缺少 model_provider 或 model_providers 配置".into());
+        suggestions.push("重新切换当前 Codex 配置，让 VarSwitch 写入完整 provider".into());
+    }
+    if !has_model {
+        issues.push("config.toml 缺少 model 字段".into());
+        suggestions.push("在 Codex 配置中填写模型名后重新保存".into());
+    }
+    if !has_base_url {
+        issues.push("未检测到 Codex Base URL".into());
+        suggestions.push("检查 provider 的 base_url 是否存在".into());
+    }
+    if !has_api_key {
+        issues.push("未检测到 Codex API Key".into());
+        suggestions.push(
+            "检查 auth.json 的 OPENAI_API_KEY 或 config.toml 的 experimental_bearer_token".into(),
+        );
+    }
+    if auth_mode == "auth_json" && !auth_exists {
+        issues.push("当前看起来需要 auth.json，但文件不存在".into());
+    }
+    if plugin_marketplaces.is_empty() {
+        suggestions.push("可在 Toolbox 安装 Codex 插件市场".into());
+    }
+    issues.sort();
+    issues.dedup();
+    suggestions.sort();
+    suggestions.dedup();
+    CodexConfigDiagnostics {
+        config_path: config_path.to_string_lossy().to_string(),
+        auth_path: auth_path.to_string_lossy().to_string(),
+        config_exists,
+        auth_exists,
+        has_model_provider,
+        has_model,
+        has_base_url,
+        has_api_key,
+        provider_name,
+        model,
+        base_url: status.base_url,
+        auth_mode,
+        active_profile_name,
+        plugin_marketplaces,
+        issues,
+        suggestions,
+        last_checked_at: chrono_now(),
+    }
+}
+
+#[tauri::command]
+fn get_codex_diagnostics(app: tauri::AppHandle) -> CodexConfigDiagnostics {
+    read_codex_config_diagnostics(&app)
+}
+
+#[tauri::command]
+fn backup_codex_runtime(app: tauri::AppHandle) -> CodexConfigBackupResult {
+    backup_codex_runtime_files(&app)
 }
 
 /// 列出所有配置备份，最新的在前。
@@ -6410,7 +9003,135 @@ fn get_codex_toolbox(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
 }
 
 #[tauri::command]
-fn apply_plugin_marketplace(
+fn start_smart_control(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    let state = read_toolbox_state(&app);
+    start_smart_control_server(
+        app.clone(),
+        state.mobile_remote.remote_control_backend_url.clone(),
+    );
+    std::thread::sleep(Duration::from_millis(120));
+    Ok(build_toolbox_snapshot(&app))
+}
+
+fn emit_update_download_progress(app: &tauri::AppHandle, step: u32, total: u32, label: &str) {
+    let _ = app.emit(
+        "update-download-progress",
+        ProgressEvent {
+            step,
+            total,
+            label: label.into(),
+        },
+    );
+}
+
+#[tauri::command]
+fn get_smart_control_debug() -> SmartControlDebugSnapshot {
+    smart_control_debug_snapshot()
+}
+
+#[tauri::command]
+fn submit_smart_control_approval(request_id: String, decision: String) -> Result<(), String> {
+    let request_id = request_id.trim().to_string();
+    if request_id.is_empty() {
+        return Err("审批请求 ID 为空".into());
+    }
+    let id_value = request_id
+        .parse::<u64>()
+        .map(serde_json::Value::from)
+        .unwrap_or_else(|_| serde_json::Value::String(request_id.clone()));
+    let message = serde_json::json!({
+        "id": id_value,
+        "result": {
+            "decision": decision.trim(),
+            "approved": matches!(decision.trim().to_ascii_lowercase().as_str(), "approve" | "approved" | "allow" | "yes" | "accept"),
+        }
+    });
+    let envelope = smart_control_wrap_client_message(message);
+    smart_control_send_json(&envelope)?;
+    if let Ok(mut approvals) = smart_control_approval_store().lock() {
+        approvals.retain(|item| item.request_id != request_id);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn repair_openai_bundled_plugins(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    auto_backup_configs(&app);
+    let config_path = codex_config_path();
+    let existing = fs::read_to_string(&config_path).unwrap_or_default();
+    let next = ensure_openai_bundled_marketplace_config(&existing)?;
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&config_path, next).map_err(|e| format!("写入 openai-bundled 插件市场失败: {e}"))?;
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn enable_codex_builtin_plugin(
+    app: tauri::AppHandle,
+    plugin_id: String,
+) -> Result<ToolboxSnapshot, String> {
+    let normalized = plugin_id.trim().to_string();
+    if normalized.is_empty() || normalized.contains('\n') || normalized.contains('\r') {
+        return Err("非法插件 ID".into());
+    }
+    auto_backup_configs(&app);
+    let config_path = codex_config_path();
+    let existing = fs::read_to_string(&config_path).unwrap_or_default();
+    let with_marketplaces = ensure_discovered_plugin_marketplaces_config(&existing)
+        .or_else(|_| ensure_openai_bundled_marketplace_config(&existing))?;
+    let next = write_enabled_codex_plugin_config(&with_marketplaces, &normalized);
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&config_path, next).map_err(|e| format!("启用 Codex 内置插件失败: {e}"))?;
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn enable_important_codex_builtin_plugins(
+    app: tauri::AppHandle,
+) -> Result<ToolboxSnapshot, String> {
+    auto_backup_configs(&app);
+    let config_path = codex_config_path();
+    let existing = fs::read_to_string(&config_path).unwrap_or_default();
+    let mut next = ensure_discovered_plugin_marketplaces_config(&existing)
+        .or_else(|_| ensure_openai_bundled_marketplace_config(&existing))?;
+    let status = list_codex_builtin_plugins(&next);
+    if !status.available {
+        return Err(status.last_error);
+    }
+    let important_ids = status
+        .plugins
+        .iter()
+        .filter(|plugin| plugin.important)
+        .map(|plugin| plugin.id.clone())
+        .collect::<Vec<_>>();
+    if important_ids.is_empty() {
+        return Err("未发现 Computer Use / Chrome / Browser / Fast Speed 等关键内置插件".into());
+    }
+    for id in important_ids {
+        next = write_enabled_codex_plugin_config(&next, &id);
+    }
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&config_path, next).map_err(|e| format!("启用关键 Codex 内置插件失败: {e}"))?;
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+async fn apply_plugin_marketplace(
+    app: tauri::AppHandle,
+    source: String,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || apply_plugin_marketplace_blocking(app, source))
+        .await
+        .map_err(|e| format!("安装插件市场后台任务失败: {e}"))?
+}
+
+fn apply_plugin_marketplace_blocking(
     app: tauri::AppHandle,
     source: String,
 ) -> Result<ToolboxSnapshot, String> {
@@ -6418,6 +9139,17 @@ fn apply_plugin_marketplace(
     emit_plugin_marketplace_progress(&app, 1, "prepare");
     let config_path = codex_config_path();
     let existing = fs::read_to_string(&config_path).unwrap_or_default();
+
+    if config_has_plugin_marketplace_source(&existing, trimmed)
+        && plugin_marketplace_snapshot_exists(default_plugin_marketplace_name())
+    {
+        let mut state = read_toolbox_state(&app);
+        state.plugin_marketplace_input = trimmed.to_string();
+        write_toolbox_state(&app, &state)?;
+        emit_plugin_marketplace_progress(&app, 6, "done");
+        return Ok(build_toolbox_snapshot(&app));
+    }
+
     let cleaned = remove_all_plugin_marketplace_sections(&existing);
     let parent = config_path
         .parent()
@@ -6427,7 +9159,7 @@ fn apply_plugin_marketplace(
     fs::write(&config_path, cleaned).map_err(|e| e.to_string())?;
 
     emit_plugin_marketplace_progress(&app, 2, "install");
-    if let Err(error) = run_codex_plugin_marketplace_add(trimmed) {
+    if let Err(error) = repair_and_add_codex_plugin_marketplace(trimmed) {
         let fallback_existing = fs::read_to_string(&config_path).unwrap_or_default();
         let fallback_next = ensure_plugin_marketplace_section(
             &fallback_existing,
@@ -6437,11 +9169,27 @@ fn apply_plugin_marketplace(
         );
         let _ = fs::write(&config_path, fallback_next);
         return Err(format!(
-            "{error}\n已尝试把 VarSwitch-Plugin 写入 config.toml 作为兜底；请确认 Codex CLI 和 Git 可用后重试。"
+            "{error}\n已尝试自动修复 varswitch-plugins 来源冲突并写入 config.toml 作为兜底；请确认 Codex CLI 和 Git 可用后重试。"
         ));
     }
 
-    emit_plugin_marketplace_progress(&app, 3, "verify");
+    emit_plugin_marketplace_progress(&app, 3, "install");
+    emit_plugin_marketplace_progress(&app, 4, "verify");
+    if !plugin_marketplace_snapshot_exists(default_plugin_marketplace_name()) {
+        if let Err(error) = run_codex_plugin_marketplace_upgrade(default_plugin_marketplace_name())
+        {
+            let lowered = error.to_ascii_lowercase();
+            if lowered.contains("filename too long") || lowered.contains("unable to checkout") {
+                configure_git_longpaths_for_windows();
+                clean_plugin_marketplace_cache(default_plugin_marketplace_name());
+                emit_plugin_marketplace_progress(&app, 5, "verify");
+                run_codex_plugin_marketplace_upgrade(default_plugin_marketplace_name())?;
+            } else {
+                return Err(error);
+            }
+        }
+    }
+
     let updated = fs::read_to_string(&config_path).unwrap_or_default();
     if !config_has_plugin_marketplace_source(&updated, trimmed) {
         let fallback_next = ensure_plugin_marketplace_section(
@@ -6456,7 +9204,7 @@ fn apply_plugin_marketplace(
     let mut state = read_toolbox_state(&app);
     state.plugin_marketplace_input = trimmed.to_string();
     write_toolbox_state(&app, &state)?;
-    emit_plugin_marketplace_progress(&app, 4, "done");
+    emit_plugin_marketplace_progress(&app, 6, "done");
     Ok(build_toolbox_snapshot(&app))
 }
 
@@ -6465,15 +9213,109 @@ fn sync_codex_sessions(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
     let threads = read_codex_threads(200);
     let mut state = read_toolbox_state(&app);
     state.synced_codex_threads = threads;
+    refresh_selected_mobile_thread_after_session_change(&mut state);
     state.session_sync = CodexSessionSyncState {
         last_synced_at: chrono_now(),
-        total: state.synced_codex_threads.len(),
+        total: visible_codex_threads(&state).len(),
     };
-    if state.selected_mobile_thread_id.trim().is_empty() {
-        if let Some(first) = state.synced_codex_threads.first() {
-            state.selected_mobile_thread_id = first.id.clone();
+    write_toolbox_state(&app, &state)?;
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn trash_codex_sessions(
+    app: tauri::AppHandle,
+    thread_ids: Vec<String>,
+) -> Result<ToolboxSnapshot, String> {
+    let requested: HashSet<String> = thread_ids
+        .into_iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect();
+    if requested.is_empty() {
+        return Err("请至少选择一条会话".into());
+    }
+
+    let mut state = read_toolbox_state(&app);
+    let mut available = HashMap::new();
+    for thread in state
+        .synced_codex_threads
+        .iter()
+        .cloned()
+        .chain(read_codex_threads(500).into_iter())
+    {
+        available.entry(thread.id.clone()).or_insert(thread);
+    }
+
+    let deleted_at = chrono_now();
+    let mut added = 0usize;
+    let mut existing_trash = trashed_codex_thread_ids(&state);
+    for id in requested {
+        if existing_trash.contains(&id) {
+            continue;
+        }
+        let Some(thread) = available.get(&id).cloned() else {
+            continue;
+        };
+        state
+            .trashed_codex_threads
+            .push(codex_thread_to_trash_record(thread, &deleted_at));
+        existing_trash.insert(id);
+        added += 1;
+    }
+
+    if added == 0 {
+        return Err("没有找到可移入回收站的会话".into());
+    }
+
+    refresh_selected_mobile_thread_after_session_change(&mut state);
+    state.session_sync.total = visible_codex_threads(&state).len();
+    write_toolbox_state(&app, &state)?;
+    Ok(build_toolbox_snapshot(&app))
+}
+
+#[tauri::command]
+fn restore_codex_sessions(
+    app: tauri::AppHandle,
+    thread_ids: Vec<String>,
+) -> Result<ToolboxSnapshot, String> {
+    let requested: HashSet<String> = thread_ids
+        .into_iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect();
+    if requested.is_empty() {
+        return Err("请至少选择一条待恢复会话".into());
+    }
+
+    let mut state = read_toolbox_state(&app);
+    let mut restored = Vec::new();
+    state.trashed_codex_threads.retain(|thread| {
+        if requested.contains(&thread.id) {
+            restored.push(trash_record_to_codex_thread(thread));
+            false
+        } else {
+            true
+        }
+    });
+
+    if restored.is_empty() {
+        return Err("没有找到可恢复的会话".into());
+    }
+
+    let mut known_ids: HashSet<String> = state
+        .synced_codex_threads
+        .iter()
+        .map(|thread| thread.id.clone())
+        .collect();
+    for thread in restored {
+        if known_ids.insert(thread.id.clone()) {
+            state.synced_codex_threads.push(thread);
         }
     }
+
+    refresh_selected_mobile_thread_after_session_change(&mut state);
+    state.session_sync.total = visible_codex_threads(&state).len();
     write_toolbox_state(&app, &state)?;
     Ok(build_toolbox_snapshot(&app))
 }
@@ -6609,7 +9451,8 @@ fn start_lark_bot_registration(
         binding.qr_url = binding.launcher_url.clone();
         binding.qr_device_code = device_code.clone();
         binding.qr_status = if create_only {
-            "已打开飞书创建页面，建议命名为 VarSwitch 智能体，创建完成后会自动填充 AppID/AppSecret".into()
+            "已打开飞书创建页面，建议命名为 VarSwitch 智能体，创建完成后会自动填充 AppID/AppSecret"
+                .into()
         } else {
             "已打开飞书换绑页面，完成授权后会自动读取 AppID/AppSecret".into()
         };
@@ -6620,7 +9463,7 @@ fn start_lark_bot_registration(
             "等待飞书已有机器人授权完成".into()
         };
         binding.last_error.clear();
-        binding.qr_started_at = chrono_now();
+        binding.qr_started_at = chrono_timestamp_millis().to_string();
         binding.updated_at = chrono_now();
     }
     write_toolbox_state(&app, &state)?;
@@ -6780,8 +9623,7 @@ fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
             .stderr(Stdio::piped());
         #[cfg(target_os = "windows")]
         cmd.creation_flags(CREATE_NO_WINDOW);
-        let mut child = match cmd.spawn()
-        {
+        let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(error) => {
                 let _ = write_mobile_channel_qr_state(
@@ -6855,7 +9697,10 @@ fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
 
                     // QQ connector 返回的 credentials 是数组 [{"appId":"...","appSecret":"..."}]，取第一个元素
                     let credentials = if credentials_raw.is_array() {
-                        credentials_raw.get(0).cloned().unwrap_or_else(|| serde_json::json!({}))
+                        credentials_raw
+                            .get(0)
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!({}))
                     } else {
                         credentials_raw
                     };
@@ -7211,7 +10056,8 @@ fn bind_codex_thread(
     write_toolbox_state(&app, &state)?;
     log_info!(
         "[mobile-control][bind] saved: channel={}, thread_id={}",
-        normalized_channel, state.mobile_remote.active_thread_id
+        normalized_channel,
+        state.mobile_remote.active_thread_id
     );
     Ok(build_toolbox_snapshot(&app))
 }
@@ -7221,7 +10067,8 @@ fn unbind_codex_thread(app: tauri::AppHandle, channel: String) -> Result<Toolbox
     let normalized_channel = normalize_mobile_channel(&channel);
     log_info!(
         "[mobile-control][unbind] request: channel={}, normalized={}",
-        channel, normalized_channel
+        channel,
+        normalized_channel
     );
     let mut state = read_toolbox_state(&app);
     state
@@ -7268,6 +10115,21 @@ fn start_mobile_remote(
     toolbox_state.mobile_remote.last_error.clear();
     toolbox_state.mobile_remote.device_name = local_device_name();
     toolbox_state.mobile_remote.local_ip = detect_local_ip();
+    start_smart_control_server(
+        app.clone(),
+        toolbox_state
+            .mobile_remote
+            .remote_control_backend_url
+            .clone(),
+    );
+    std::thread::sleep(Duration::from_millis(120));
+    let smart_status = refresh_smart_control_status_for_state(&mut toolbox_state);
+    log_info!(
+        "[mobile-control][smart-control] start probe: connected={}, status={}, detail={}",
+        smart_status.connected,
+        smart_status.status,
+        smart_status.detail
+    );
     for channel in toolbox_state.mobile_channels.iter_mut() {
         if channel.enabled && !channel.thread_id.trim().is_empty() {
             channel.listening = false;
@@ -7315,7 +10177,8 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                 last_error = channel.last_error.clone();
                 log_info!(
                     "[mobile-control][start-worker] missing credentials: channel={}, error={}",
-                    channel.channel, channel.last_error
+                    channel.channel,
+                    channel.last_error
                 );
                 continue;
             }
@@ -7343,7 +10206,8 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                 Err(error) => {
                     log_info!(
                         "[mobile-control][start-worker] probe failed: channel={}, error={}",
-                        channel.channel, error
+                        channel.channel,
+                        error
                     );
                     channel.listening = false;
                     channel.status = "平台连接失败".into();
@@ -7375,7 +10239,8 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
     let _ = write_toolbox_state(&app, &toolbox_state);
     log_info!(
         "[mobile-control][start-worker] state saved: enabled={}, connected_count={}",
-        toolbox_state.mobile_remote.enabled, connected_count
+        toolbox_state.mobile_remote.enabled,
+        connected_count
     );
     if toolbox_state.mobile_remote.enabled {
         if let Some(binding) = lark_bridge_binding {
@@ -7416,7 +10281,8 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
     if toolbox_state.mobile_remote.enabled {
         let watchdog_app = app.clone();
         std::thread::spawn(move || {
-            let mut fail_counts: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+            let mut fail_counts: std::collections::HashMap<&str, u32> =
+                std::collections::HashMap::new();
             loop {
                 // 每 30 秒轮询一次
                 std::thread::sleep(Duration::from_secs(30));
@@ -7431,14 +10297,34 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                 }
                 // 检查飞书
                 if !LARK_BRIDGE_ACTIVE.load(Ordering::SeqCst) {
-                    if let Some(binding) = state.mobile_channels.iter().find(|b| b.channel == "lark" && mobile_channel_has_credentials(b)).cloned() {
+                    if let Some(binding) = state
+                        .mobile_channels
+                        .iter()
+                        .find(|b| b.channel == "lark" && mobile_channel_has_credentials(b))
+                        .cloned()
+                    {
                         let cnt = fail_counts.entry("lark").or_insert(0);
                         let delay = (30u64 * (1 << (*cnt).min(4))).min(300);
-                        log_info!("[mobile-control][watchdog] 飞书断线，{}s 后重启（第{}次）", delay, *cnt + 1);
+                        log_info!(
+                            "[mobile-control][watchdog] 飞书断线，{}s 后重启（第{}次）",
+                            delay,
+                            *cnt + 1
+                        );
                         std::thread::sleep(Duration::from_secs(delay));
                         match start_lark_bridge(watchdog_app.clone(), binding) {
-                            Ok(_) => { *cnt = 0; update_channel_status(&watchdog_app, "lark", "飞书已自动重连", ""); }
-                            Err(e) => { *cnt += 1; update_channel_status(&watchdog_app, "lark", "飞书自动重连失败", &e); }
+                            Ok(_) => {
+                                *cnt = 0;
+                                update_channel_status(&watchdog_app, "lark", "飞书已自动重连", "");
+                            }
+                            Err(e) => {
+                                *cnt += 1;
+                                update_channel_status(
+                                    &watchdog_app,
+                                    "lark",
+                                    "飞书自动重连失败",
+                                    &e,
+                                );
+                            }
                         }
                     }
                 } else {
@@ -7446,14 +10332,29 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                 }
                 // 检查 QQ
                 if !QQ_GATEWAY_ACTIVE.load(Ordering::SeqCst) {
-                    if let Some(binding) = state.mobile_channels.iter().find(|b| b.channel == "qq" && mobile_channel_has_credentials(b)).cloned() {
+                    if let Some(binding) = state
+                        .mobile_channels
+                        .iter()
+                        .find(|b| b.channel == "qq" && mobile_channel_has_credentials(b))
+                        .cloned()
+                    {
                         let cnt = fail_counts.entry("qq").or_insert(0);
                         let delay = (30u64 * (1 << (*cnt).min(4))).min(300);
-                        log_info!("[mobile-control][watchdog] QQ 断线，{}s 后重启（第{}次）", delay, *cnt + 1);
+                        log_info!(
+                            "[mobile-control][watchdog] QQ 断线，{}s 后重启（第{}次）",
+                            delay,
+                            *cnt + 1
+                        );
                         std::thread::sleep(Duration::from_secs(delay));
                         match start_qq_gateway(watchdog_app.clone(), binding) {
-                            Ok(_) => { *cnt = 0; update_channel_status(&watchdog_app, "qq", "QQ 已自动重连", ""); }
-                            Err(e) => { *cnt += 1; update_channel_status(&watchdog_app, "qq", "QQ 自动重连失败", &e); }
+                            Ok(_) => {
+                                *cnt = 0;
+                                update_channel_status(&watchdog_app, "qq", "QQ 已自动重连", "");
+                            }
+                            Err(e) => {
+                                *cnt += 1;
+                                update_channel_status(&watchdog_app, "qq", "QQ 自动重连失败", &e);
+                            }
                         }
                     }
                 } else {
@@ -7461,14 +10362,39 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                 }
                 // 检查微信
                 if !WECHAT_LISTENER_ACTIVE.load(Ordering::SeqCst) {
-                    if let Some(binding) = state.mobile_channels.iter().find(|b| b.channel == "wechat" && mobile_channel_has_credentials(b)).cloned() {
+                    if let Some(binding) = state
+                        .mobile_channels
+                        .iter()
+                        .find(|b| b.channel == "wechat" && mobile_channel_has_credentials(b))
+                        .cloned()
+                    {
                         let cnt = fail_counts.entry("wechat").or_insert(0);
                         let delay = (30u64 * (1 << (*cnt).min(4))).min(300);
-                        log_info!("[mobile-control][watchdog] 微信断线，{}s 后重启（第{}次）", delay, *cnt + 1);
+                        log_info!(
+                            "[mobile-control][watchdog] 微信断线，{}s 后重启（第{}次）",
+                            delay,
+                            *cnt + 1
+                        );
                         std::thread::sleep(Duration::from_secs(delay));
                         match start_wechat_listener(watchdog_app.clone(), binding) {
-                            Ok(_) => { *cnt = 0; update_channel_status(&watchdog_app, "wechat", "微信已自动重连", ""); }
-                            Err(e) => { *cnt += 1; update_channel_status(&watchdog_app, "wechat", "微信自动重连失败", &e); }
+                            Ok(_) => {
+                                *cnt = 0;
+                                update_channel_status(
+                                    &watchdog_app,
+                                    "wechat",
+                                    "微信已自动重连",
+                                    "",
+                                );
+                            }
+                            Err(e) => {
+                                *cnt += 1;
+                                update_channel_status(
+                                    &watchdog_app,
+                                    "wechat",
+                                    "微信自动重连失败",
+                                    &e,
+                                );
+                            }
                         }
                     }
                 } else {
@@ -7488,6 +10414,7 @@ fn stop_mobile_remote(
     log_info!("[mobile-control][stop] stop_mobile_remote requested");
     MOBILE_REMOTE_CANCEL_REQUESTED.store(true, Ordering::SeqCst);
     MOBILE_REMOTE_START_ACTIVE.store(false, Ordering::SeqCst);
+    stop_smart_control_server();
     stop_lark_bridge();
     stop_qq_gateway();
     stop_wechat_listener(&app);
@@ -7629,6 +10556,7 @@ fn get_app_paths(app: tauri::AppHandle) -> AppPaths {
         config_dir: data_dir(&app).to_string_lossy().to_string(),
         profiles_path: profiles_path(&app).to_string_lossy().to_string(),
         claude_settings: claude_settings_path().to_string_lossy().to_string(),
+        codex_settings: codex_config_path().to_string_lossy().to_string(),
         editor_settings: collect_editor_path_infos(&settings),
         claude_md: claude_md_path().to_string_lossy().to_string(),
         claude_mcp: claude_mcp_path().to_string_lossy().to_string(),
@@ -7649,8 +10577,7 @@ fn open_folder(path: String) -> Result<(), String> {
         let mut cmd = std::process::Command::new("explorer");
         cmd.arg(dir.to_string_lossy().to_string());
         cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd.spawn()
-            .map_err(|e| e.to_string())?;
+        cmd.spawn().map_err(|e| e.to_string())?;
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -7688,30 +10615,77 @@ async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateCheckResult, St
     let current_version = app.package_info().version.to_string();
 
     tauri::async_runtime::spawn_blocking(move || {
-        let release = fetch_latest_release()?;
-        let asset = select_release_asset(
-            &release.assets,
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-        );
+        let release = fetch_latest_download_page_release()?;
+        let latest_version = release.version.clone();
 
         Ok(UpdateCheckResult {
             current_version: current_version.clone(),
-            latest_version: release.tag_name.clone(),
-            has_update: is_remote_version_newer(&release.tag_name, &current_version),
-            release_url: if release.html_url.is_empty() {
-                format!("{}/releases", GITHUB_REPO_URL)
-            } else {
-                release.html_url
-            },
-            release_notes: release.body,
-            published_at: release.published_at,
-            asset_name: asset.as_ref().map(|item| item.name.clone()),
-            can_auto_update: asset.is_some(),
+            latest_version: latest_version.clone(),
+            has_update: is_remote_version_newer(&latest_version, &current_version),
+            release_url: APP_DOWNLOAD_PAGE_URL.into(),
+            release_notes: String::new(),
+            published_at: String::new(),
+            asset_name: Some(release.file_name),
+            can_auto_update: true,
         })
     })
     .await
     .map_err(|e| format!("Task failed: {}", e))?
+}
+
+#[tauri::command]
+async fn install_app_update(app: tauri::AppHandle) -> Result<UpdateDownloadResult, String> {
+    emit_update_download_progress(&app, 5, 100, "prepare");
+
+    let update = app
+        .updater()
+        .map_err(|e| format!("初始化自动更新失败: {e}"))?
+        .check()
+        .await
+        .map_err(|e| format!("检查自动更新失败: {e}"))?
+        .ok_or_else(|| "当前已经是最新版本".to_string())?;
+
+    let latest_version = update.version.clone();
+    let file_name = update
+        .download_url
+        .path_segments()
+        .and_then(|mut segments| segments.next_back())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("VarSwitch-update")
+        .to_string();
+    let release_url = update.download_url.to_string();
+    let app_for_progress = app.clone();
+    let mut downloaded: u64 = 0;
+
+    emit_update_download_progress(&app, 10, 100, "download");
+    update
+        .download_and_install(
+            move |chunk_len, content_len| {
+                downloaded = downloaded.saturating_add(chunk_len as u64);
+                let pct = content_len
+                    .filter(|total| *total > 0)
+                    .map(|total| 10 + ((downloaded.saturating_mul(80) / total).min(80) as u32))
+                    .unwrap_or(35);
+                emit_update_download_progress(&app_for_progress, pct, 100, "download");
+            },
+            {
+                let app_for_install = app.clone();
+                move || {
+                    emit_update_download_progress(&app_for_install, 92, 100, "install");
+                }
+            },
+        )
+        .await
+        .map_err(|e| format!("自动安装更新失败: {e}"))?;
+
+    emit_update_download_progress(&app, 100, 100, "done");
+
+    Ok(UpdateDownloadResult {
+        latest_version,
+        file_name,
+        file_path: String::new(),
+        release_url,
+    })
 }
 
 #[tauri::command]
@@ -7720,49 +10694,57 @@ async fn download_and_open_update(app: tauri::AppHandle) -> Result<UpdateDownloa
     let app_handle = app.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        let release = fetch_latest_release()?;
-        if !is_remote_version_newer(&release.tag_name, &current_version) {
+        emit_update_download_progress(&app_handle, 5, 100, "prepare");
+        let release = fetch_latest_download_page_release()?;
+        if !is_remote_version_newer(&release.version, &current_version) {
             return Err("Already on the latest version".into());
         }
 
-        let asset = select_release_asset(
-            &release.assets,
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-        )
-        .ok_or_else(|| "No installer found for the current platform".to_string())?;
-
         let client = build_http_client(120)?;
-        let resp = client
-            .get(&asset.browser_download_url)
+        emit_update_download_progress(&app_handle, 10, 100, "download");
+        let mut resp = client
+            .get(&release.download_url)
             .send()
-            .map_err(|e| format!("Download error: {}", e))?;
+            .map_err(|e| format!("更新包下载失败: {}", e))?;
 
         if !resp.status().is_success() {
-            return Err(format!("Download failed with {}", resp.status()));
+            return Err(format!("更新包下载返回 {}", resp.status()));
         }
-
-        let bytes = resp
-            .bytes()
-            .map_err(|e| format!("Read download failed: {}", e))?;
 
         let update_dir = data_dir(&app_handle).join("updates");
         fs::create_dir_all(&update_dir).map_err(|e| e.to_string())?;
-        let file_path = update_dir.join(&asset.name);
-        fs::write(&file_path, &bytes).map_err(|e| e.to_string())?;
+        let file_path = update_dir.join(&release.file_name);
+        let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
+        let total_size = resp.content_length().unwrap_or(0);
+        let mut downloaded: u64 = 0;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let read = resp
+                .read(&mut buffer)
+                .map_err(|e| format!("读取更新包失败: {}", e))?;
+            if read == 0 {
+                break;
+            }
+            file.write_all(&buffer[..read])
+                .map_err(|e| format!("写入更新包失败: {}", e))?;
+            downloaded += read as u64;
+            if total_size > 0 {
+                let pct = 10 + ((downloaded.saturating_mul(75) / total_size).min(75) as u32);
+                emit_update_download_progress(&app_handle, pct, 100, "download");
+            }
+        }
+        file.flush().map_err(|e| e.to_string())?;
 
         let file_path_str = file_path.to_string_lossy().to_string();
-        open_with_system(&file_path_str)?;
+        emit_update_download_progress(&app_handle, 90, 100, "open");
+        open_installer_file(&file_path)?;
+        emit_update_download_progress(&app_handle, 100, 100, "done");
 
         Ok(UpdateDownloadResult {
-            latest_version: release.tag_name,
-            file_name: asset.name,
+            latest_version: release.version,
+            file_name: release.file_name,
             file_path: file_path_str,
-            release_url: if release.html_url.is_empty() {
-                format!("{}/releases", GITHUB_REPO_URL)
-            } else {
-                release.html_url
-            },
+            release_url: APP_DOWNLOAD_PAGE_URL.into(),
         })
     })
     .await
@@ -9297,112 +12279,106 @@ fn is_remote_version_newer(remote: &str, local: &str) -> bool {
     compare_versions(remote, local) == CmpOrdering::Greater
 }
 
-fn asset_has_known_arch_marker(name_lower: &str) -> bool {
-    ["x64", "x86_64", "amd64", "arm64", "aarch64", "universal"]
-        .iter()
-        .any(|token| name_lower.contains(token))
+fn normalize_version_tag(version: &str) -> String {
+    let trimmed = version.trim();
+    if trimmed.starts_with(['v', 'V']) {
+        format!("v{}", &trimmed[1..])
+    } else {
+        format!("v{trimmed}")
+    }
 }
 
-fn asset_matches_target_arch(name_lower: &str, target_arch: &str) -> Option<bool> {
-    let aliases: Vec<&str> = match target_arch {
-        "x86_64" => vec!["x64", "x86_64", "amd64"],
-        "aarch64" => vec!["arm64", "aarch64"],
-        other => vec![other],
-    };
-
-    if aliases.iter().any(|alias| name_lower.contains(alias)) {
-        return Some(true);
-    }
-
-    if name_lower.contains("universal") {
-        return Some(true);
-    }
-
-    if asset_has_known_arch_marker(name_lower) {
-        return Some(false);
-    }
-
-    None
+#[cfg(test)]
+fn extract_latest_version_from_download_page(html: &str) -> Option<String> {
+    extract_latest_download_page_release(html).map(|release| release.version)
 }
 
-fn installer_extension_score(name_lower: &str, target_os: &str) -> Option<i32> {
+fn installer_name_matches_target(name_lower: &str, target_os: &str) -> bool {
     match target_os {
-        "windows" => {
-            if name_lower.ends_with(".msi") {
-                Some(30)
-            } else if name_lower.ends_with(".exe") {
-                Some(25)
-            } else {
-                None
-            }
-        }
-        "macos" => {
-            if name_lower.ends_with(".dmg") {
-                Some(30)
-            } else {
-                None
-            }
-        }
+        "windows" => name_lower.ends_with(".exe") || name_lower.ends_with(".msi"),
+        "macos" => name_lower.ends_with(".dmg"),
         "linux" => {
-            if name_lower.ends_with(".appimage") {
-                Some(30)
-            } else if name_lower.ends_with(".deb") {
-                Some(25)
-            } else if name_lower.ends_with(".rpm") {
-                Some(24)
-            } else {
-                None
-            }
+            name_lower.ends_with(".appimage")
+                || name_lower.ends_with(".deb")
+                || name_lower.ends_with(".rpm")
         }
-        _ => None,
+        _ => false,
     }
 }
 
-fn select_release_asset(
-    assets: &[ReleaseAsset],
-    target_os: &str,
-    target_arch: &str,
-) -> Option<ReleaseAsset> {
-    assets
-        .iter()
-        .filter_map(|asset| {
-            let name_lower = asset.name.to_ascii_lowercase();
-            if name_lower.ends_with(".sig") {
+fn extract_download_page_releases(html: &str) -> Vec<DownloadPageRelease> {
+    let marker = "VarSwitch_";
+    html.match_indices(marker)
+        .filter_map(|(idx, _)| {
+            let tail = html.get(idx..)?;
+            let file_name = tail
+                .chars()
+                .take_while(|ch| {
+                    ch.is_ascii_alphanumeric() || matches!(*ch, '_' | '-' | '.' | '+' | '(' | ')')
+                })
+                .collect::<String>();
+            if file_name.is_empty() {
                 return None;
             }
-
-            let mut score = installer_extension_score(&name_lower, target_os)?;
-            match asset_matches_target_arch(&name_lower, target_arch) {
-                Some(true) => score += 10,
-                Some(false) => return None,
-                None => score += 1,
+            let version_tail = file_name.strip_prefix(marker)?;
+            let version = version_tail
+                .chars()
+                .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
+                .collect::<String>();
+            if version.is_empty() {
+                return None;
             }
-
-            Some((score, asset.size, asset.clone()))
+            let href_before = html[..idx].rfind("href=\"");
+            let download_url = href_before
+                .and_then(|href_idx| {
+                    let start = href_idx + "href=\"".len();
+                    let end = html[start..].find('"')? + start;
+                    let href = &html[start..end];
+                    if href.contains(&file_name) {
+                        reqwest::Url::parse(APP_DOWNLOAD_PAGE_URL)
+                            .ok()
+                            .and_then(|base| base.join(href).ok())
+                            .map(|url| url.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| format!("{}releases/{}", APP_DOWNLOAD_PAGE_URL, file_name));
+            Some(DownloadPageRelease {
+                version: normalize_version_tag(&version),
+                file_name,
+                download_url,
+            })
         })
-        .max_by_key(|(score, size, _)| (*score, *size))
-        .map(|(_, _, asset)| asset)
+        .collect()
 }
 
-fn fetch_latest_release() -> Result<GitHubRelease, String> {
+fn extract_latest_download_page_release(html: &str) -> Option<DownloadPageRelease> {
+    extract_download_page_releases(html)
+        .into_iter()
+        .filter(|release| {
+            installer_name_matches_target(
+                &release.file_name.to_ascii_lowercase(),
+                std::env::consts::OS,
+            )
+        })
+        .max_by(|left, right| compare_versions(&left.version, &right.version))
+}
+
+fn fetch_latest_download_page_release() -> Result<DownloadPageRelease, String> {
     let client = build_http_client(20)?;
     let resp = client
-        .get(GITHUB_LATEST_RELEASE_API)
+        .get(APP_DOWNLOAD_PAGE_URL)
         .send()
-        .map_err(|e| format!("GitHub API error: {}", e))?;
+        .map_err(|e| format!("下载页请求失败: {}", e))?;
 
     if !resp.status().is_success() {
-        return Err(format!("GitHub API returned {}", resp.status()));
+        return Err(format!("下载页返回 {}", resp.status()));
     }
 
-    let body = resp
-        .text()
-        .map_err(|e| format!("Response read error: {}", e))?;
+    let body = resp.text().map_err(|e| format!("下载页读取失败: {}", e))?;
 
-    serde_json::from_str::<GitHubRelease>(&body).map_err(|e| {
-        let preview: String = body.chars().take(180).collect();
-        format!("JSON parse error: {} | body: {}", e, preview)
-    })
+    extract_latest_download_page_release(&body).ok_or_else(|| "下载页未找到可用安装包".into())
 }
 
 fn open_with_system(target: &str) -> Result<(), String> {
@@ -9411,8 +12387,7 @@ fn open_with_system(target: &str) -> Result<(), String> {
         let mut cmd = std::process::Command::new("cmd");
         cmd.args(["/C", "start", "", target]);
         cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd.spawn()
-            .map_err(|e| e.to_string())?;
+        cmd.spawn().map_err(|e| e.to_string())?;
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -9429,6 +12404,69 @@ fn open_with_system(target: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn open_installer_file(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Err(format!("安装包不存在: {}", path.to_string_lossy()));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let path_str = path.to_string_lossy().to_string();
+        let escaped = path_str.replace('\'', "''");
+        let script = format!(
+            "Unblock-File -LiteralPath '{}' -ErrorAction SilentlyContinue; Start-Process -FilePath '{}' -Verb Open -WorkingDirectory '{}'",
+            escaped,
+            escaped,
+            path.parent()
+                .map(|dir| dir.to_string_lossy().replace('\'', "''"))
+                .unwrap_or_default()
+        );
+        let mut powershell = std::process::Command::new("powershell");
+        powershell.args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ]);
+        powershell.creation_flags(CREATE_NO_WINDOW);
+        match powershell.status() {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => {
+                log_error!(
+                    "[update] PowerShell Start-Process failed with status: {:?}",
+                    status.code()
+                );
+            }
+            Err(error) => {
+                log_error!("[update] PowerShell Start-Process failed: {}", error);
+            }
+        }
+
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", &path_str]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        match cmd.spawn() {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                let folder = path
+                    .parent()
+                    .map(|dir| dir.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path_str.clone());
+                let _ = open_folder(folder);
+                Err(format!(
+                    "安装包已下载，但启动安装程序失败：{error}。已打开安装包所在文件夹。"
+                ))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        open_with_system(&path.to_string_lossy())
+    }
 }
 
 fn chrono_now() -> String {
@@ -9570,13 +12608,52 @@ source_type = "local"
 
     #[test]
     fn default_plugin_marketplace_uses_varswitch_gitcode_mirror() {
-        assert_eq!(default_plugin_marketplace_name(), "VarSwitch-Plugin");
+        assert_eq!(default_plugin_marketplace_name(), "varswitch-plugins");
         assert_eq!(
             default_plugin_marketplace_url(),
             "https://gitcode.com/2301_79703673/codex-plugins.git"
         );
     }
 
+    #[test]
+    fn enabling_plugin_updates_existing_plugin_table_without_duplicate_inline_key() {
+        let config = r#"[plugins."chrome-devtools@varswitch-plugins"]
+enabled = false
+
+[plugins]
+"browser@openai-bundled" = { enabled = true }
+"#;
+
+        let updated =
+            write_enabled_codex_plugin_config(config, "chrome-devtools@varswitch-plugins");
+
+        assert!(updated.contains("[plugins.\"chrome-devtools@varswitch-plugins\"]"));
+        assert!(updated.contains("enabled = true"));
+        assert!(!updated.contains("\"chrome-devtools@varswitch-plugins\" = { enabled = true }"));
+        assert!(updated.contains("\"browser@openai-bundled\" = { enabled = true }"));
+    }
+
+    #[test]
+    fn enabling_plugin_deduplicates_inline_key_when_plugin_table_exists() {
+        let config = r#"[plugins."chrome-devtools@varswitch-plugins"]
+enabled = false
+
+[plugins]
+"chrome-devtools@varswitch-plugins" = { enabled = true }
+"browser@openai-bundled" = { enabled = true }
+"#;
+
+        let updated =
+            write_enabled_codex_plugin_config(config, "chrome-devtools@varswitch-plugins");
+
+        assert_eq!(
+            updated.matches("chrome-devtools@varswitch-plugins").count(),
+            1
+        );
+        assert!(updated.contains("[plugins.\"chrome-devtools@varswitch-plugins\"]"));
+        assert!(updated.contains("enabled = true"));
+        assert!(updated.contains("\"browser@openai-bundled\" = { enabled = true }"));
+    }
     #[test]
     fn supported_plugin_marketplace_normalizes_known_sources() {
         assert_eq!(
@@ -9618,7 +12695,7 @@ source_type = "local"
         let mut state = ToolboxState::default();
         let mut qq = default_mobile_channel("qq");
         qq.qr_url = "raw-internal-token".into();
-        qq.qr_data_url = "data:image/png;base64,abc".into();
+        qq.qr_data_url = String::new();
         qq.qr_started_at = chrono_timestamp_millis().to_string();
         state.mobile_channels.push(qq);
         let mut wechat = default_mobile_channel("wechat");
@@ -9666,6 +12743,46 @@ source_type = "local"
     }
 
     #[test]
+    fn normalize_toolbox_state_keeps_fresh_qq_image_qr_even_without_openable_url() {
+        let mut state = ToolboxState::default();
+        let mut qq = default_mobile_channel("qq");
+        qq.qr_url = "internal-connector-token".into();
+        qq.qr_data_url = "data:image/png;base64,abc".into();
+        qq.qr_started_at = chrono_timestamp_millis().to_string();
+        state.mobile_channels.push(qq);
+
+        let state = normalize_toolbox_state(state);
+        let qq = state
+            .mobile_channels
+            .iter()
+            .find(|item| item.channel == "qq")
+            .expect("qq channel");
+
+        assert_eq!(qq.qr_data_url, "data:image/png;base64,abc");
+        assert_eq!(qq.qr_url, "internal-connector-token");
+    }
+
+    #[test]
+    fn normalize_toolbox_state_clears_invalid_qr_started_at() {
+        let mut state = ToolboxState::default();
+        let mut qq = default_mobile_channel("qq");
+        qq.qr_url = "https://bots.qq.com/connect/abc".into();
+        qq.qr_data_url = "data:image/png;base64,abc".into();
+        qq.qr_started_at = "2026-06-28 12:00:00".into();
+        state.mobile_channels.push(qq);
+
+        let state = normalize_toolbox_state(state);
+        let qq = state
+            .mobile_channels
+            .iter()
+            .find(|item| item.channel == "qq")
+            .expect("qq channel");
+
+        assert!(qq.qr_data_url.is_empty());
+        assert!(qq.qr_url.is_empty());
+    }
+
+    #[test]
     fn mobile_channel_credentials_require_platform_specific_fields() {
         let mut lark = default_mobile_channel("lark");
         assert!(!mobile_channel_has_credentials(&lark));
@@ -9677,6 +12794,370 @@ source_type = "local"
         assert!(!mobile_channel_has_credentials(&wechat));
         wechat.bot_token = "token".into();
         assert!(mobile_channel_has_credentials(&wechat));
+    }
+
+    #[test]
+    fn normalize_smart_control_backend_url_adds_scheme_and_trims_slashes() {
+        assert_eq!(
+            normalize_smart_control_backend_url("127.0.0.1:3847/"),
+            "http://127.0.0.1:3847"
+        );
+        assert_eq!(
+            normalize_smart_control_backend_url("https://localhost:3847/backend-api/"),
+            "https://localhost:3847/backend-api"
+        );
+        assert_eq!(
+            normalize_smart_control_backend_url(""),
+            default_smart_control_backend_url()
+        );
+    }
+
+    #[test]
+    fn smart_control_json_response_contains_cors_and_content_length() {
+        let response = smart_control_json_response(json!({ "ok": true }));
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Access-Control-Allow-Origin: *"));
+        assert!(response.contains("Content-Type: application/json; charset=utf-8"));
+        assert!(response.ends_with(r#"{"ok":true}"#));
+    }
+
+    #[test]
+    fn codex_config_toml_content_points_chatgpt_base_url_to_local_control() {
+        let content = codex_config_toml_content(
+            "custom",
+            "gpt-test",
+            "https://api.example.com",
+            "sk-test",
+            false,
+        );
+        assert!(content.contains(r#"chatgpt_base_url = "http://127.0.0.1:3847/backend-api""#));
+        assert!(content.contains(r#"model_provider = "custom""#));
+        assert!(content.contains(r#"model = "gpt-test""#));
+
+        let official = codex_config_toml_content(
+            "customer",
+            "gpt-5.5",
+            "https://api.example.com",
+            "sk-test",
+            true,
+        );
+        assert!(official.contains(r#"chatgpt_base_url = "http://127.0.0.1:3847/backend-api""#));
+        assert!(official.contains(r#"preferred_auth_method = "apikey""#));
+        assert!(official.contains(r#"experimental_bearer_token = "sk-test""#));
+    }
+
+    #[test]
+    fn codex_config_merge_preserves_unmanaged_sections() {
+        let existing = r#"
+model_provider = "old"
+approval_policy = "never"
+
+[model_providers.old]
+name = "old"
+base_url = "https://old.example.com"
+
+[projects."H:/variable-switching"]
+trust_level = "trusted"
+
+[marketplaces.varswitch-plugins]
+source = "https://example.com/plugins.git"
+source_type = "git"
+
+[plugins]
+"chrome@openai-bundled".enabled = true
+"#;
+        let generated = codex_config_toml_content(
+            "custom",
+            "gpt-5-codex",
+            "https://api.example.com/v1",
+            "sk-test",
+            false,
+        );
+
+        let merged = merge_codex_config_with_preserved_sections(&generated, existing);
+
+        assert!(merged.contains(r#"model_provider = "custom""#));
+        assert!(merged.contains(r#"approval_policy = "never""#));
+        assert!(merged.contains(r#"[projects."H:/variable-switching"]"#));
+        assert!(merged.contains("[marketplaces.varswitch-plugins]"));
+        assert!(merged.contains("[plugins]"));
+        assert!(!merged.contains("[model_providers.old]"));
+    }
+
+    #[test]
+    fn visible_codex_threads_filters_toolbox_trash_only() {
+        let mut state = ToolboxState::default();
+        state.synced_codex_threads = vec![
+            CodexThreadRecord {
+                id: "keep".into(),
+                thread_name: "Keep".into(),
+                ..CodexThreadRecord::default()
+            },
+            CodexThreadRecord {
+                id: "hidden".into(),
+                thread_name: "Hidden".into(),
+                ..CodexThreadRecord::default()
+            },
+        ];
+        state
+            .trashed_codex_threads
+            .push(codex_thread_to_trash_record(
+                state.synced_codex_threads[1].clone(),
+                "2026-07-03 00:00:00",
+            ));
+
+        let visible = visible_codex_threads(&state);
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].id, "keep");
+        assert_eq!(state.synced_codex_threads.len(), 2);
+    }
+
+    #[test]
+    fn websocket_accept_key_matches_rfc_example() {
+        assert_eq!(
+            websocket_accept_key("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+    }
+
+    #[test]
+    fn smart_control_preview_truncates_long_text() {
+        assert_eq!(smart_control_preview("abcdef", 10), "abcdef");
+        assert_eq!(smart_control_preview("abcdef", 3), "abc…");
+    }
+
+    #[test]
+    fn try_smart_control_dispatch_returns_none_when_not_connected() {
+        SMART_CONTROL_REMOTE_CONNECTED.store(false, Ordering::SeqCst);
+        let result =
+            try_smart_control_dispatch("thread", "hello").expect("dispatch should not fail");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn smart_control_turn_start_message_has_expected_shape() {
+        let message = smart_control_turn_start_message(42, "thread-1", " hello ");
+        assert_eq!(message.get("id").and_then(|v| v.as_u64()), Some(42));
+        assert_eq!(
+            message.get("method").and_then(|v| v.as_str()),
+            Some("turn/start")
+        );
+        assert_eq!(
+            message
+                .get("params")
+                .and_then(|v| v.get("threadId"))
+                .and_then(|v| v.as_str()),
+            Some("thread-1")
+        );
+        assert_eq!(
+            message
+                .get("params")
+                .and_then(|v| v.get("input"))
+                .and_then(|v| v.as_array())
+                .and_then(|items| items.first())
+                .and_then(|v| v.get("text"))
+                .and_then(|v| v.as_str()),
+            Some("hello")
+        );
+    }
+
+    #[test]
+    fn smart_control_wraps_client_message_with_envelope_identity() {
+        smart_control_reset_client_state();
+        let message = smart_control_initialize_message(7);
+        let envelope = smart_control_wrap_client_message(message);
+        assert_eq!(
+            envelope.get("type").and_then(|v| v.as_str()),
+            Some("client_message")
+        );
+        assert!(envelope.get("client_id").and_then(|v| v.as_str()).is_some());
+        assert!(envelope.get("stream_id").and_then(|v| v.as_str()).is_some());
+        assert_eq!(envelope.get("seq_id").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(
+            envelope
+                .get("message")
+                .and_then(|v| v.get("method"))
+                .and_then(|v| v.as_str()),
+            Some("initialize")
+        );
+    }
+
+    #[test]
+    fn smart_control_reassembles_server_message_chunk() {
+        smart_control_reset_client_state();
+        let message = json!({"id": 9, "result": {"text": "chunked"}});
+        let raw = serde_json::to_vec(&message).unwrap();
+        let mid = raw.len() / 2;
+        let first = base64::engine::general_purpose::STANDARD.encode(&raw[..mid]);
+        let second = base64::engine::general_purpose::STANDARD.encode(&raw[mid..]);
+        let base = json!({
+            "type": "server_message_chunk",
+            "client_id": "c",
+            "stream_id": "s",
+            "seq_id": 3,
+            "segment_count": 2,
+            "message_size_bytes": raw.len(),
+        });
+        let mut chunk1 = base.clone();
+        chunk1["segment_id"] = json!(0);
+        chunk1["message_chunk_base64"] = json!(first);
+        assert!(smart_control_reassemble_server_chunk(&chunk1).is_none());
+        let mut chunk2 = base;
+        chunk2["segment_id"] = json!(1);
+        chunk2["message_chunk_base64"] = json!(second);
+        assert_eq!(
+            smart_control_reassemble_server_chunk(&chunk2)
+                .and_then(|v| v.get("result").and_then(|r| r.get("text")).cloned())
+                .and_then(|v| v.as_str().map(str::to_string)),
+            Some("chunked".into())
+        );
+    }
+
+    #[test]
+    fn smart_control_extracts_approval_request() {
+        let value = json!({
+            "type": "server_message",
+            "client_id": "c",
+            "stream_id": "s",
+            "seq_id": 1,
+            "message": {
+                "id": "approval-1",
+                "method": "approval/request",
+                "params": {
+                    "title": "Run command",
+                    "body": "Allow command?",
+                    "options": [{"label": "approve"}, {"label": "deny"}]
+                }
+            }
+        });
+        let approval = smart_control_extract_approval(&value).expect("approval");
+        assert_eq!(approval.request_id, "approval-1");
+        assert_eq!(approval.title, "Run command");
+        assert_eq!(approval.options, vec!["approve", "deny"]);
+    }
+
+    #[test]
+    fn smart_control_turn_accumulator_completes_pending() {
+        let request_id = 777;
+        smart_control_register_pending(request_id);
+        smart_control_observe_turn_item(&json!({
+            "id": request_id,
+            "delta": {"text": "hello "}
+        }));
+        smart_control_observe_turn_item(&json!({
+            "id": request_id,
+            "delta": {"text": "world"},
+            "status": "completed"
+        }));
+        let result = smart_control_wait_pending(request_id, Duration::from_millis(50))
+            .expect("pending result");
+        assert_eq!(result.text, "hello world");
+    }
+
+    #[test]
+    fn smart_control_delta_does_not_complete_pending_before_done() {
+        let request_id = 778;
+        smart_control_register_pending(request_id);
+        smart_control_maybe_complete_pending(&json!({
+            "id": request_id,
+            "delta": {"text": "partial "}
+        }));
+        let pending_done = smart_control_pending_store()
+            .0
+            .lock()
+            .ok()
+            .and_then(|pending| pending.get(&request_id).map(|result| result.done))
+            .unwrap_or(true);
+        assert!(!pending_done);
+        smart_control_maybe_complete_pending(&json!({
+            "id": request_id,
+            "delta": {"text": "done"},
+            "status": "completed"
+        }));
+        let result = smart_control_wait_pending(request_id, Duration::from_millis(50))
+            .expect("pending result");
+        assert_eq!(result.text, "partial done");
+    }
+
+    #[test]
+    fn codex_inject_script_does_not_force_scroll_layout() {
+        let script = codex_inject_send_script("\"hello\"");
+        assert!(
+            !script.contains("scrollIntoView"),
+            "CDP compatibility injection must not force-scroll the Codex window"
+        );
+    }
+
+    #[test]
+    fn codex_debug_port_probe_does_not_auto_relaunch_app() {
+        let source = include_str!("lib.rs");
+        let marker = "fn codex_debug_port_or_relaunch()";
+        let start = source.find(marker).expect("function exists");
+        let tail = &source[start..];
+        let open = tail.find('{').expect("function body starts");
+        let mut depth = 0i32;
+        let mut end = tail.len();
+        for (idx, ch) in tail[open..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = open + idx + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let body = &tail[..end];
+        assert!(
+            !body.contains("relaunch_codex_with_debug_port"),
+            "debug port probing must not kill/relaunch Codex App automatically"
+        );
+        assert!(
+            !body.contains("taskkill"),
+            "debug port probing must not taskkill Codex App automatically"
+        );
+    }
+
+    #[test]
+    fn smart_control_extracts_text_from_response_shapes() {
+        assert_eq!(
+            smart_control_extract_text(&json!({"id": 1, "result": {"text": "hello"}})),
+            "hello"
+        );
+        assert_eq!(
+            smart_control_extract_text(&json!({"id": 1, "delta": {"text": "world"}})),
+            "world"
+        );
+        assert_eq!(
+            smart_control_extract_error(&json!({"id": 1, "error": {"message": "bad"}})),
+            "bad"
+        );
+    }
+
+    #[test]
+    fn push_smart_control_event_keeps_ring_buffer_bounded() {
+        for idx in 0..90 {
+            push_smart_control_event(SmartControlEvent {
+                received_at: idx.to_string(),
+                event_type: "test".into(),
+                message_id: idx.to_string(),
+                method: "noop".into(),
+                raw_preview: "x".into(),
+            });
+        }
+        let snapshot = smart_control_debug_snapshot();
+        assert!(snapshot.events.len() <= 80);
+        assert_eq!(
+            snapshot
+                .last_event
+                .as_ref()
+                .map(|event| event.message_id.as_str()),
+            Some("89")
+        );
     }
 
     #[test]
@@ -9735,10 +13216,18 @@ source_type = "local"
     }
 
     #[test]
-    fn known_editors_include_vscodium() {
+    fn known_editors_only_include_primary_supported_editors() {
+        let editor_ids: Vec<&str> = KNOWN_EDITORS.iter().map(|editor| editor.id).collect();
         assert!(
-            KNOWN_EDITORS.iter().any(|editor| editor.id == "vscodium"),
-            "VSCodium should be part of the built-in supported editor list"
+            editor_ids.contains(&"vscode") && editor_ids.contains(&"cursor"),
+            "primary supported editors should be present"
+        );
+        assert!(
+            !editor_ids.contains(&"vscode-insiders")
+                && !editor_ids.contains(&"windsurf")
+                && !editor_ids.contains(&"trae")
+                && !editor_ids.contains(&"vscodium"),
+            "VS Code Insiders, Windsurf, Trae, and VSCodium should not be shown in settings editor paths"
         );
     }
 
@@ -9806,54 +13295,16 @@ source_type = "local"
     }
 
     #[test]
-    fn select_release_asset_for_windows_prefers_installer_extensions() {
-        let assets = vec![
-            ReleaseAsset {
-                name: "VarSwitch_1.2.0_x64-setup.nsis.zip.sig".into(),
-                browser_download_url: "https://example.test/app.sig".into(),
-                size: 1,
-            },
-            ReleaseAsset {
-                name: "VarSwitch_1.2.0_x64_en-US.msi".into(),
-                browser_download_url: "https://example.test/app.msi".into(),
-                size: 2,
-            },
-            ReleaseAsset {
-                name: "VarSwitch_1.2.0_x64-setup.exe".into(),
-                browser_download_url: "https://example.test/app.exe".into(),
-                size: 3,
-            },
-        ];
+    fn extract_latest_version_from_download_page_uses_newest_installer_version() {
+        let html = r#"
+            <a href="./releases/VarSwitch_1.0.0_x64-setup.exe">VarSwitch_1.0.0_x64-setup.exe</a>
+            <a href="./releases/VarSwitch_1.2.3_x64-setup.exe">VarSwitch_1.2.3_x64-setup.exe</a>
+        "#;
 
-        let selected = select_release_asset(&assets, "windows", "x86_64")
-            .expect("should pick a Windows installer");
-
-        assert!(
-            selected.name.ends_with(".msi") || selected.name.ends_with(".exe"),
-            "selected asset should be an installer, got {}",
-            selected.name
+        assert_eq!(
+            extract_latest_version_from_download_page(html),
+            Some("v1.2.3".into())
         );
-    }
-
-    #[test]
-    fn select_release_asset_for_macos_prefers_matching_architecture() {
-        let assets = vec![
-            ReleaseAsset {
-                name: "VarSwitch_1.2.0_x64.dmg".into(),
-                browser_download_url: "https://example.test/app-x64.dmg".into(),
-                size: 2,
-            },
-            ReleaseAsset {
-                name: "VarSwitch_1.2.0_aarch64.dmg".into(),
-                browser_download_url: "https://example.test/app-arm64.dmg".into(),
-                size: 3,
-            },
-        ];
-
-        let selected =
-            select_release_asset(&assets, "macos", "aarch64").expect("should pick a macOS dmg");
-
-        assert_eq!(selected.name, "VarSwitch_1.2.0_aarch64.dmg");
     }
 
     #[test]
@@ -9867,7 +13318,7 @@ source_type = "local"
 
         assert_eq!(
             proxy, None,
-            "discard-style loopback proxy should be ignored instead of breaking GitHub requests"
+            "discard-style loopback proxy should be ignored instead of breaking update requests"
         );
     }
 
@@ -9881,28 +13332,6 @@ source_type = "local"
         ]);
 
         assert_eq!(proxy.as_deref(), Some("http://proxy.example.com:8080"));
-    }
-
-    #[test]
-    fn github_release_struct_deserializes_snake_case_payload() {
-        let release: GitHubRelease = serde_json::from_value(json!({
-            "tag_name": "v1.0.2",
-            "html_url": "https://github.com/ConcertoNotes/variable-switching/releases/tag/v1.0.2",
-            "body": "notes",
-            "published_at": "2026-02-25T06:03:09Z",
-            "assets": [{
-                "name": "VarSwitch_1.0.2_x64_en-US.msi",
-                "browser_download_url": "https://example.test/VarSwitch_1.0.2_x64_en-US.msi",
-                "size": 12345
-            }]
-        }))
-        .expect("GitHub release JSON should deserialize");
-
-        assert_eq!(release.tag_name, "v1.0.2");
-        assert_eq!(
-            release.assets[0].browser_download_url,
-            "https://example.test/VarSwitch_1.0.2_x64_en-US.msi"
-        );
     }
 
     #[test]
@@ -9922,6 +13351,8 @@ source_type = "local"
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState {
             cancel_flag: AtomicBool::new(false),
         })
@@ -9941,9 +13372,7 @@ pub fn run() {
                 .build()?;
 
             // Build tray icon
-            let tray_builder = TrayIconBuilder::new()
-                .tooltip("VarSwitch")
-                .menu(&menu);
+            let tray_builder = TrayIconBuilder::new().tooltip("VarSwitch").menu(&menu);
             // 图标不可用时不阻断启动，仅无图标显示
             let tray_builder = if let Some(icon) = app.default_window_icon() {
                 tray_builder.icon(icon.clone())
@@ -10032,9 +13461,19 @@ pub fn run() {
             switch_codex_profile,
             import_codex_current,
             get_codex_status,
+            get_codex_diagnostics,
+            backup_codex_runtime,
             get_codex_toolbox,
+            start_smart_control,
+            get_smart_control_debug,
+            submit_smart_control_approval,
+            repair_openai_bundled_plugins,
+            enable_codex_builtin_plugin,
+            enable_important_codex_builtin_plugins,
             apply_plugin_marketplace,
             sync_codex_sessions,
+            trash_codex_sessions,
+            restore_codex_sessions,
             select_mobile_thread,
             configure_mobile_channel,
             start_lark_bot_registration,
@@ -10055,6 +13494,7 @@ pub fn run() {
             open_logs_folder,
             open_external_target,
             check_app_update,
+            install_app_update,
             download_and_open_update,
             export_profiles,
             import_profiles,

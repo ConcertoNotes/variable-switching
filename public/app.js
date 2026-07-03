@@ -193,6 +193,13 @@ const I18N = {
     toolboxRemoteDevice: "Device",
     toolboxRemoteRunning: "Platform Listening",
     toolboxRemoteStopped: "Stopped",
+    toolboxSmartControlConnected: "Advanced control connected",
+    toolboxSmartControlWaiting: "Advanced control waiting",
+    toolboxSmartControlCompat: "Compatibility mode",
+    toolboxSmartControlCopied: "Protocol event copied",
+    toolboxSmartControlApprovalTitle: "Pending approvals",
+    toolboxSmartControlApprovalEmpty: "No pending approval",
+    toolboxSmartControlApprovalSubmitted: "Approval submitted",
     toolboxRemoteStart: "Start Platform Link",
     toolboxRemoteStop: "Stop",
     toolboxChannelCredentials: "Platform Credentials",
@@ -224,6 +231,29 @@ const I18N = {
     toolboxBindingRemoved: "Session binding removed",
     toolboxBindingSynced: "Session binding synced",
     toolboxSessionsSynced: "Local Codex history synced",
+    toolboxSessionSafeNote: "Session manager actions only hide records inside VarSwitch; Codex App history files stay untouched.",
+    toolboxSessionSearchPlaceholder: "Search title, project, message, or session ID",
+    toolboxSessionSelectAll: "Select All",
+    toolboxSessionClearSelected: "Clear Selection",
+    toolboxSessionCopyIds: "Copy IDs",
+    toolboxSessionOpenTrash: "Trash",
+    toolboxSessionMoveTrash: "Move to Trash",
+    toolboxSessionTrashTitle: "Session Trash",
+    toolboxSessionTrashHint: "Restore sessions hidden from this toolbox. Original Codex files were not deleted.",
+    toolboxSessionTrashClose: "Close",
+    toolboxSessionRestoreSelected: "Restore Selected",
+    toolboxSessionTrashEmpty: "Trash is empty",
+    toolboxSessionNoSearchResults: "No sessions match the search.",
+    toolboxSessionSelectedSummary: "{selected} selected · {total} visible · {trash} in trash",
+    toolboxSessionCopiedIds: "Copied selected session IDs",
+    toolboxSessionMovedTrash: "Moved selected sessions to toolbox trash",
+    toolboxSessionRestored: "Sessions restored",
+    toolboxSessionConfirmTrash: "Move selected sessions to VarSwitch trash? This will not delete Codex App history files.",
+    toolboxSessionProjectUnknown: "Unknown Project",
+    toolboxSessionIdLabel: "Session ID",
+    toolboxSessionFileLabel: "File",
+    toolboxSessionDeletedAt: "Hidden at",
+    toolboxSessionCopyId: "Copy session ID",
     toolboxThreadSelected: "Control conversation switched",
     toolboxRemoteStarted: "Mobile platform link is starting",
     toolboxRemoteStopped: "Mobile control stopped",
@@ -365,6 +395,7 @@ const I18N = {
     settingsMinTrayDesc: "Hide to system tray when closing the window",
     settingsConfigDir: "Config directory",
     settingsClaudePath: "Claude settings",
+    settingsCodexPath: "Codex settings",
     settingsLogs: "Runtime logs",
     settingsLogsDesc: "Open the logs folder to view or report issues",
     settingsOpen: "Open",
@@ -400,31 +431,39 @@ const I18N = {
     settingsTheme: "Theme",
     supportSectionTitle: "Quick Actions",
     supportHintDefault: "Open the usage guide, check for updates, or jump to the repository.",
-    supportHintUpdateAvailable: "{version} is available. Click again to open the download page.",
+    supportHintUpdateAvailable: "New version available: current {currentVersion}, latest {latestVersion}. Click to download and install automatically.",
     supportHintUpToDate: "You're already on the latest version: {version}.",
     usageGuideBtn: "Usage Guide",
     updateCheckBtn: "Check for Updates",
-    updateReleaseBtn: "Open Download Page {version}",
+    updateReleaseBtn: "Install Update {version}",
+    downloadSiteBtn: "Download Site",
     githubRepoBtn: "GitHub Repo",
     usageGuideKicker: "Usage Guide",
     usageGuideTitle: "How to use VarSwitch",
-    usageGuideIntro: "Follow these steps to switch API environments safely and keep Claude-related settings in sync.",
-    usageGuideStep1Title: "Add or import a config",
-    usageGuideStep1Desc: "Use Add Config or Import Current to prepare your API key and base URL.",
-    usageGuideStep2Title: "Switch the active config",
-    usageGuideStep2Desc: "Click Switch on a config card and wait for System, Editors, and Claude to finish syncing.",
-    usageGuideStep3Title: "Restart terminals and editors",
-    usageGuideStep3Desc: "After switching, restart your terminal and editor windows so the new environment variables take effect.",
-    usageGuideStep4Title: "Manage Claude-related files",
-    usageGuideStep4Desc: "The toolbar lets you manage Skills, Prompts, MCP servers, and app settings in one place.",
+    usageGuideIntro: "VarSwitch centralizes Claude Code, Codex CLI, plugins, prompts, MCP servers, mobile control, settings, and backups.",
+    usageGuideStep1Title: "Claude Code configs",
+    usageGuideStep1Desc: "Add or import Token/Base URL configs, test endpoint speed, then switch to sync system env, supported editors, and ~/.claude/settings.json.",
+    usageGuideStep2Title: "Codex CLI configs",
+    usageGuideStep2Desc: "Manage Codex API Key, Base URL, model, provider, auth mode, diagnostics, and backups for ~/.codex/config.toml and auth.json.",
+    usageGuideStep3Title: "Codex Toolbox",
+    usageGuideStep3Desc: "Install plugin marketplaces, repair bundled plugins, enable important plugins, sync Codex sessions, and bind mobile control.",
+    usageGuideStep4Title: "Skills, prompts, and MCP",
+    usageGuideStep4Desc: "Use toolbar entries to edit Claude Skills/Commands, manage CLAUDE.md templates, and edit MCP server JSON in ~/.claude.json.",
+    usageGuideStep5Title: "Settings and backups",
+    usageGuideStep5Desc: "Set language, theme, tray behavior, startup options, editor paths, profile export/import, automatic backups, and rollback.",
+    usageGuideStep6Title: "Updates and restart tips",
+    usageGuideStep6Desc: "Use the home shortcuts to check updates, open the download site or repository. After switching configs, restart terminals and editors.",
     usageGuideClose: "Close",
     usageGuideNever: "Never remind again",
     toastGuideDisabled: "Usage guide disabled",
     checkingUpdates: "Checking for Updates...",
+    downloadingUpdate: "Downloading update {percent}%",
+    installingUpdate: "Installing update...",
     openingReleasePage: "Opening Download Page...",
-    toastUpdateAvailable: "Update available: {version}",
-    updatePillText: "New version {version} is available",
+    toastUpdateAvailable: "Update available: current {currentVersion}, latest {latestVersion}",
+    updatePillText: "New version available: current {currentVersion}, latest {latestVersion}",
     updatePillAction: "Download",
+    toastUpdateDownloaded: "Update installer started. VarSwitch will restart automatically if needed.",
     toastAlreadyLatest: "You're already on the latest version",
     toastReleaseOpened: "Download page opened",
     toastRepoOpened: "Repository opened"
@@ -532,6 +571,13 @@ const I18N = {
     toolboxRemoteDevice: "设备",
     toolboxRemoteRunning: "平台监听中",
     toolboxRemoteStopped: "未启动",
+    toolboxSmartControlConnected: "高级控制通道已连接",
+    toolboxSmartControlWaiting: "高级控制通道等待 Codex 连接",
+    toolboxSmartControlCompat: "兼容模式",
+    toolboxSmartControlCopied: "协议事件已复制",
+    toolboxSmartControlApprovalTitle: "待处理审批",
+    toolboxSmartControlApprovalEmpty: "暂无待处理审批",
+    toolboxSmartControlApprovalSubmitted: "审批已提交",
     toolboxRemoteStart: "开启平台连接",
     toolboxRemoteStop: "停止",
     toolboxChannelCredentials: "平台凭据",
@@ -563,6 +609,29 @@ const I18N = {
     toolboxBindingRemoved: "会话绑定已解除",
     toolboxBindingSynced: "会话绑定已同步",
     toolboxSessionsSynced: "本地 Codex 历史已同步",
+    toolboxSessionSafeNote: "会话管理只在 VarSwitch 内隐藏记录，不会删除 Codex App 的历史会话文件。",
+    toolboxSessionSearchPlaceholder: "搜索标题、项目、消息或会话 ID",
+    toolboxSessionSelectAll: "全选",
+    toolboxSessionClearSelected: "取消选择",
+    toolboxSessionCopyIds: "复制 ID",
+    toolboxSessionOpenTrash: "回收站",
+    toolboxSessionMoveTrash: "移到回收站",
+    toolboxSessionTrashTitle: "会话回收站",
+    toolboxSessionTrashHint: "恢复从本工具列表中隐藏的会话；Codex 原始文件从未删除。",
+    toolboxSessionTrashClose: "关闭",
+    toolboxSessionRestoreSelected: "恢复所选",
+    toolboxSessionTrashEmpty: "回收站为空",
+    toolboxSessionNoSearchResults: "没有匹配的会话。",
+    toolboxSessionSelectedSummary: "已选 {selected} 个 · 当前显示 {total} 个 · 回收站 {trash} 个",
+    toolboxSessionCopiedIds: "已复制所选会话 ID",
+    toolboxSessionMovedTrash: "已移入工具内回收站",
+    toolboxSessionRestored: "会话已恢复",
+    toolboxSessionConfirmTrash: "把所选会话移入 VarSwitch 回收站？这不会删除 Codex App 的历史会话文件。",
+    toolboxSessionProjectUnknown: "未知项目",
+    toolboxSessionIdLabel: "会话 ID",
+    toolboxSessionFileLabel: "文件",
+    toolboxSessionDeletedAt: "隐藏时间",
+    toolboxSessionCopyId: "复制会话 ID",
     toolboxThreadSelected: "手机控制对话已切换",
     toolboxRemoteStarted: "手机平台连接正在启动",
     toolboxRemoteStopped: "手机控制已停止",
@@ -702,6 +771,7 @@ const I18N = {
     settingsMinTrayDesc: "关闭窗口时隐藏到系统托盘",
     settingsConfigDir: "配置目录",
     settingsClaudePath: "Claude 设置",
+    settingsCodexPath: "Codex 设置",
     settingsLogs: "运行日志",
     settingsLogsDesc: "出现问题时可打开日志文件夹查看或反馈",
     settingsOpen: "打开",
@@ -737,31 +807,39 @@ const I18N = {
     settingsTheme: "主题",
     supportSectionTitle: "快捷操作",
     supportHintDefault: "打开使用说明、检查更新，或直接访问仓库。",
-    supportHintUpdateAvailable: "发现新版本 {version}，再次点击即可打开下载页。",
+    supportHintUpdateAvailable: "发现新版本：当前版本 {currentVersion}，新版本 {latestVersion}，点击即可后台下载并自动安装。",
     supportHintUpToDate: "当前已经是最新版本：{version}。",
     usageGuideBtn: "使用说明",
     updateCheckBtn: "检查更新",
-    updateReleaseBtn: "打开下载页 {version}",
+    updateReleaseBtn: "安装更新 {version}",
+    downloadSiteBtn: "下载网站",
     githubRepoBtn: "GitHub 仓库",
     usageGuideKicker: "使用说明",
     usageGuideTitle: "VarSwitch 使用说明",
-    usageGuideIntro: "按照下面的步骤使用 VarSwitch，可以安全切换 API 环境并同步 Claude 相关配置。",
-    usageGuideStep1Title: "添加或导入配置",
-    usageGuideStep1Desc: "使用“添加配置”或“导入当前配置”，准备好 API Key 和 Base URL。",
-    usageGuideStep2Title: "切换当前配置",
-    usageGuideStep2Desc: "在配置卡片上点击“切换使用”，等待系统环境变量、编辑器和 Claude 同步完成。",
-    usageGuideStep3Title: "重启终端和编辑器",
-    usageGuideStep3Desc: "切换完成后，请重启终端和编辑器窗口，让新的环境变量生效。",
-    usageGuideStep4Title: "管理 Claude 相关内容",
-    usageGuideStep4Desc: "顶部工具栏可以统一管理 Skills、Prompts、MCP 服务器和应用设置。",
+    usageGuideIntro: "VarSwitch 可集中管理 Claude Code、Codex CLI、插件市场、提示词、MCP Server、移动端控制、设置与备份。",
+    usageGuideStep1Title: "Claude Code 配置",
+    usageGuideStep1Desc: "添加或导入 Token/Base URL 配置，可测试接口速度；切换后会同步系统环境变量、已支持编辑器和 ~/.claude/settings.json。",
+    usageGuideStep2Title: "Codex CLI 配置",
+    usageGuideStep2Desc: "管理 Codex API Key、Base URL、模型、Provider 和写入方式，并提供诊断与 ~/.codex/config.toml、auth.json 备份。",
+    usageGuideStep3Title: "Codex Toolbox",
+    usageGuideStep3Desc: "安装插件市场、修复内置插件、启用关键插件、同步 Codex 会话，并绑定飞书/Lark、QQ、微信移动端控制。",
+    usageGuideStep4Title: "Skills、Prompts 与 MCP",
+    usageGuideStep4Desc: "顶部工具栏可编辑 Claude Skills/Commands、维护 CLAUDE.md 模板，并管理 ~/.claude.json 中的 MCP Server。",
+    usageGuideStep5Title: "设置与备份",
+    usageGuideStep5Desc: "设置语言、主题、托盘行为、开机启动、编辑器路径，支持配置导入导出、自动备份和回滚。",
+    usageGuideStep6Title: "更新与生效提示",
+    usageGuideStep6Desc: "首页可检查更新、打开下载站或仓库。切换配置后，请重启终端和编辑器让环境变量生效。",
     usageGuideClose: "关闭",
     usageGuideNever: "永不提醒",
     toastGuideDisabled: "已关闭使用说明提醒",
     checkingUpdates: "正在检查更新...",
+    downloadingUpdate: "正在下载更新 {percent}%",
+    installingUpdate: "正在安装更新...",
     openingReleasePage: "正在打开下载页...",
-    toastUpdateAvailable: "发现新版本：{version}",
-    updatePillText: "发现新版本 {version}",
+    toastUpdateAvailable: "发现新版本：当前版本 {currentVersion}，新版本 {latestVersion}",
+    updatePillText: "发现新版本：当前版本 {currentVersion}，新版本 {latestVersion}",
     updatePillAction: "下载更新",
+    toastUpdateDownloaded: "更新安装程序已启动，必要时 VarSwitch 会自动重启。",
     toastAlreadyLatest: "当前已经是最新版本",
     toastReleaseOpened: "已打开下载页",
     toastRepoOpened: "已打开仓库地址"
@@ -781,6 +859,7 @@ if (currentTheme !== "light" && currentTheme !== "dark") {
 let profiles = [];
 let codexProfiles = [];
 let codexToolbox = null;
+let codexDiagnostics = null;
 let currentPage = "claude";
 let detectedEditors = {}; // { id: displayName }
 let editingId = null;
@@ -805,6 +884,8 @@ let updateInfo = null;
 let updateBusy = false;
 let updateBusyAction = null;
 let updatePillHideTimer = null;
+let updateDownloadPercent = 0;
+let updateDownloadUnlisten = null;
 let appSettings = null;
 let appPaths = null;
 let usageGuideAutoHandled = false;
@@ -817,6 +898,15 @@ let larkCredentialSaveTimer = null;
 let toolboxRemoteBusy = false;
 let marketplaceInstallBusy = false;
 let marketplaceProgressUnlisten = null;
+let toolboxSessionSyncBusy = false;
+let toolboxSessionProgressTimer = null;
+let toolboxSessionProgressValue = 0;
+let toolboxSessionSearchQuery = "";
+let toolboxSelectedSessionIds = new Set();
+let toolboxSelectedTrashSessionIds = new Set();
+let toolboxSessionTrashOpen = false;
+let toolboxCopiedSessionId = "";
+let mobileBindBusyAction = "";
 
 function t(key, params) {
   const dict = I18N[currentLang] || I18N.en;
@@ -836,6 +926,45 @@ function esc(s) {
   const div = document.createElement("div");
   div.textContent = s;
   return div.innerHTML;
+}
+
+function setButtonBusy(button, busy, label) {
+  if (!button) return;
+  if (busy) {
+    if (!button.dataset.originalText) {
+      button.dataset.originalText = button.textContent;
+    }
+    button.disabled = true;
+    button.classList.add("is-busy");
+    button.innerHTML = `<span class="inline-spinner" aria-hidden="true"></span><span>${esc(label || button.dataset.originalText || "")}</span>`;
+  } else {
+    button.disabled = false;
+    button.classList.remove("is-busy");
+    if (button.dataset.originalText) {
+      button.textContent = button.dataset.originalText;
+      delete button.dataset.originalText;
+    }
+  }
+}
+
+function productIcon(kind) {
+  if (kind === "anthropic") {
+    return `<span class="product-icon product-icon-anthropic" aria-hidden="true">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M38.7 10h-8.9L13 54h8.5l3.6-9.7h18.1L46.9 54H56L38.7 10Zm-11 27.2 6.4-17.1 6.5 17.1H27.7Z" fill="currentColor"/>
+      </svg>
+    </span>`;
+  }
+  if (kind === "codex") {
+    return `<span class="product-icon product-icon-codex" aria-hidden="true">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M32 6 54.5 19v26L32 58 9.5 45V19L32 6Z" stroke="currentColor" stroke-width="5" stroke-linejoin="round"/>
+        <path d="M22 25.5 32 19l10 6.5v13L32 45l-10-6.5v-13Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
+        <path d="M32 19v26M22 25.5l20 13M42 25.5l-20 13" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+    </span>`;
+  }
+  return "";
 }
 
 function maskKey(key) {
@@ -872,6 +1001,14 @@ function formatVersionTag(version) {
   return version.startsWith("v") ? version : `v${version}`;
 }
 
+function updateVersionParams(info = updateInfo) {
+  return {
+    currentVersion: formatVersionTag(info?.currentVersion),
+    latestVersion: formatVersionTag(info?.latestVersion),
+    version: formatVersionTag(info?.latestVersion)
+  };
+}
+
 function getEditorPathMode(editorInfo) {
   if (typeof helpers.getEditorPathMode === "function") {
     return helpers.getEditorPathMode(editorInfo);
@@ -900,17 +1037,16 @@ function syncAppSettingsAppearance() {
 
 function currentSupportHint() {
   if (updateBusy) {
+    if (updateBusyAction === "download") {
+      return t("downloadingUpdate", { percent: updateDownloadPercent });
+    }
+    if (updateBusyAction === "install") {
+      return t("installingUpdate");
+    }
     return t("checkingUpdates");
   }
   if (updateInfo?.hasUpdate) {
-    return t("supportHintUpdateAvailable", {
-      version: formatVersionTag(updateInfo.latestVersion)
-    });
-  }
-  if (updateInfo && !updateInfo.hasUpdate) {
-    return t("supportHintUpToDate", {
-      version: formatVersionTag(updateInfo.currentVersion || updateInfo.latestVersion)
-    });
+    return t("supportHintUpdateAvailable", updateVersionParams());
   }
   return t("supportHintDefault");
 }
@@ -924,12 +1060,16 @@ function renderUpdateButton() {
   const mode = getUpdateActionMode();
   if (mode === "busy") {
     btn.disabled = true;
-    textEl.textContent = t("checkingUpdates");
+    if (updateBusyAction === "download") {
+      textEl.textContent = t("downloadingUpdate", { percent: updateDownloadPercent });
+    } else if (updateBusyAction === "install") {
+      textEl.textContent = t("installingUpdate");
+    } else {
+      textEl.textContent = t("checkingUpdates");
+    }
   } else if (mode === "release" && updateInfo?.latestVersion) {
     btn.disabled = false;
-    textEl.textContent = t("updateReleaseBtn", {
-      version: formatVersionTag(updateInfo.latestVersion)
-    });
+    textEl.textContent = t("updateReleaseBtn", updateVersionParams());
   } else {
     btn.disabled = false;
     textEl.textContent = t("updateCheckBtn");
@@ -937,6 +1077,7 @@ function renderUpdateButton() {
 
   hintEl.textContent = currentSupportHint();
   renderUpdatePill();
+  renderUpdateDownloadProgress();
 }
 
 function renderUpdatePill() {
@@ -950,11 +1091,33 @@ function renderUpdatePill() {
     return;
   }
 
-  textEl.textContent = t("updatePillText", {
-    version: formatVersionTag(updateInfo.latestVersion)
-  });
-  actionEl.textContent = t("updatePillAction");
+  textEl.textContent = t("updatePillText", updateVersionParams());
+  actionEl.textContent = updateBusyAction === "download"
+    ? `${updateDownloadPercent}%`
+    : t("updatePillAction");
   banner.hidden = false;
+}
+
+function renderUpdateDownloadProgress() {
+  const progress = $("updateDownloadProgress");
+  const bar = $("updateDownloadProgressBar");
+  if (!progress || !bar) return;
+  const show = updateBusyAction === "download" || updateBusyAction === "install";
+  progress.hidden = !show;
+  bar.style.width = `${Math.max(0, Math.min(100, updateDownloadPercent))}%`;
+}
+
+function updateDownloadProgress(payload = {}) {
+  const total = Number(payload.total) || 100;
+  const step = Number(payload.step) || 0;
+  const label = payload.label || "download";
+  updateDownloadPercent = Math.max(0, Math.min(100, Math.round((step / total) * 100)));
+  if (label === "install" || label === "done" || label === "open") {
+    updateBusyAction = "install";
+  } else {
+    updateBusyAction = "download";
+  }
+  renderUpdateButton();
 }
 
 function hideUpdatePillSoon() {
@@ -1031,14 +1194,10 @@ async function checkForUpdates() {
     updateInfo = await invoke("check_app_update");
     if (updateInfo?.hasUpdate) {
       showToast(
-        t("toastUpdateAvailable", {
-          version: formatVersionTag(updateInfo.latestVersion)
-        }),
+        t("toastUpdateAvailable", updateVersionParams()),
         "success"
       );
       hideUpdatePillSoon();
-    } else {
-      showToast(t("toastAlreadyLatest"), "success");
     }
   } catch (error) {
     showToast(String(error), "error");
@@ -1047,6 +1206,7 @@ async function checkForUpdates() {
     updateBusyAction = null;
     renderUpdateButton();
   }
+  return updateInfo;
 }
 
 async function checkForUpdatesOnStartup() {
@@ -1063,9 +1223,7 @@ async function checkForUpdatesOnStartup() {
     updateBusy = false;
     updateBusyAction = null;
     renderUpdateButton();
-    if (updateInfo?.hasUpdate) {
-      hideUpdatePillSoon();
-    }
+    // 启动时只在版本不一致时显示更新横幅；相同版本保持安静。
   }
 }
 
@@ -1078,14 +1236,60 @@ async function openUpdateReleasePage() {
   }
 }
 
+async function installAppUpdate() {
+  updateBusy = true;
+  updateBusyAction = "download";
+  updateDownloadPercent = 0;
+  renderUpdateButton();
+
+  try {
+    if (updateDownloadUnlisten) {
+      updateDownloadUnlisten();
+      updateDownloadUnlisten = null;
+    }
+    updateDownloadUnlisten = await listen("update-download-progress", (event) => {
+      updateDownloadProgress(event.payload || {});
+    });
+    const result = await invoke("install_app_update");
+    updateDownloadPercent = 100;
+    updateBusyAction = "install";
+    renderUpdateButton();
+    showToast(
+      t("toastUpdateDownloaded", { fileName: result?.fileName || "" }),
+      "success"
+    );
+    hideUpdatePillSoon();
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    if (updateDownloadUnlisten) {
+      updateDownloadUnlisten();
+      updateDownloadUnlisten = null;
+    }
+    setTimeout(() => {
+      updateBusy = false;
+      updateBusyAction = null;
+      updateDownloadPercent = 0;
+      renderUpdateButton();
+    }, 900);
+  }
+}
+
+async function downloadAndOpenUpdate() {
+  return installAppUpdate();
+}
+
 async function handleUpdateButton() {
   const mode = getUpdateActionMode();
   if (mode === "busy") return;
   if (mode === "release") {
-    await openUpdateReleasePage();
+    await installAppUpdate();
     return;
   }
-  await checkForUpdates();
+  const info = await checkForUpdates();
+  if (info?.hasUpdate) {
+    await installAppUpdate();
+  }
 }
 
 async function openGitHubRepo() {
@@ -1136,8 +1340,11 @@ function applyLanguage() {
   $("appSubtitle").textContent = t("appSubtitle");
   $("importBtnText").textContent = t("importBtn");
   $("addBtn").textContent = t("addBtn");
-  $("supportSectionTitle").textContent = t("supportSectionTitle");
+  const supportTitle = $("supportSectionTitle");
+  if (supportTitle) supportTitle.textContent = t("supportSectionTitle");
   $("usageGuideBtnText").textContent = t("usageGuideBtn");
+  const downloadSiteBtnText = $("downloadSiteBtnText");
+  if (downloadSiteBtnText) downloadSiteBtnText.textContent = t("downloadSiteBtn");
   $("githubRepoBtnText").textContent = t("githubRepoBtn");
   $("statusSectionTitle").textContent = t("statusTitle");
   $("statusHint").textContent = t("statusHint");
@@ -1167,6 +1374,10 @@ function applyLanguage() {
   $("usageGuideStep3Desc").textContent = t("usageGuideStep3Desc");
   $("usageGuideStep4Title").textContent = t("usageGuideStep4Title");
   $("usageGuideStep4Desc").textContent = t("usageGuideStep4Desc");
+  $("usageGuideStep5Title").textContent = t("usageGuideStep5Title");
+  $("usageGuideStep5Desc").textContent = t("usageGuideStep5Desc");
+  $("usageGuideStep6Title").textContent = t("usageGuideStep6Title");
+  $("usageGuideStep6Desc").textContent = t("usageGuideStep6Desc");
   $("usageGuideCloseBtn").textContent = t("usageGuideClose");
   $("usageGuideNeverBtn").textContent = t("usageGuideNever");
 
@@ -1198,7 +1409,8 @@ function applyLanguage() {
   $("codexCopyOfficialConfigBtn").textContent = t("copy");
   $("codexCancelBtn").textContent = t("cancel");
   $("codexSubmitBtn").textContent = t("save");
-  $("codexToolboxBtn").textContent = t("codexToolbox");
+  const codexToolboxBtn = $("codexToolboxBtn");
+  if (codexToolboxBtn) codexToolboxBtn.textContent = t("codexToolbox");
   $("codexToolboxTitle").textContent = t("codexToolboxTitle");
   $("toolboxTabMarket").textContent = t("toolboxTabMarket");
   $("toolboxTabSession").textContent = t("toolboxTabSession");
@@ -1209,6 +1421,12 @@ function applyLanguage() {
   $("toolboxSessionHint").textContent = t("toolboxSessionHint");
   $("toolboxSessionSyncBtn").textContent = t("toolboxSyncNow");
   $("toolboxSyncedThreadsTitle").textContent = t("toolboxSyncedThreadsTitle");
+  $("toolboxSessionSafeNote").textContent = t("toolboxSessionSafeNote");
+  $("toolboxSessionSearchInput").placeholder = t("toolboxSessionSearchPlaceholder");
+  $("toolboxSessionTrashTitle").textContent = t("toolboxSessionTrashTitle");
+  $("toolboxSessionTrashHint").textContent = t("toolboxSessionTrashHint");
+  $("toolboxSessionTrashCloseBtn").textContent = t("toolboxSessionTrashClose");
+  $("toolboxSessionRestoreBtn").textContent = t("toolboxSessionRestoreSelected");
   $("toolboxRemoteHint").textContent = t("toolboxRemoteHint");
   $("toolboxMobileAppLabel").textContent = t("toolboxMobileAppLabel");
   $("toolboxMobileThreadLabel").textContent = t("toolboxMobileThreadLabel");
@@ -1289,10 +1507,12 @@ function applyLanguage() {
   $("settingsMinTrayDesc").textContent = t("settingsMinTrayDesc");
   $("settingsConfigDirLabel").textContent = t("settingsConfigDir");
   $("settingsClaudePathLabel").textContent = t("settingsClaudePath");
+  $("settingsCodexPathLabel").textContent = t("settingsCodexPath");
   $("settingsLogsLabel").textContent = t("settingsLogs");
   $("settingsLogsValue").textContent = t("settingsLogsDesc");
   $("settingsOpenConfigDir").textContent = t("settingsOpen");
   $("settingsOpenClaudeDir").textContent = t("settingsOpen");
+  $("settingsOpenCodexDir").textContent = t("settingsOpen");
   $("settingsExportBtn").textContent = t("settingsExport");
   $("settingsImportBtn").textContent = t("settingsImport");
   $("settingsAutoBackupLabel").textContent = t("settingsAutoBackup");
@@ -1339,9 +1559,20 @@ function setTheme(theme) {
 async function loadCodexToolbox() {
   try {
     codexToolbox = await invoke("get_codex_toolbox");
+    await loadSmartControlDebug(false);
     renderCodexToolbox();
   } catch (error) {
     showToast(String(error), "error");
+  }
+}
+
+async function loadSmartControlDebug(showError = false) {
+  try {
+    codexDiagnostics = await invoke("get_smart_control_debug");
+    return codexDiagnostics;
+  } catch (error) {
+    if (showError) showToast(String(error), "error");
+    return null;
   }
 }
 
@@ -1387,9 +1618,11 @@ function startToolboxRefresh(ticks = 8) {
       } else {
         codexToolbox = await invoke("get_codex_toolbox");
       }
+      await loadSmartControlDebug(false);
       renderCodexToolbox();
     } catch (_) {
       codexToolbox = await invoke("get_codex_toolbox").catch(() => codexToolbox);
+      await loadSmartControlDebug(false);
       renderCodexToolbox();
     } finally {
       toolboxRefreshBusy = false;
@@ -1434,16 +1667,110 @@ function renderCodexToolbox() {
     marketplaces[0];
   $("toolboxMarketplaceDesc").textContent =
     currentLang === "zh" ? option.zh || "" : option.en || option.zh || "";
+  renderBuiltinPlugins();
   renderToolboxSessionSync();
   renderToolboxSyncedThreads();
   renderToolboxMobileControl();
   renderToolboxRemote();
 }
 
+function builtinPluginStatusText(status) {
+  if (!status?.available) {
+    return status?.lastError || "未找到 Codex App 自带插件目录";
+  }
+  const market = status.marketplaceConfigured ? "已挂载 openai-bundled" : "未挂载 openai-bundled";
+  const important = `${status.importantEnabledCount || 0}/${status.importantTotalCount || 0} 个关键插件已启用`;
+  const total = `${status.enabledCount || 0}/${status.totalCount || 0} 个内置插件已启用`;
+  return `${market} · ${important} · ${total}`;
+}
+
+function renderBuiltinPlugins() {
+  const summary = $("builtinPluginSummary");
+  const list = $("builtinPluginList");
+  if (!summary || !list) return;
+  const status = codexToolbox?.builtinPlugins || {};
+  summary.textContent = builtinPluginStatusText(status);
+  if (!status.available) {
+    list.innerHTML = `<div class="builtin-plugin-empty">${esc(status.lastError || "未发现 Codex App 内置插件")}</div>`;
+    return;
+  }
+  const plugins = status.plugins || [];
+  if (plugins.length === 0) {
+    list.innerHTML = `<div class="builtin-plugin-empty">没有可展示的内置插件</div>`;
+    return;
+  }
+  list.innerHTML = plugins.map((plugin) => {
+    const skills = (plugin.skills || []).slice(0, 4).map((skill) => `<span>${esc(skill.name)}</span>`).join("");
+    return `<div class="builtin-plugin-card ${plugin.important ? "important" : ""}">
+      <div class="builtin-plugin-card-main">
+        <div class="builtin-plugin-title-row">
+          <strong>${esc(plugin.displayName || plugin.name)}</strong>
+          ${plugin.important ? `<span class="builtin-plugin-badge">关键</span>` : ""}
+          ${plugin.enabled ? `<span class="builtin-plugin-badge enabled">已启用</span>` : ""}
+        </div>
+        <div class="builtin-plugin-desc">${esc(plugin.description || plugin.id)}</div>
+        <div class="builtin-plugin-skills">${skills}</div>
+      </div>
+      <div class="builtin-plugin-card-actions">
+        <button class="btn ${plugin.enabled ? "btn-secondary" : "btn-primary"} btn-sm" data-enable-builtin-plugin="${esc(plugin.id)}" ${plugin.enabled ? "disabled" : ""} type="button">
+          ${plugin.enabled ? "已启用" : "启用"}
+        </button>
+      </div>
+    </div>`;
+  }).join("");
+  list.querySelectorAll("[data-enable-builtin-plugin]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const pluginId = btn.getAttribute("data-enable-builtin-plugin");
+      if (!pluginId) return;
+      btn.disabled = true;
+      try {
+        codexToolbox = await invoke("enable_codex_builtin_plugin", { pluginId });
+        showToast("Codex 内置插件已启用", "success");
+        renderCodexToolbox();
+        await loadCodexDiagnostics();
+      } catch (error) {
+        showToast(String(error), "error");
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+async function handleRepairOpenAiBundledPlugins() {
+  const btn = $("builtinPluginRepairBtn");
+  if (btn) btn.disabled = true;
+  try {
+    codexToolbox = await invoke("repair_openai_bundled_plugins");
+    showToast("已修复 Codex 内置插件市场", "success");
+    renderCodexToolbox();
+    await loadCodexDiagnostics();
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function handleEnableImportantBuiltinPlugins() {
+  const btn = $("builtinPluginEnableImportantBtn");
+  if (btn) btn.disabled = true;
+  try {
+    codexToolbox = await invoke("enable_important_codex_builtin_plugins");
+    showToast("Computer Use / Chrome 等关键插件已启用", "success");
+    renderCodexToolbox();
+    await loadCodexDiagnostics();
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function renderToolboxSessionSync() {
   const summary = $("toolboxSessionSummary");
   const state = codexToolbox?.sessionSync || {};
   const count = state.total || (codexToolbox?.syncedCodexThreads || []).length || 0;
+  renderToolboxSessionProgress();
   if (!state.lastSyncedAt && !count) {
     summary.textContent = t("toolboxSessionSummaryEmpty");
     return;
@@ -1454,38 +1781,384 @@ function renderToolboxSessionSync() {
   });
 }
 
-function renderThreadCard(thread, options = {}) {
-  const isSelected = thread.id === (codexToolbox?.selectedMobileThreadId || selectedCodexThreadId);
-  const actions = [];
-  if (options.selectable) {
-    actions.push(
-      `<button class="btn ${isSelected ? "btn-primary" : "btn-secondary"} btn-sm" data-action="toolbox-select-thread" data-thread-id="${esc(thread.id)}">${isSelected ? t("toolboxSelectedThread") : t("toolboxSelectThread")}</button>`
-    );
+function renderToolboxSessionProgress() {
+  const progress = $("toolboxSessionProgress");
+  if (!progress) return;
+  progress.hidden = !toolboxSessionSyncBusy;
+  $("toolboxSessionSyncBtn").disabled = toolboxSessionSyncBusy;
+  if (toolboxSessionSyncBusy) {
+    $("toolboxSessionSyncBtn").classList.add("is-busy");
+  } else {
+    $("toolboxSessionSyncBtn").classList.remove("is-busy");
   }
-  if (options.bindable) {
-    actions.push(`<button class="btn btn-secondary btn-sm" data-bind-channel="lark" data-thread-id="${esc(thread.id)}">${t("toolboxBindLark")}</button>`);
-    actions.push(`<button class="btn btn-secondary btn-sm" data-bind-channel="wechat" data-thread-id="${esc(thread.id)}">${t("toolboxBindWechat")}</button>`);
-    actions.push(`<button class="btn btn-secondary btn-sm" data-bind-channel="qq" data-thread-id="${esc(thread.id)}">${t("toolboxBindQq")}</button>`);
+}
+
+function updateToolboxSessionProgress(percent, label) {
+  toolboxSessionProgressValue = Math.max(0, Math.min(100, Number(percent) || 0));
+  const progress = $("toolboxSessionProgress");
+  const bar = $("toolboxSessionProgressBar");
+  const labelEl = $("toolboxSessionProgressLabel");
+  const percentEl = $("toolboxSessionProgressPercent");
+  if (progress) progress.hidden = false;
+  if (bar) bar.style.width = `${toolboxSessionProgressValue}%`;
+  if (labelEl) labelEl.textContent = label || "正在同步 Codex 会话...";
+  if (percentEl) percentEl.textContent = `${Math.round(toolboxSessionProgressValue)}%`;
+}
+
+function startToolboxSessionProgress() {
+  toolboxSessionSyncBusy = true;
+  updateToolboxSessionProgress(8, "正在扫描本地 Codex 会话...");
+  if (toolboxSessionProgressTimer) {
+    clearInterval(toolboxSessionProgressTimer);
   }
+  toolboxSessionProgressTimer = setInterval(() => {
+    const next = toolboxSessionProgressValue < 72
+      ? toolboxSessionProgressValue + 9
+      : toolboxSessionProgressValue < 92
+        ? toolboxSessionProgressValue + 2
+        : toolboxSessionProgressValue;
+    updateToolboxSessionProgress(next, next < 72 ? "正在导入会话记录..." : "正在整理会话索引...");
+  }, 360);
+  renderToolboxSessionProgress();
+}
+
+function finishToolboxSessionProgress(success) {
+  if (toolboxSessionProgressTimer) {
+    clearInterval(toolboxSessionProgressTimer);
+    toolboxSessionProgressTimer = null;
+  }
+  updateToolboxSessionProgress(success ? 100 : Math.max(35, toolboxSessionProgressValue), success ? "同步完成" : "同步失败");
+  window.setTimeout(() => {
+    toolboxSessionSyncBusy = false;
+    const progress = $("toolboxSessionProgress");
+    if (progress) progress.hidden = true;
+    renderToolboxSessionProgress();
+  }, success ? 520 : 900);
+}
+
+function parseToolboxSessionTime(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 1_000_000_000_000 ? value : value * 1000;
+  }
+  const text = String(value || "").trim();
+  if (!text) return 0;
+  if (/^\d+$/.test(text)) {
+    const numeric = Number(text);
+    return numeric > 1_000_000_000_000 ? numeric : numeric * 1000;
+  }
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatToolboxSessionTime(value) {
+  const time = parseToolboxSessionTime(value);
+  if (!time) return "--";
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (diffSeconds < 3600) {
+    const minutes = Math.max(1, Math.floor(diffSeconds / 60));
+    return currentLang === "zh" ? `${minutes} 分钟前` : `${minutes}m ago`;
+  }
+  if (diffSeconds < 86400) {
+    const hours = Math.floor(diffSeconds / 3600);
+    return currentLang === "zh" ? `${hours} 小时前` : `${hours}h ago`;
+  }
+  if (diffSeconds < 604800) {
+    const days = Math.floor(diffSeconds / 86400);
+    return currentLang === "zh" ? `${days} 天前` : `${days}d ago`;
+  }
+  return new Date(time).toLocaleString();
+}
+
+function shortToolboxSessionId(sessionId) {
+  const text = String(sessionId || "");
+  return text.length <= 18 ? text : `${text.slice(0, 8)}...${text.slice(-6)}`;
+}
+
+function toolboxSessionTitle(thread) {
+  return thread.threadName || thread.lastUserMessage || thread.id || t("toolboxSessionProjectUnknown");
+}
+
+function toolboxSessionProjectLabel(cwd) {
+  const normalized = String(cwd || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] || t("toolboxSessionProjectUnknown");
+}
+
+function filterToolboxSessions(threads) {
+  const query = toolboxSessionSearchQuery.trim().toLowerCase();
+  if (!query) return threads;
+  return threads.filter((thread) => {
+    const haystack = [
+      thread.id,
+      thread.threadName,
+      thread.cwd,
+      thread.sessionFile,
+      thread.lastUserMessage,
+      thread.lastAssistantMessage,
+    ].join("\n").toLowerCase();
+    return haystack.includes(query);
+  });
+}
+
+function groupToolboxSessions(threads) {
+  const groups = new Map();
+  threads.forEach((thread) => {
+    const key = thread.cwd || t("toolboxSessionProjectUnknown");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(thread);
+  });
+  return Array.from(groups.entries())
+    .map(([cwd, sessions]) => ({
+      cwd,
+      sessions: sessions
+        .slice()
+        .sort((a, b) => parseToolboxSessionTime(b.updatedAt) - parseToolboxSessionTime(a.updatedAt)),
+      latest: Math.max(...sessions.map((item) => parseToolboxSessionTime(item.updatedAt)), 0),
+    }))
+    .sort((a, b) => b.latest - a.latest || toolboxSessionProjectLabel(a.cwd).localeCompare(toolboxSessionProjectLabel(b.cwd)));
+}
+
+function syncToolboxSessionSelection(threads) {
+  const valid = new Set(threads.map((thread) => thread.id));
+  toolboxSelectedSessionIds = new Set([...toolboxSelectedSessionIds].filter((id) => valid.has(id)));
+  const trashed = new Set((codexToolbox?.trashedCodexThreads || []).map((thread) => thread.id));
+  toolboxSelectedTrashSessionIds = new Set([...toolboxSelectedTrashSessionIds].filter((id) => trashed.has(id)));
+}
+
+function renderToolboxSessionRow(thread) {
+  const selected = toolboxSelectedSessionIds.has(thread.id);
+  const copied = toolboxCopiedSessionId === thread.id;
+  const preview = thread.lastUserMessage || thread.lastAssistantMessage || "";
   return `
-    <div class="toolbox-thread-card ${isSelected ? "selected" : ""}" data-thread-id="${esc(thread.id)}">
-      <div class="toolbox-thread-title">${esc(thread.threadName || thread.id)}</div>
-      <div class="toolbox-thread-meta">${esc(thread.updatedAt || "--")}</div>
-      ${thread.cwd ? `<div class="toolbox-thread-meta">${esc(thread.cwd)}</div>` : ""}
-      ${thread.lastUserMessage ? `<div class="toolbox-thread-preview">${esc(thread.lastUserMessage)}</div>` : ""}
-      ${actions.length ? `<div class="toolbox-thread-actions">${actions.join("")}</div>` : ""}
+    <div class="toolbox-session-row ${selected ? "selected" : ""}">
+      <label class="toolbox-session-row-main">
+        <input type="checkbox" data-toolbox-session-check="${esc(thread.id)}" ${selected ? "checked" : ""}>
+        <span class="toolbox-session-row-text">
+          <strong title="${esc(toolboxSessionTitle(thread))}">${esc(toolboxSessionTitle(thread))}</strong>
+          <span class="toolbox-session-row-meta">${esc(t("toolboxSessionIdLabel"))}: ${esc(shortToolboxSessionId(thread.id))}</span>
+          ${thread.sessionFile ? `<span class="toolbox-session-row-meta">${esc(t("toolboxSessionFileLabel"))}: ${esc(thread.sessionFile)}</span>` : ""}
+          ${preview ? `<span class="toolbox-session-row-preview">${esc(preview)}</span>` : ""}
+        </span>
+      </label>
+      <div class="toolbox-session-row-actions">
+        <button class="toolbox-session-copy-btn ${copied ? "is-copied" : ""}" data-toolbox-session-copy="${esc(thread.id)}" type="button" title="${esc(t("toolboxSessionCopyId"))}">
+          ${copied ? "✓" : "⧉"}
+        </button>
+        <span class="toolbox-session-row-time">${esc(formatToolboxSessionTime(thread.updatedAt))}</span>
+      </div>
     </div>
   `;
 }
 
-function renderToolboxSyncedThreads() {
-  const list = $("toolboxSyncedThreadsList");
-  const threads = codexToolbox?.syncedCodexThreads || [];
-  if (threads.length === 0) {
-    list.innerHTML = `<div class="mgmt-empty">${t("toolboxNoThreads")}</div>`;
+function renderToolboxSessionGroup(group) {
+  const ids = group.sessions.map((thread) => thread.id);
+  const allSelected = ids.length > 0 && ids.every((id) => toolboxSelectedSessionIds.has(id));
+  return `
+    <section class="toolbox-session-folder">
+      <div class="toolbox-session-folder-row">
+        <label class="toolbox-session-folder-main">
+          <input type="checkbox" data-toolbox-session-group="${esc(ids.join(","))}" ${allSelected ? "checked" : ""}>
+          <span class="toolbox-session-folder-icon" aria-hidden="true">▣</span>
+          <span class="toolbox-session-folder-text">
+            <strong title="${esc(group.cwd)}">${esc(toolboxSessionProjectLabel(group.cwd))}</strong>
+            <span>${esc(group.cwd || t("toolboxSessionProjectUnknown"))}</span>
+          </span>
+        </label>
+        <span class="toolbox-session-folder-meta">${group.sessions.length} · ${esc(formatToolboxSessionTime(group.latest))}</span>
+      </div>
+      <div class="toolbox-session-folder-children">
+        ${group.sessions.map(renderToolboxSessionRow).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderToolboxSessionTrash() {
+  const drawer = $("toolboxSessionTrashDrawer");
+  const list = $("toolboxSessionTrashList");
+  const trash = codexToolbox?.trashedCodexThreads || [];
+  drawer.hidden = !toolboxSessionTrashOpen;
+  if (!toolboxSessionTrashOpen) return;
+  $("toolboxSessionRestoreBtn").disabled = toolboxSelectedTrashSessionIds.size === 0;
+  if (trash.length === 0) {
+    list.innerHTML = `<div class="mgmt-empty">${t("toolboxSessionTrashEmpty")}</div>`;
     return;
   }
-  list.innerHTML = threads.map((thread) => renderThreadCard(thread)).join("");
+  list.innerHTML = trash.map((thread) => {
+    const selected = toolboxSelectedTrashSessionIds.has(thread.id);
+    return `
+      <label class="toolbox-session-trash-row">
+        <input type="checkbox" data-toolbox-trash-check="${esc(thread.id)}" ${selected ? "checked" : ""}>
+        <span class="toolbox-session-trash-row-text">
+          <strong>${esc(toolboxSessionTitle(thread))}</strong>
+          <span>${esc(toolboxSessionProjectLabel(thread.cwd))} · ${esc(shortToolboxSessionId(thread.id))}</span>
+          <span>${esc(t("toolboxSessionDeletedAt"))}: ${esc(thread.deletedAt || "--")}</span>
+        </span>
+      </label>
+    `;
+  }).join("");
+  list.querySelectorAll("[data-toolbox-trash-check]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const id = input.getAttribute("data-toolbox-trash-check");
+      if (!id) return;
+      if (input.checked) toolboxSelectedTrashSessionIds.add(id);
+      else toolboxSelectedTrashSessionIds.delete(id);
+      renderToolboxSyncedThreads();
+    });
+  });
+}
+
+function renderToolboxSessionManagerControls(filteredThreads, allThreads) {
+  const filteredIds = filteredThreads.map((thread) => thread.id);
+  const allFilteredSelected = filteredIds.length > 0 && filteredIds.every((id) => toolboxSelectedSessionIds.has(id));
+  $("toolboxSessionSelectAllBtn").textContent = allFilteredSelected ? t("toolboxSessionClearSelected") : t("toolboxSessionSelectAll");
+  $("toolboxSessionCopyIdsBtn").textContent = `${t("toolboxSessionCopyIds")} (${toolboxSelectedSessionIds.size})`;
+  $("toolboxSessionTrashBtn").textContent = `${t("toolboxSessionMoveTrash")} (${toolboxSelectedSessionIds.size})`;
+  $("toolboxSessionRestoreOpenBtn").textContent = `${t("toolboxSessionOpenTrash")} (${(codexToolbox?.trashedCodexThreads || []).length})`;
+  $("toolboxSessionCopyIdsBtn").disabled = toolboxSelectedSessionIds.size === 0;
+  $("toolboxSessionTrashBtn").disabled = toolboxSelectedSessionIds.size === 0;
+  $("toolboxSessionSelectAllBtn").disabled = filteredIds.length === 0;
+  $("toolboxSessionManagerStatus").textContent = t("toolboxSessionSelectedSummary", {
+    selected: toolboxSelectedSessionIds.size,
+    total: filteredThreads.length,
+    trash: (codexToolbox?.trashedCodexThreads || []).length,
+  });
+}
+
+function renderToolboxSyncedThreads() {
+  const list = $("toolboxSyncedThreadsList");
+  const allThreads = codexToolbox?.syncedCodexThreads || [];
+  syncToolboxSessionSelection(allThreads);
+  const filteredThreads = filterToolboxSessions(allThreads);
+  const groups = groupToolboxSessions(filteredThreads);
+  renderToolboxSessionManagerControls(filteredThreads, allThreads);
+  renderToolboxSessionTrash();
+  if (allThreads.length === 0) {
+    list.innerHTML = `<div class="mgmt-empty">${t("toolboxNoThreads")}</div>`;
+    bindToolboxSessionManagerEvents(filteredThreads);
+    return;
+  }
+  if (filteredThreads.length === 0) {
+    list.innerHTML = `<div class="mgmt-empty">${t("toolboxSessionNoSearchResults")}</div>`;
+    bindToolboxSessionManagerEvents(filteredThreads);
+    return;
+  }
+  list.innerHTML = groups.map(renderToolboxSessionGroup).join("");
+  bindToolboxSessionManagerEvents(filteredThreads);
+}
+
+async function copyToolboxText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  input.remove();
+}
+
+function bindToolboxSessionManagerEvents(filteredThreads) {
+  const list = $("toolboxSyncedThreadsList");
+  list.querySelectorAll("[data-toolbox-session-check]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const id = input.getAttribute("data-toolbox-session-check");
+      if (!id) return;
+      if (input.checked) toolboxSelectedSessionIds.add(id);
+      else toolboxSelectedSessionIds.delete(id);
+      renderToolboxSyncedThreads();
+    });
+  });
+  list.querySelectorAll("[data-toolbox-session-group]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const ids = (input.getAttribute("data-toolbox-session-group") || "").split(",").filter(Boolean);
+      const allSelected = ids.every((id) => toolboxSelectedSessionIds.has(id));
+      ids.forEach((id) => {
+        if (allSelected) toolboxSelectedSessionIds.delete(id);
+        else toolboxSelectedSessionIds.add(id);
+      });
+      renderToolboxSyncedThreads();
+    });
+  });
+  list.querySelectorAll("[data-toolbox-session-copy]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-toolbox-session-copy");
+      if (!id) return;
+      try {
+        await copyToolboxText(id);
+        toolboxCopiedSessionId = id;
+        renderToolboxSyncedThreads();
+        window.setTimeout(() => {
+          if (toolboxCopiedSessionId === id) {
+            toolboxCopiedSessionId = "";
+            renderToolboxSyncedThreads();
+          }
+        }, 1000);
+      } catch (error) {
+        showToast(String(error), "error");
+      }
+    });
+  });
+  $("toolboxSessionSelectAllBtn").onclick = () => {
+    const ids = filteredThreads.map((thread) => thread.id);
+    const allSelected = ids.length > 0 && ids.every((id) => toolboxSelectedSessionIds.has(id));
+    ids.forEach((id) => {
+      if (allSelected) toolboxSelectedSessionIds.delete(id);
+      else toolboxSelectedSessionIds.add(id);
+    });
+    renderToolboxSyncedThreads();
+  };
+  $("toolboxSessionCopyIdsBtn").onclick = async () => {
+    const ids = [...toolboxSelectedSessionIds];
+    if (ids.length === 0) return;
+    try {
+      await copyToolboxText(ids.join("\n"));
+      showToast(t("toolboxSessionCopiedIds"), "success");
+    } catch (error) {
+      showToast(String(error), "error");
+    }
+  };
+  $("toolboxSessionTrashBtn").onclick = handleToolboxMoveSelectedToTrash;
+  $("toolboxSessionRestoreOpenBtn").onclick = () => {
+    toolboxSessionTrashOpen = !toolboxSessionTrashOpen;
+    renderToolboxSyncedThreads();
+  };
+  $("toolboxSessionTrashCloseBtn").onclick = () => {
+    toolboxSessionTrashOpen = false;
+    renderToolboxSyncedThreads();
+  };
+  $("toolboxSessionRestoreBtn").onclick = handleToolboxRestoreSelectedSessions;
+}
+
+async function handleToolboxMoveSelectedToTrash() {
+  const threadIds = [...toolboxSelectedSessionIds];
+  if (threadIds.length === 0) return;
+  if (!window.confirm(t("toolboxSessionConfirmTrash"))) return;
+  try {
+    codexToolbox = await invoke("trash_codex_sessions", { threadIds });
+    toolboxSelectedSessionIds.clear();
+    showToast(t("toolboxSessionMovedTrash"), "success");
+    renderCodexToolbox();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleToolboxRestoreSelectedSessions() {
+  const threadIds = [...toolboxSelectedTrashSessionIds];
+  if (threadIds.length === 0) return;
+  try {
+    codexToolbox = await invoke("restore_codex_sessions", { threadIds });
+    toolboxSelectedTrashSessionIds.clear();
+    showToast(t("toolboxSessionRestored"), "success");
+    renderCodexToolbox();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
 }
 
 function getSelectedMobileBinding() {
@@ -1620,7 +2293,9 @@ async function saveSelectedMobileChannelDraft({ render = false } = {}) {
 async function handleMobileBindAction(event) {
   const btn = event.currentTarget;
   const action = btn.getAttribute("data-action");
-  btn.disabled = true;
+  mobileBindBusyAction = action || "";
+  setButtonBusy(btn, true, getMobileBindingLoadingText(selectedMobileChannel, mobileBindBusyAction));
+  renderCodexToolbox();
   try {
     if (action === "toolbox-open-lark-create") {
       selectedMobileChannel = "lark";
@@ -1665,7 +2340,21 @@ async function handleMobileBindAction(event) {
       selectedMobileChannel = "qq";
       startToolboxRefresh(120);
       showToast(t("toolboxStartQqQr"), "success");
-      codexToolbox = await invoke("start_qq_qr_binding", {});
+      const qqBinding = getSelectedMobileBinding();
+      qqBinding.qrStatus = "正在生成 QQ 扫码二维码，请稍等...";
+      qqBinding.status = "正在生成 QQ 扫码二维码，请稍等...";
+      renderCodexToolbox();
+      invoke("start_qq_qr_binding", {})
+        .then((snapshot) => {
+          codexToolbox = snapshot;
+          renderCodexToolbox();
+          startToolboxRefresh(120);
+        })
+        .catch((error) => {
+          mobileDebugError("start_qq_qr_binding invoke:failed", error);
+          showToast(String(error), "error");
+          loadCodexToolbox();
+        });
     } else if (action === "toolbox-start-wechat-qr") {
       selectedMobileChannel = "wechat";
       startToolboxRefresh(120);
@@ -1682,27 +2371,38 @@ async function handleMobileBindAction(event) {
     mobileDebugError("mobile bind action failed", error, { action });
     showToast(String(error), "error");
   } finally {
-    btn.disabled = false;
+    mobileBindBusyAction = "";
+    setButtonBusy(btn, false);
+    renderCodexToolbox();
   }
 }
 
 function renderSelectedMobileBinding(binding) {
   const channel = binding.channel || selectedMobileChannel;
   const title = channelLabel(channel);
-  const status = binding.status || binding.qrStatus || binding.credentialStatus || t("toolboxRemoteStopped");
+  const uiState = getMobileBindingUiState(binding);
+  const status = getMobileBindingStatusText(binding, uiState);
   const error = binding.lastError ? `<div class="mgmt-item-desc danger">${t("toolboxLastError")}: ${esc(binding.lastError)}</div>` : "";
-  const qr = renderChannelQr(binding);
+  const qr = uiState.showQr ? renderChannelQr(binding) : "";
+  const busy = uiState.busy ||
+    mobileBindBusyAction.startsWith(`toolbox-${channel}`) ||
+    mobileBindBusyAction.includes(channel) ||
+    mobileBindBusyAction.includes("remote");
+  const loading = busy
+    ? `<div class="toolbox-loading-line"><span class="inline-spinner" aria-hidden="true"></span><span>${esc(getMobileBindingLoadingText(channel, mobileBindBusyAction))}</span></div>`
+    : "";
+  const stateBadge = `<span class="toolbox-binding-state toolbox-binding-state-${esc(uiState.kind)}">${esc(getMobileBindingStateLabel(uiState.kind))}</span>`;
   let body = "";
   let actions = "";
 
   if (channel === "wechat") {
-    body = `${qr}<div class="mgmt-item-desc">${esc(binding.qrStatus || "点击绑定微信后，用手机微信扫码并确认绑定。")}</div>`;
+    body = `${qr}${loading}<div class="mgmt-item-desc">${esc(status.detail || "点击绑定微信后，用手机微信扫码并确认绑定。")}</div>`;
     actions = `
       <button class="btn btn-primary btn-sm" data-action="toolbox-start-wechat-qr">${t("toolboxStartWechatQr")}</button>
       <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-wechat-binding">清除绑定</button>
     `;
   } else if (channel === "qq") {
-    body = `${qr}<div class="mgmt-item-desc">${esc(binding.qrStatus || "点击 QQ 扫码绑定后，用 QQ 扫描二维码即可保存机器人凭据。")}</div>`;
+    body = `${qr}${loading}<div class="mgmt-item-desc">${esc(status.detail || "点击 QQ 扫码绑定后，用 QQ 扫描二维码即可保存机器人凭据。")}</div>`;
     actions = `
       <button class="btn btn-primary btn-sm" data-action="toolbox-start-qq-qr">${t("toolboxStartQqQr")}</button>
       <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-qq-binding">清除绑定</button>
@@ -1710,6 +2410,7 @@ function renderSelectedMobileBinding(binding) {
   } else {
     body = `
       ${qr}
+      ${loading}
       <div class="mgmt-item-desc">创建新机器人会打开飞书开放平台；创建完成后 App ID 和 App Secret 会自动填充并绑定当前对话。</div>
       <div class="toolbox-channel-form toolbox-channel-form-compact">
         <label class="toolbox-channel-field">
@@ -1733,13 +2434,84 @@ function renderSelectedMobileBinding(binding) {
 
   return `
     <div class="toolbox-mobile-card">
-      <div class="toolbox-mobile-card-title">${esc(title)}</div>
-      <div class="mgmt-item-desc">${esc(status)}</div>
+      <div class="toolbox-mobile-card-title"><span>${esc(title)}</span>${stateBadge}</div>
+      <div class="mgmt-item-desc">${esc(status.main)}</div>
       ${error}
       ${body}
       <div class="toolbox-thread-actions">${actions}</div>
     </div>
   `;
+}
+
+function getMobileBindingUiState(binding) {
+  if (typeof helpers.getMobileBindingUiState === "function") {
+    return helpers.getMobileBindingUiState(binding);
+  }
+  const hasCredential = Boolean(binding?.bound || binding?.botToken || binding?.appId || binding?.appSecret || binding?.accountId || binding?.userId || binding?.botOpenId);
+  if (binding?.lastError) return { kind: "error", hasCredential, showQr: false, busy: false };
+  if (hasCredential) return { kind: "bound", hasCredential, showQr: false, busy: false };
+  if (shouldRenderChannelQr(binding)) return { kind: "qr", hasCredential, showQr: true, busy: false };
+  return { kind: "unbound", hasCredential, showQr: false, busy: false };
+}
+
+function getMobileBindingStateLabel(kind) {
+  const zh = {
+    bound: "已绑定",
+    qr: "等待扫码",
+    binding: "连接中",
+    error: "异常",
+    unbound: "未绑定",
+  };
+  const en = {
+    bound: "Bound",
+    qr: "Scan QR",
+    binding: "Connecting",
+    error: "Error",
+    unbound: "Unbound",
+  };
+  return (currentLang === "zh" ? zh : en)[kind] || kind;
+}
+
+function getMobileBindingStatusText(binding, uiState) {
+  const channel = channelLabel(binding?.channel || selectedMobileChannel);
+  if (uiState.kind === "bound") {
+    return {
+      main: `${channel} 已绑定，可直接开启平台连接`,
+      detail: `如果手机端没有收到消息，请点击「开启平台连接」重新监听；不需要重新扫码。`,
+    };
+  }
+  if (uiState.kind === "qr") {
+    return {
+      main: `${channel} 二维码已生成`,
+      detail: `请使用 ${channel} 扫码并在手机端确认。`,
+    };
+  }
+  if (uiState.kind === "binding") {
+    return {
+      main: `${channel} 正在连接`,
+      detail: binding?.status || binding?.qrStatus || `正在准备 ${channel} 绑定，请稍等。`,
+    };
+  }
+  if (uiState.kind === "error") {
+    return {
+      main: `${channel} 状态异常`,
+      detail: `请重新绑定或清除后再试。`,
+    };
+  }
+  return {
+    main: `${channel} 尚未绑定`,
+    detail: binding?.status || binding?.qrStatus || `请选择对话后绑定 ${channel}。`,
+  };
+}
+
+function getMobileBindingLoadingText(channel, action) {
+  const label = channelLabel(channel);
+  if (action.includes("remote")) return `正在开启 ${label} 平台连接...`;
+  if (action.includes("clear")) return `正在清除 ${label} 绑定...`;
+  if (action.includes("lark")) return `正在准备飞书绑定流程...`;
+  if (action.includes("qq")) return `正在生成 QQ 扫码二维码...`;
+  if (action.includes("wechat")) return `正在生成微信扫码二维码...`;
+  return `正在处理 ${label} 状态...`;
 }
 
 function renderChannelQr(binding) {
@@ -1762,7 +2534,7 @@ function shouldRenderChannelQr(binding) {
   if (!binding || (!binding.qrDataUrl && !binding.qrUrl)) return false;
   if (binding.channel === "lark") return Boolean(binding.qrDataUrl || binding.qrUrl);
   if (binding.channel === "qq") {
-    return Boolean(binding.qrDataUrl && isFreshMobileQr(binding) && isQqAuthorizationTarget(binding.qrUrl));
+    return Boolean(binding.qrDataUrl && isFreshMobileQr(binding));
   }
   if (binding.channel === "wechat") {
     const dataUrl = String(binding.qrDataUrl || "").trim().toLowerCase();
@@ -1797,13 +2569,75 @@ function renderToolboxRemote() {
   if (!remote) return;
   const binding = getSelectedMobileBinding();
   const activeThread = remote.activeThreadName || remote.activeThreadId || "";
+  const smartControlText = remote.remoteControlConnected
+    ? t("toolboxSmartControlConnected")
+    : (remote.remoteControlStatus || remote.remoteControlDetail
+      ? `${t("toolboxSmartControlWaiting")}: ${remote.remoteControlStatus || remote.remoteControlDetail}`
+      : t("toolboxSmartControlCompat"));
   const stateText = binding?.lastError || (remote.enabled ? t("toolboxRemoteRunning") : (remote.lastError || t("toolboxRemoteStopped")));
   $("toolboxRemoteStatusValue").textContent = [
+    smartControlText,
     stateText,
     channelLabel(selectedMobileChannel),
     activeThread,
     binding.status || binding.qrStatus || "",
   ].filter(Boolean).join(" · ");
+  $("toolboxRemoteStatusValue").title = currentLang === "zh"
+    ? "点击复制最近高级控制协议事件"
+    : "Click to copy the latest advanced-control protocol event";
+  $("toolboxRemoteStatusValue").style.cursor = "copy";
+  $("toolboxRemoteStatusValue").onclick = copySmartControlDebugEvent;
+  renderSmartControlApprovals();
+}
+
+function ensureSmartControlApprovalPanel() {
+  let panel = $("smartControlApprovalPanel");
+  if (panel) return panel;
+  const status = $("toolboxRemoteStatusValue");
+  if (!status || !status.parentElement) return null;
+  panel = document.createElement("div");
+  panel.id = "smartControlApprovalPanel";
+  panel.className = "smart-control-approval-panel";
+  status.insertAdjacentElement("afterend", panel);
+  return panel;
+}
+
+function renderSmartControlApprovals() {
+  const panel = ensureSmartControlApprovalPanel();
+  if (!panel) return;
+  const approvals = codexDiagnostics?.approvals || [];
+  if (!approvals.length) {
+    panel.innerHTML = `<div class="smart-control-approval-empty">${esc(t("toolboxSmartControlApprovalEmpty"))}</div>`;
+    return;
+  }
+  panel.innerHTML = `<div class="smart-control-approval-title">${esc(t("toolboxSmartControlApprovalTitle"))}</div>
+    ${approvals.slice(-3).reverse().map((approval) => {
+      const options = approval.options?.length ? approval.options : ["approve", "deny"];
+      return `<div class="smart-control-approval-card">
+        <div class="smart-control-approval-card-title">${esc(approval.title || approval.method || "Approval")}</div>
+        <div class="smart-control-approval-card-body">${esc(approval.body || approval.rawPreview || "")}</div>
+        <div class="smart-control-approval-actions">
+          ${options.map((option) => `<button class="btn btn-secondary btn-sm" type="button" data-approval-id="${esc(approval.requestId || "")}" data-approval-decision="${esc(option)}">${esc(option)}</button>`).join("")}
+        </div>
+      </div>`;
+    }).join("")}`;
+  panel.querySelectorAll("[data-approval-id]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const requestId = btn.getAttribute("data-approval-id");
+      const decision = btn.getAttribute("data-approval-decision");
+      if (!requestId || !decision) return;
+      btn.disabled = true;
+      try {
+        await invoke("submit_smart_control_approval", { requestId, decision });
+        showToast(t("toolboxSmartControlApprovalSubmitted"), "success");
+        await loadSmartControlDebug(true);
+        renderSmartControlApprovals();
+      } catch (error) {
+        showToast(String(error), "error");
+        btn.disabled = false;
+      }
+    });
+  });
 }
 
 function channelLabel(channel) {
@@ -1811,6 +2645,18 @@ function channelLabel(channel) {
   if (channel === "wechat") return currentLang === "zh" ? "微信" : "WeChat";
   if (channel === "qq") return "QQ";
   return String(channel || "").toUpperCase();
+}
+
+async function copySmartControlDebugEvent() {
+  try {
+    const debug = await invoke("get_smart_control_debug");
+    const latest = debug?.lastEvent || debug?.events?.[debug.events.length - 1] || null;
+    const payload = latest || debug || {};
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    showToast(t("toolboxSmartControlCopied"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
 }
 
 function showSwitchOverlay(profileName) {
@@ -1934,7 +2780,7 @@ async function loadStatus() {
 
     // 固定三列：系统环境变量、编辑器轮播、Claude
     const systemLoc = { key: "envVars", title: t("statusSystemEnv"), data: status.envVars };
-    const claudeLoc = { key: "claude", title: t("statusClaude"), data: status.claude };
+    const claudeLoc = { key: "claude", title: t("statusClaude"), data: status.claude, icon: "anthropic" };
 
     // 计算同步状态
     const allLocations = [systemLoc, ...editorLocations, claudeLoc];
@@ -1951,7 +2797,7 @@ async function loadStatus() {
         return `
           <div class="status-card error-card ${extraClass || ""}">
             <div class="status-card-title">
-              <span class="status-card-title-text">${loc.title}</span>
+              <span class="status-card-title-text">${productIcon(loc.icon)}${loc.title}</span>
             </div>
             <div style="font-size:13px;color:var(--error-text)">${t("readFailed")}</div>
           </div>`;
@@ -2462,6 +3308,7 @@ function switchPage(page) {
     $("pageCodex").classList.add("active");
     loadCodexProfiles();
     loadCodexStatus();
+    loadCodexDiagnostics();
   }
 }
 
@@ -2654,6 +3501,69 @@ function updateCodexActiveConfigBar() {
   }
 }
 
+function renderCodexDiagnostics() {
+  const panel = $("codexDiagnosticsPanel");
+  if (!panel) return;
+  const d = codexDiagnostics;
+  if (!d) {
+    panel.innerHTML = `<div class="diagnostics-card muted">Codex diagnostics: --</div>`;
+    return;
+  }
+  const healthy = Array.isArray(d.issues) && d.issues.length === 0;
+  const issueItems = (d.issues || []).map((item) => `<li>${esc(item)}</li>`).join("");
+  const suggestionItems = (d.suggestions || []).map((item) => `<li>${esc(item)}</li>`).join("");
+  const markets = (d.pluginMarketplaces || []).length
+    ? d.pluginMarketplaces.map((item) => `<span class="diagnostics-pill">${esc(truncUrl(item, 34))}</span>`).join("")
+    : `<span class="diagnostics-pill muted">未安装插件市场</span>`;
+  panel.innerHTML = `
+    <div class="diagnostics-card ${healthy ? "healthy" : "warning"}">
+      <div class="diagnostics-head">
+        <div>
+          <div class="diagnostics-kicker">Codex Health</div>
+          <div class="diagnostics-title">${healthy ? "配置健康" : "需要处理"}</div>
+        </div>
+        <span class="diagnostics-state ${healthy ? "ok" : "warn"}">${healthy ? "OK" : `${d.issues.length} issues`}</span>
+      </div>
+      <div class="diagnostics-grid">
+        <div><span>Active</span><strong>${esc(d.activeProfileName || "--")}</strong></div>
+        <div><span>Provider</span><strong>${esc(d.providerName || "--")}</strong></div>
+        <div><span>Model</span><strong>${esc(d.model || "--")}</strong></div>
+        <div><span>Auth</span><strong>${esc(d.authMode || "--")}</strong></div>
+      </div>
+      <div class="diagnostics-paths">
+        <div title="${esc(d.configPath || "")}">config: ${esc(d.configExists ? d.configPath : "未找到")}</div>
+        <div title="${esc(d.authPath || "")}">auth: ${esc(d.authExists ? d.authPath : "未找到")}</div>
+      </div>
+      <div class="diagnostics-marketplaces">${markets}</div>
+      ${issueItems ? `<div class="diagnostics-list"><strong>问题</strong><ul>${issueItems}</ul></div>` : ""}
+      ${suggestionItems ? `<div class="diagnostics-list"><strong>建议</strong><ul>${suggestionItems}</ul></div>` : ""}
+      <div class="diagnostics-footer">Last checked: ${esc(d.lastCheckedAt || "--")}</div>
+    </div>`;
+}
+
+async function loadCodexDiagnostics() {
+  try {
+    codexDiagnostics = await invoke("get_codex_diagnostics");
+    renderCodexDiagnostics();
+  } catch (error) {
+    const panel = $("codexDiagnosticsPanel");
+    if (panel) {
+      panel.innerHTML = `<div class="diagnostics-card warning">诊断加载失败：${esc(String(error))}</div>`;
+    }
+  }
+}
+
+async function handleCodexRuntimeBackup() {
+  try {
+    const result = await invoke("backup_codex_runtime");
+    const files = [result.configBackup, result.authBackup].filter(Boolean).length;
+    showToast(files ? `已备份 ${files} 个 Codex 文件` : "没有可备份的 Codex 文件", files ? "success" : "warning");
+    await loadCodexDiagnostics();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
 async function loadCodexStatus() {
   try {
     const status = await invoke("get_codex_status");
@@ -2666,7 +3576,7 @@ async function loadCodexStatus() {
     grid.innerHTML = `
       <div class="status-card">
         <div class="status-card-title">
-          <span class="status-card-title-text">Codex CLI</span>
+          <span class="status-card-title-text">${productIcon("codex")}Codex CLI</span>
         </div>
         <div class="status-item">
           <span class="status-label">${t("codexApiKeyLabel")}</span>
@@ -2739,6 +3649,7 @@ async function handleCodexSubmit(event) {
     closeCodexModal();
     await loadCodexProfiles();
     await loadCodexStatus();
+    await loadCodexDiagnostics();
   } catch (error) {
     showToast(String(error), "error");
   }
@@ -2751,6 +3662,7 @@ async function handleCodexSwitch(id) {
     showToast(t("codexSwitchedTo", { name: profile?.name || "" }), "success");
     await loadCodexProfiles();
     await loadCodexStatus();
+    await loadCodexDiagnostics();
   } catch (error) {
     showToast(String(error), "error");
   }
@@ -3526,14 +4438,22 @@ function showToast(message, type = "success") {
   }, 3200);
 }
 
-$("addBtn").addEventListener("click", () => {
+function triggerCurrentAdd() {
   if (currentPage === "codex") openCodexModal(null);
   else openModal(null);
-});
-$("importBtn").addEventListener("click", () => {
+}
+
+function triggerCurrentImport() {
   if (currentPage === "codex") handleCodexImport();
   else handleImport();
-});
+}
+
+$("addBtn").addEventListener("click", triggerCurrentAdd);
+$("importBtn").addEventListener("click", triggerCurrentImport);
+$("codexRefreshDiagnosticsBtn")?.addEventListener("click", loadCodexDiagnostics);
+$("codexBackupRuntimeBtn")?.addEventListener("click", handleCodexRuntimeBackup);
+$("heroToolboxBtn")?.addEventListener("click", openCodexToolbox);
+$("codexToolboxOpenBtn")?.addEventListener("click", openCodexToolbox);
 $("langZhBtn").addEventListener("click", () => setLanguage("zh"));
 $("langEnBtn").addEventListener("click", () => setLanguage("en"));
 $("themeLightBtn").addEventListener("click", () => setTheme("light"));
@@ -3554,7 +4474,7 @@ $("modalOverlay").addEventListener("click", (event) => {
 
 // ── Page Tabs Event Listeners ───────────────────────
 
-document.querySelectorAll(".page-tab").forEach((tab) => {
+document.querySelectorAll(".page-tab[data-page]").forEach((tab) => {
   tab.addEventListener("click", () => {
     switchPage(tab.getAttribute("data-page"));
   });
@@ -3581,7 +4501,7 @@ $("codexSyncNowBtn").addEventListener("click", () => {
   const active = codexProfiles.find((p) => p.isActive);
   if (active) handleCodexSwitch(active.id);
 });
-$("codexToolboxBtn").addEventListener("click", openCodexToolbox);
+$("codexToolboxBtn")?.addEventListener("click", openCodexToolbox);
 $("codexToolboxClose").addEventListener("click", closeCodexToolbox);
 $("codexToolboxOverlay").addEventListener("click", (event) => {
   if (event.target === $("codexToolboxOverlay")) closeCodexToolbox();
@@ -3589,15 +4509,25 @@ $("codexToolboxOverlay").addEventListener("click", (event) => {
 $("toolboxTabMarket").addEventListener("click", () => switchToolboxTab("market"));
 $("toolboxTabSession").addEventListener("click", () => switchToolboxTab("session"));
 $("toolboxTabRemote").addEventListener("click", () => switchToolboxTab("remote"));
+$("toolboxSessionSearchInput").addEventListener("input", (event) => {
+  toolboxSessionSearchQuery = event.target.value || "";
+  renderToolboxSyncedThreads();
+});
 $("toolboxSessionSyncBtn").addEventListener("click", async () => {
+  if (toolboxSessionSyncBusy) return;
+  startToolboxSessionProgress();
   try {
     codexToolbox = await invoke("sync_codex_sessions", {});
+    finishToolboxSessionProgress(true);
     showToast(t("toolboxSessionsSynced"), "success");
     renderCodexToolbox();
   } catch (error) {
+    finishToolboxSessionProgress(false);
     showToast(String(error), "error");
   }
 });
+$("builtinPluginRepairBtn")?.addEventListener("click", handleRepairOpenAiBundledPlugins);
+$("builtinPluginEnableImportantBtn")?.addEventListener("click", handleEnableImportantBuiltinPlugins);
 $("toolboxMarketApplyBtn").addEventListener("click", async () => {
   if (marketplaceInstallBusy) return;
   setMarketplaceInstallBusy(true);
@@ -3613,7 +4543,7 @@ $("toolboxMarketApplyBtn").addEventListener("click", async () => {
     codexToolbox = await invoke("apply_plugin_marketplace", {
       source: $("toolboxMarketplaceInput").value.trim(),
     });
-    updateMarketplaceProgress({ step: 4, total: 4, label: "done" });
+    updateMarketplaceProgress({ step: 6, total: 6, label: "done" });
     showToast(t("toolboxMarketplaceApplied"), "success");
     renderCodexToolbox();
   } catch (error) {
@@ -3637,8 +4567,11 @@ $("toolboxRemoteStartBtn").addEventListener("click", async () => {
   if (toolboxRemoteBusy) return;
   mobileDebug("remote start button clicked");
   toolboxRemoteBusy = true;
+  mobileBindBusyAction = "toolbox-remote-start";
   $("toolboxRemoteStartBtn").disabled = true;
   $("toolboxRemoteStopBtn").disabled = true;
+  $("toolboxRemoteStartBtn").classList.add("is-busy");
+  renderCodexToolbox();
   try {
     await bindCurrentMobileSelection();
     mobileDebug("start_mobile_remote invoke:start", {
@@ -3657,16 +4590,22 @@ $("toolboxRemoteStartBtn").addEventListener("click", async () => {
     showToast(String(error), "error");
   } finally {
     toolboxRemoteBusy = false;
+    mobileBindBusyAction = "";
     $("toolboxRemoteStartBtn").disabled = false;
     $("toolboxRemoteStopBtn").disabled = false;
+    $("toolboxRemoteStartBtn").classList.remove("is-busy");
+    renderCodexToolbox();
   }
 });
 $("toolboxRemoteStopBtn").addEventListener("click", async () => {
   if (toolboxRemoteBusy) return;
   mobileDebug("remote stop button clicked");
   toolboxRemoteBusy = true;
+  mobileBindBusyAction = "toolbox-remote-stop";
   $("toolboxRemoteStartBtn").disabled = true;
   $("toolboxRemoteStopBtn").disabled = true;
+  $("toolboxRemoteStopBtn").classList.add("is-busy");
+  renderCodexToolbox();
   try {
     mobileDebug("stop_mobile_remote invoke:start", { source: "remote-main-button" });
     codexToolbox = await invoke("stop_mobile_remote", {});
@@ -3683,8 +4622,11 @@ $("toolboxRemoteStopBtn").addEventListener("click", async () => {
     showToast(String(error), "error");
   } finally {
     toolboxRemoteBusy = false;
+    mobileBindBusyAction = "";
     $("toolboxRemoteStartBtn").disabled = false;
     $("toolboxRemoteStopBtn").disabled = false;
+    $("toolboxRemoteStopBtn").classList.remove("is-busy");
+    renderCodexToolbox();
   }
 });
 
@@ -3783,7 +4725,16 @@ $("mcpPresetSearch").addEventListener("keydown", (e) => {
 
 $("usageGuideBtn").addEventListener("click", openUsageGuide);
 $("updateBtn").addEventListener("click", handleUpdateButton);
-$("updatePillBtn").addEventListener("click", openUpdateReleasePage);
+const downloadSiteBtn = $("downloadSiteBtn");
+if (downloadSiteBtn) downloadSiteBtn.addEventListener("click", openUpdateReleasePage);
+$("updatePillBtn").addEventListener("click", async () => {
+  if (updateBusy) return;
+  if (updateInfo?.hasUpdate) {
+    await installAppUpdate();
+  } else {
+    await openUpdateReleasePage();
+  }
+});
 $("githubRepoBtn").addEventListener("click", openGitHubRepo);
 $("usageGuideCloseBtn").addEventListener("click", closeUsageGuide);
 $("usageGuideCloseIcon").addEventListener("click", closeUsageGuide);
@@ -3958,6 +4909,7 @@ async function refreshSettingsPanelData() {
   $("settingsSilentStart").checked = !!appSettings.silentStartup;
   $("settingsConfigDirValue").textContent = appPaths.configDir || "--";
   $("settingsClaudePathValue").textContent = appPaths.claudeSettings || "--";
+  $("settingsCodexPathValue").textContent = appPaths.codexSettings || "--";
   renderSettingsEditorPaths(getSettingsEditorPathInfos());
 }
 
@@ -4122,6 +5074,9 @@ $("settingsOpenConfigDir").addEventListener("click", () => {
 $("settingsOpenClaudeDir").addEventListener("click", () => {
   if (appPaths) invoke("open_folder", { path: appPaths.claudeSettings });
 });
+$("settingsOpenCodexDir").addEventListener("click", () => {
+  if (appPaths) invoke("open_folder", { path: appPaths.codexSettings });
+});
 $("settingsOpenLogsDir").addEventListener("click", () => {
   invoke("open_logs_folder").catch((error) => showToast(String(error), "error"));
 });
@@ -4202,6 +5157,7 @@ async function toggleBackupList() {
     loadProfiles(),
     loadCodexProfiles(),
     loadCodexStatus(),
+    loadCodexDiagnostics(),
     loadCodexToolbox(),
     loadAppSettings(),
   ]);

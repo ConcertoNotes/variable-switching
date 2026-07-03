@@ -78,5 +78,8 @@ hi-codex-src-test/
 
 # Project local files
 PLAN.md
+.build-version
+deploy-download-site.bat
 src-tauri/varswitch-profiles.json
+src-tauri/updater.key
 codex-plugins/

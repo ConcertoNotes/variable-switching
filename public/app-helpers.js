@@ -161,6 +161,42 @@
     return Boolean(binding.qrDataUrl);
   }
 
+  function getMobileBindingUiState(binding, now = Date.now()) {
+    const channel = binding && binding.channel ? binding.channel : "";
+    const hasCredential = Boolean(
+      binding &&
+        (binding.bound ||
+          binding.botToken ||
+          binding.appId ||
+          binding.appSecret ||
+          binding.accountId ||
+          binding.userId ||
+          binding.botOpenId)
+    );
+    const statusText = String(
+      (binding && (binding.status || binding.qrStatus || binding.credentialStatus)) || ""
+    ).trim();
+    const hasQr = Boolean(binding && (binding.qrDataUrl || binding.qrUrl));
+    const qrFresh = hasQr && isFreshMobileQr(binding, now);
+    const looksExpired = /过期|失效|expired|timeout|超时/i.test(statusText);
+    const looksBusy = /正在|生成|获取|等待扫码|connecting|loading|pending/i.test(statusText);
+    const looksOnline = /在线|已绑定|listening|running|connected|ready|saved/i.test(statusText);
+
+    if (binding && binding.lastError) {
+      return { kind: "error", hasCredential, showQr: false, busy: false };
+    }
+    if (hasCredential && (looksOnline || !hasQr || looksExpired || !qrFresh)) {
+      return { kind: "bound", hasCredential, showQr: false, busy: false };
+    }
+    if (hasQr && qrFresh && shouldRenderChannelQr(binding, now)) {
+      return { kind: "qr", hasCredential, showQr: true, busy: false };
+    }
+    if (looksBusy || (hasQr && !qrFresh)) {
+      return { kind: "binding", hasCredential, showQr: false, busy: true };
+    }
+    return { kind: hasCredential ? "bound" : "unbound", hasCredential, showQr: false, busy: false, channel };
+  }
+
   return {
     CODEX_PLUGIN_MARKETPLACE_URL,
     VARSWITCH_GITHUB_PLUGIN_MARKETPLACE_URL,
@@ -178,5 +214,6 @@
     isFreshMobileQr,
     isQqAuthorizationTarget,
     shouldRenderChannelQr,
+    getMobileBindingUiState,
   };
 });

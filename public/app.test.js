@@ -11,6 +11,7 @@ const {
   getCodexPluginMarketplaceOption,
   getCodexToolboxLayout,
   shouldRenderChannelQr,
+  getMobileBindingUiState,
   CODEX_PLUGIN_MARKETPLACE_URL,
   VARSWITCH_GITHUB_PLUGIN_MARKETPLACE_URL,
   AWESOME_CODEX_PLUGIN_MARKETPLACE_URL,
@@ -23,6 +24,25 @@ test("shouldAutoOpenUsageGuide defaults to showing the guide", () => {
   assert.equal(
     shouldAutoOpenUsageGuide({ neverShowUsageGuide: false }),
     true
+  );
+});
+
+test("getMobileBindingUiState prefers bound credentials over stale QR status", () => {
+  const now = 1_700_000_000_000;
+  assert.deepEqual(
+    getMobileBindingUiState(
+      {
+        channel: "wechat",
+        botToken: "token",
+        status: "微信 iLink 已在线，等待手机消息",
+        qrStatus: "微信二维码已失效，请重新生成",
+        qrDeviceCode: "device-code",
+        qrDataUrl: "data:image/png;base64,abc",
+        qrStartedAt: String(now - 11 * 60 * 1000),
+      },
+      now
+    ),
+    { kind: "bound", hasCredential: true, showQr: false, busy: false }
   );
 });
 
