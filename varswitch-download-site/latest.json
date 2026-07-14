@@ -1,0 +1,11 @@
+{
+    "version":  "2.3.10",
+    "notes":  "VarSwitch update 2.3.10",
+    "pub_date":  "2026-07-14T03:06:19Z",
+    "platforms":  {
+                      "windows-x86_64":  {
+                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTNGV3lNUVViNVFXemoweENhdFhuaWRNcE9UUFRIek1ybC9wRStnanA3bzJkRDFhd21vbHF2SDhIeFVUZE5jYlpmL3cvK216U0grWXZ0MHhybVNSNnVsbW1NVlZ6VmdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzOTk4MjczCWZpbGU6VmFyU3dpdGNoXzIuMy4xMF94NjQtc2V0dXAuZXhlCnU2WCtzWHV5M2gvbm9RbUw5bXNIZy9ZUHE4SFc1bUl4UGFIMVg5ZW9XWjcwTE9BdXduVTNxL01jaXVDZFhiVEU3RkIrNjhQd1ljdHNKOTY0aXEzZUFnPT0K",
+                                             "url":  "https://download.varswitch.strova.top/releases/VarSwitch_2.3.10_x64-setup.exe"
+                                         }
+                  }
+}

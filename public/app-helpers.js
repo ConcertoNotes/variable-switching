@@ -36,12 +36,43 @@
     return "default";
   }
 
+  function getSwitchOverlayState(kind) {
+    // Claude 切换有多步进度；Codex / Grok 为环境写入型，使用不确定进度条
+    const isClaude = kind === "claude";
+    return {
+      cancellable: isClaude,
+      indeterminate: !isClaude,
+      showSteps: isClaude,
+    };
+  }
+
   function validateEditorPathInput(value) {
     const normalized = typeof value === "string" ? value.trim() : "";
     if (!normalized) {
       return { valid: false, reason: "empty" };
     }
     return { valid: true, value: normalized };
+  }
+
+  function normalizeFetchedModels(models) {
+    if (!Array.isArray(models)) return [];
+    const seen = new Set();
+    return models
+      .map((item) => {
+        const id =
+          typeof item === "string"
+            ? item
+            : item && typeof item.id === "string"
+              ? item.id
+              : "";
+        return id.trim();
+      })
+      .filter((id) => {
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .sort((a, b) => a.localeCompare(b));
   }
 
   const CODEX_PLUGIN_MARKETPLACE_URL =
@@ -197,6 +228,67 @@
     return { kind: hasCredential ? "bound" : "unbound", hasCredential, showQr: false, busy: false, channel };
   }
 
+  function matchesPluginFilter(plugin, filter = "all", query = "") {
+    const text = String(plugin?.text || "").toLowerCase();
+    const normalizedQuery = String(query || "").trim().toLowerCase();
+    if (normalizedQuery && !text.includes(normalizedQuery)) return false;
+    if (filter === "enabled") return !!plugin?.enabled;
+    if (filter === "repair") return !!plugin?.needsRepair;
+    if (filter === "installed") return !!plugin?.installed;
+    return true;
+  }
+
+  function getCodexSessionMetrics(toolbox) {
+    const source = toolbox || {};
+    const sync = source.sessionSync || {};
+    const synced = source.syncedCodexThreads || source.syncedThreads || source.sessions || [];
+    const trashed = source.trashedCodexThreads || source.trashedThreads || [];
+    const syncedLength = Array.isArray(synced) ? synced.length : 0;
+    const trashCount = Array.isArray(trashed) ? trashed.length : 0;
+    const explicitCount = Number(sync.total ?? source.syncedCount);
+    const count = Number.isFinite(explicitCount) && (explicitCount > 0 || syncedLength === 0)
+      ? explicitCount
+      : syncedLength;
+    return {
+      count,
+      trashCount,
+      lastSyncedAt: sync.lastSyncedAt || source.lastSyncedAt || "",
+    };
+  }
+
+  function getGlobalConfigDisplay(page, state, language = "zh") {
+    const current = state || {};
+    const isZh = language === "zh";
+    const inactive = isZh ? "未启用" : "Inactive";
+    const entries = [
+      ["Claude", current.claude],
+      ["Codex", current.codex],
+      ["Grok", current.grok],
+    ].filter(([, name]) => Boolean(name));
+    const title = entries.length
+      ? entries.map(([type, name]) => `${type}: ${name}`).join(" · ")
+      : (isZh ? "尚未启用配置" : "No active configuration");
+
+    if (page === "claude") return { label: "Claude", name: current.claude || inactive, title };
+    if (["codex", "plugins", "sessions", "mobile"].includes(page)) {
+      return { label: "Codex", name: current.codex || inactive, title };
+    }
+    if (page === "grok") return { label: "Grok", name: current.grok || inactive, title };
+    if (page === "configurations") {
+      const total = Number(current.total) || 0;
+      return {
+        label: isZh ? "配置" : "Configs",
+        name: isZh ? `${total} 套配置` : `${total} configs`,
+        title,
+      };
+    }
+    return {
+      label: isZh ? "环境" : "Environments",
+      name: isZh ? `${entries.length} 个已启用` : `${entries.length} active`,
+      title,
+    };
+  }
+
   return {
     CODEX_PLUGIN_MARKETPLACE_URL,
     VARSWITCH_GITHUB_PLUGIN_MARKETPLACE_URL,
@@ -207,7 +299,9 @@
     getUpdateActionMode,
     formatVersionTag,
     getEditorPathMode,
+    getSwitchOverlayState,
     validateEditorPathInput,
+    normalizeFetchedModels,
     normalizeCodexPluginMarketplaceInput,
     getCodexPluginMarketplaceOption,
     getCodexToolboxLayout,
@@ -215,5 +309,8 @@
     isQqAuthorizationTarget,
     shouldRenderChannelQr,
     getMobileBindingUiState,
+    matchesPluginFilter,
+    getCodexSessionMetrics,
+    getGlobalConfigDisplay,
   };
 });

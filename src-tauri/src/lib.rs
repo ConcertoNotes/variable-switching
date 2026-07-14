@@ -36,6 +36,16 @@ const AUTH_TOKEN_ENV: &str = "ANTHROPIC_AUTH_TOKEN";
 const AUTH_KEY_ENV: &str = "ANTHROPIC_AUTH_KEY";
 const LEGACY_AUTH_ENV: &str = "ANTHROPIC_API_KEY";
 const BASE_URL_ENV: &str = "ANTHROPIC_BASE_URL";
+/// xAI / Grok 官方环境变量
+const XAI_API_KEY_ENV: &str = "XAI_API_KEY";
+const XAI_BASE_URL_ENV: &str = "XAI_BASE_URL";
+const XAI_MODEL_ENV: &str = "XAI_MODEL";
+/// 部分工具使用的兼容别名
+const GROK_API_KEY_ENV: &str = "GROK_API_KEY";
+const GROK_BASE_URL_ENV: &str = "GROK_BASE_URL";
+const DEFAULT_XAI_BASE_URL: &str = "https://api.x.ai/v1";
+/// VarSwitch 在 ~/.grok/config.toml 中管理的模型段 ID
+const GROK_MANAGED_MODEL_ID: &str = "varswitch";
 const SWITCH_TOTAL_STEPS: u32 = 6;
 const APP_DOWNLOAD_PAGE_URL: &str = "https://download.varswitch.strova.top/";
 const ENDPOINT_TEST_DEFAULT_TIMEOUT_SECS: u64 = 8;
@@ -101,6 +111,10 @@ struct CodexProfile {
     model: String,
     #[serde(default)]
     provider_name: String,
+    #[serde(default)]
+    image_api_key: String,
+    #[serde(default = "default_gpt_image_2_base_url_string")]
+    image_base_url: String,
     is_active: bool,
     created_at: String,
 }
@@ -108,6 +122,66 @@ struct CodexProfile {
 #[derive(Serialize, Deserialize, Default)]
 struct CodexProfilesData {
     profiles: Vec<CodexProfile>,
+}
+
+/// Grok / xAI API 配置档案（对应 ~/.grok/config.toml 的 [model.*]）
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GrokProfile {
+    id: String,
+    name: String,
+    api_key: String,
+    base_url: String,
+    #[serde(default)]
+    model: String,
+    /// chat_completions | responses | messages
+    #[serde(default = "default_grok_api_backend")]
+    api_backend: String,
+    is_active: bool,
+    created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct GrokProfilesData {
+    profiles: Vec<GrokProfile>,
+}
+
+fn default_grok_api_backend() -> String {
+    "chat_completions".to_string()
+}
+
+/// 返回给前端的 Grok 运行时状态（比 LocationStatus 更完整）
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GrokRuntimeStatus {
+    api_key: String,
+    base_url: String,
+    model: String,
+    default_model_id: String,
+    api_backend: String,
+    config_path: String,
+    config_exists: bool,
+    source: String, // "config.toml" | "env" | "none"
+}
+
+/// Grok 诊断信息
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GrokConfigDiagnostics {
+    config_path: String,
+    config_exists: bool,
+    has_default_model: bool,
+    has_api_key: bool,
+    has_base_url: bool,
+    default_model_id: String,
+    model: String,
+    base_url: String,
+    api_backend: String,
+    active_profile_name: String,
+    source: String,
+    issues: Vec<String>,
+    suggestions: Vec<String>,
+    last_checked_at: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -420,6 +494,14 @@ fn is_codex_official_account_api_quota(auth_mode: &str) -> bool {
     auth_mode == "official_account_api_quota"
 }
 
+fn default_gpt_image_2_base_url() -> &'static str {
+    "https://hk.getelucid.com/v1"
+}
+
+fn default_gpt_image_2_base_url_string() -> String {
+    default_gpt_image_2_base_url().to_string()
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SwitchResult {
@@ -444,6 +526,8 @@ struct SwitchDetails {
 struct LocationStatus {
     api_key: String,
     base_url: String,
+    image_api_key: String,
+    image_base_url: String,
 }
 
 #[derive(Serialize)]
@@ -547,6 +631,12 @@ struct EndpointLatency {
     latency: Option<u128>,
     status: Option<u16>,
     error: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct AvailableModel {
+    id: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -756,6 +846,363 @@ fn write_codex_profiles(app: &tauri::AppHandle, data: &CodexProfilesData) -> Res
     let path = codex_profiles_path(app);
     let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
+}
+
+fn grok_profiles_path(app: &tauri::AppHandle) -> PathBuf {
+    data_dir(app).join("grok_profiles.json")
+}
+
+fn read_grok_profiles(app: &tauri::AppHandle) -> GrokProfilesData {
+    let path = grok_profiles_path(app);
+    if !path.exists() {
+        return GrokProfilesData::default();
+    }
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_grok_profiles(app: &tauri::AppHandle, data: &GrokProfilesData) -> Result<(), String> {
+    let path = grok_profiles_path(app);
+    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+fn default_xai_base_url() -> String {
+    DEFAULT_XAI_BASE_URL.to_string()
+}
+
+fn grok_config_dir() -> PathBuf {
+    home_dir().join(".grok")
+}
+
+fn grok_config_path() -> PathBuf {
+    grok_config_dir().join("config.toml")
+}
+
+/// 删除 TOML 中指定 section（含表头与正文），保留其它内容。
+fn remove_toml_section(config: &str, section: &str) -> String {
+    let target = format!("[{section}]");
+    let mut out = String::new();
+    let mut skipping = false;
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if is_toml_section_header(trimmed) {
+            skipping = trimmed == target;
+            if skipping {
+                continue;
+            }
+        }
+        if skipping {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// 在指定 TOML 表内 upsert 字符串键；表不存在则追加。
+fn upsert_toml_table_string_key(config: &str, table: &str, key: &str, value: &str) -> String {
+    let target = format!("[{table}]");
+    let key_prefix = format!("{key} =");
+    let new_line = format!("{key} = \"{}\"", escape_toml_string_value(value));
+    let mut out = String::new();
+    let mut in_target = false;
+    let mut key_written = false;
+    let mut table_found = false;
+    let lines: Vec<&str> = config.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+        if is_toml_section_header(trimmed) {
+            if in_target && !key_written {
+                out.push_str(&new_line);
+                out.push('\n');
+                key_written = true;
+            }
+            in_target = trimmed == target;
+            if in_target {
+                table_found = true;
+            }
+            out.push_str(line);
+            out.push('\n');
+            i += 1;
+            continue;
+        }
+        if in_target && trimmed.starts_with(&key_prefix) {
+            if !key_written {
+                out.push_str(&new_line);
+                out.push('\n');
+                key_written = true;
+            }
+            i += 1;
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+        i += 1;
+    }
+    if in_target && !key_written {
+        out.push_str(&new_line);
+        out.push('\n');
+        key_written = true;
+    }
+    if !table_found {
+        if !out.ends_with('\n') && !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&target);
+        out.push('\n');
+        out.push_str(&new_line);
+        out.push('\n');
+        let _ = key_written;
+    }
+    out
+}
+
+/// 解析 ~/.grok/config.toml 中当前默认模型段的关键字段。
+fn read_grok_runtime_status() -> GrokRuntimeStatus {
+    let path = grok_config_path();
+    let config_exists = path.exists();
+    let config = fs::read_to_string(&path).unwrap_or_default();
+
+    let mut default_model_id = String::new();
+    let mut api_key = String::new();
+    let mut base_url = String::new();
+    let mut model = String::new();
+    let mut api_backend = String::new();
+    let mut source = "none".to_string();
+
+    if !config.trim().is_empty() {
+        default_model_id = toml_section_value(&config, "models", "default");
+        if default_model_id.is_empty() {
+            // 没有 default 时优先用托管段，否则取空
+            default_model_id = GROK_MANAGED_MODEL_ID.to_string();
+        }
+
+        let section = format!("model.{default_model_id}");
+        api_key = toml_section_value(&config, &section, "api_key");
+        base_url = toml_section_value(&config, &section, "base_url");
+        model = toml_section_value(&config, &section, "model");
+        api_backend = toml_section_value(&config, &section, "api_backend");
+
+        // 默认段没有 key 时，回退到托管段
+        if api_key.is_empty() {
+            let managed = format!("model.{GROK_MANAGED_MODEL_ID}");
+            let managed_key = toml_section_value(&config, &managed, "api_key");
+            if !managed_key.is_empty() {
+                api_key = managed_key;
+                if base_url.is_empty() {
+                    base_url = toml_section_value(&config, &managed, "base_url");
+                }
+                if model.is_empty() {
+                    model = toml_section_value(&config, &managed, "model");
+                }
+                if api_backend.is_empty() {
+                    api_backend = toml_section_value(&config, &managed, "api_backend");
+                }
+                default_model_id = GROK_MANAGED_MODEL_ID.to_string();
+            }
+        }
+
+        if !api_key.is_empty() || !base_url.is_empty() {
+            source = "config.toml".to_string();
+        }
+    }
+
+    if api_key.is_empty() {
+        if let Some(env_key) = reg_get_env_opt(XAI_API_KEY_ENV).or_else(|| reg_get_env_opt(GROK_API_KEY_ENV))
+        {
+            api_key = env_key;
+            if source == "none" {
+                source = "env".to_string();
+            }
+        }
+    }
+    if base_url.is_empty() {
+        base_url = reg_get_env_opt(XAI_BASE_URL_ENV)
+            .or_else(|| reg_get_env_opt(GROK_BASE_URL_ENV))
+            .unwrap_or_else(default_xai_base_url);
+    }
+    if model.is_empty() {
+        model = reg_get_env_opt(XAI_MODEL_ENV).unwrap_or_default();
+    }
+    if api_backend.is_empty() {
+        api_backend = default_grok_api_backend();
+    }
+
+    GrokRuntimeStatus {
+        api_key,
+        base_url,
+        model,
+        default_model_id,
+        api_backend,
+        config_path: path.to_string_lossy().to_string(),
+        config_exists,
+        source,
+    }
+}
+
+/// 兼容旧 LocationStatus 接口。
+fn read_grok_status() -> Option<LocationStatus> {
+    let status = read_grok_runtime_status();
+    if status.api_key.is_empty() && status.base_url.is_empty() {
+        return None;
+    }
+    Some(LocationStatus {
+        api_key: status.api_key,
+        base_url: status.base_url,
+        image_api_key: String::new(),
+        image_base_url: String::new(),
+    })
+}
+
+fn read_grok_current_model_id() -> String {
+    let status = read_grok_runtime_status();
+    if !status.model.is_empty() {
+        return status.model;
+    }
+    reg_get_env_opt(XAI_MODEL_ENV).unwrap_or_default()
+}
+
+fn normalize_grok_api_backend(value: &str) -> String {
+    match value.trim() {
+        "responses" => "responses".to_string(),
+        "messages" => "messages".to_string(),
+        _ => default_grok_api_backend(),
+    }
+}
+
+fn read_grok_config_diagnostics(app: &tauri::AppHandle) -> GrokConfigDiagnostics {
+    let runtime = read_grok_runtime_status();
+    let profiles = read_grok_profiles(app);
+    let active_name = profiles
+        .profiles
+        .iter()
+        .find(|p| p.is_active)
+        .map(|p| p.name.clone())
+        .unwrap_or_default();
+
+    let mut issues = Vec::new();
+    let mut suggestions = Vec::new();
+
+    if !runtime.config_exists {
+        issues.push("~/.grok/config.toml 不存在".into());
+        suggestions.push("点击切换任意 Grok 配置，将自动创建并写入 config.toml".into());
+    }
+    if runtime.api_key.is_empty() {
+        issues.push("未检测到 API Key".into());
+        suggestions.push("在 Grok 页添加配置并切换，或手动填写 [model.*].api_key".into());
+    }
+    if runtime.base_url.is_empty() {
+        issues.push("未检测到 Base URL".into());
+        suggestions.push("切换配置时会写入 base_url，默认 https://api.x.ai/v1".into());
+    }
+    if runtime.default_model_id.is_empty() {
+        issues.push("未设置 [models].default".into());
+        suggestions.push("切换配置会把 default 设为 varswitch 托管段".into());
+    }
+
+    GrokConfigDiagnostics {
+        config_path: runtime.config_path,
+        config_exists: runtime.config_exists,
+        has_default_model: !runtime.default_model_id.is_empty(),
+        has_api_key: !runtime.api_key.is_empty(),
+        has_base_url: !runtime.base_url.is_empty(),
+        default_model_id: runtime.default_model_id,
+        model: runtime.model,
+        base_url: runtime.base_url,
+        api_backend: runtime.api_backend,
+        active_profile_name: active_name,
+        source: runtime.source,
+        issues,
+        suggestions,
+        last_checked_at: chrono_now(),
+    }
+}
+
+/// 将 Grok 配置写入系统环境变量（XAI_* / GROK_*，作为兼容回退）。
+fn apply_grok_to_system_env(api_key: &str, base_url: &str, model: &str) -> Result<(), String> {
+    reg_set_env(XAI_API_KEY_ENV, api_key)?;
+    reg_set_env(XAI_BASE_URL_ENV, base_url)?;
+    reg_set_env(GROK_API_KEY_ENV, api_key)?;
+    reg_set_env(GROK_BASE_URL_ENV, base_url)?;
+    if model.trim().is_empty() {
+        if reg_get_env_opt(XAI_MODEL_ENV).is_some() {
+            reg_delete_env(XAI_MODEL_ENV)?;
+        }
+    } else {
+        reg_set_env(XAI_MODEL_ENV, model.trim())?;
+    }
+    Ok(())
+}
+
+/// 写入 ~/.grok/config.toml：设置默认模型为 varswitch，并更新托管模型段。
+/// 会保留用户其它 section（[ui]、其它 [model.*]、MCP 等）。
+fn write_grok_config(profile: &GrokProfile) -> Result<(), String> {
+    let dir = grok_config_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("创建 ~/.grok 目录失败: {e}"))?;
+
+    let path = grok_config_path();
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+
+    // 移除旧的托管段，再写回，避免残留字段
+    let mut content = remove_toml_section(&existing, &format!("model.{GROK_MANAGED_MODEL_ID}"));
+    content = upsert_toml_table_string_key(&content, "models", "default", GROK_MANAGED_MODEL_ID);
+
+    let model_id = if profile.model.trim().is_empty() {
+        "grok-4".to_string()
+    } else {
+        profile.model.trim().to_string()
+    };
+    let display_name = if profile.name.trim().is_empty() {
+        model_id.clone()
+    } else {
+        profile.name.trim().to_string()
+    };
+    let base_url = if profile.base_url.trim().is_empty() {
+        default_xai_base_url()
+    } else {
+        profile.base_url.trim().trim_end_matches('/').to_string()
+    };
+    let api_backend = normalize_grok_api_backend(&profile.api_backend);
+
+    let managed_section = format!(
+        r#"
+[model.{managed}]
+model = "{model}"
+base_url = "{base_url}"
+name = "{name}"
+api_key = "{api_key}"
+api_backend = "{api_backend}"
+"#,
+        managed = GROK_MANAGED_MODEL_ID,
+        model = escape_toml_string_value(&model_id),
+        base_url = escape_toml_string_value(&base_url),
+        name = escape_toml_string_value(&display_name),
+        api_key = escape_toml_string_value(profile.api_key.trim()),
+        api_backend = escape_toml_string_value(&api_backend),
+    );
+
+    if !content.ends_with('\n') && !content.is_empty() {
+        content.push('\n');
+    }
+    content.push_str(managed_section.trim_start());
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+
+    fs::write(&path, content).map_err(|e| format!("写入 ~/.grok/config.toml 失败: {e}"))?;
+    log_info!(
+        "[grok] 已写入 ~/.grok/config.toml model={} base_url={} api_backend={}",
+        model_id,
+        base_url,
+        api_backend
+    );
+    Ok(())
 }
 
 fn home_dir() -> PathBuf {
@@ -2135,6 +2582,7 @@ fn smart_control_backend_api_url() -> String {
     format!("{}/backend-api", default_smart_control_backend_url())
 }
 
+#[cfg(test)]
 fn codex_config_toml_content(
     provider: &str,
     model: &str,
@@ -2142,8 +2590,50 @@ fn codex_config_toml_content(
     api_key: &str,
     official_account_mode: bool,
 ) -> String {
+    codex_config_toml_content_with_image(
+        provider,
+        model,
+        base_url,
+        api_key,
+        official_account_mode,
+        "",
+        "",
+    )
+}
+
+fn gpt_image_2_config_toml_section(image_api_key: &str, image_base_url: &str) -> String {
+    let key = image_api_key.trim();
+    if key.is_empty() {
+        return String::new();
+    }
+    let base_url = if image_base_url.trim().is_empty() {
+        default_gpt_image_2_base_url().to_string()
+    } else {
+        image_base_url.trim().trim_end_matches('/').to_string()
+    };
+    format!(
+        r#"
+[gpt_image_2]
+api_key = "{api_key}"
+base_url = "{base_url}"
+model = "gpt-image-2"
+"#,
+        api_key = escape_toml_string_value(key),
+        base_url = escape_toml_string_value(&base_url),
+    )
+}
+
+fn codex_config_toml_content_with_image(
+    provider: &str,
+    model: &str,
+    base_url: &str,
+    api_key: &str,
+    official_account_mode: bool,
+    image_api_key: &str,
+    image_base_url: &str,
+) -> String {
     if official_account_mode {
-        format!(
+        let mut content = format!(
             r#"model_provider = "customer"
 model = "gpt-5.5"
 review_model = "gpt-5.5"
@@ -2162,9 +2652,14 @@ experimental_bearer_token = "{api_key}"
             base_url = base_url,
             api_key = api_key,
             chatgpt_base_url = smart_control_backend_api_url(),
-        )
+        );
+        content.push_str(&gpt_image_2_config_toml_section(
+            image_api_key,
+            image_base_url,
+        ));
+        content
     } else {
-        format!(
+        let mut content = format!(
             r#"model_provider = "{provider}"
 model = "{model}"
 chatgpt_base_url = "{chatgpt_base_url}"
@@ -2179,7 +2674,12 @@ requires_openai_auth = true
             model = model,
             base_url = base_url,
             chatgpt_base_url = smart_control_backend_api_url(),
-        )
+        );
+        content.push_str(&gpt_image_2_config_toml_section(
+            image_api_key,
+            image_base_url,
+        ));
+        content
     }
 }
 
@@ -2211,8 +2711,25 @@ fn write_codex_config_with_base_url(profile: &CodexProfile, base_url: &str) -> R
     } else {
         profile.model.clone()
     };
+    let image_base_url = if profile.image_base_url.trim().is_empty() {
+        default_gpt_image_2_base_url().to_string()
+    } else {
+        profile
+            .image_base_url
+            .trim()
+            .trim_end_matches('/')
+            .to_string()
+    };
     let toml_content = if official_account_mode {
-        codex_config_toml_content(&provider, &model, base_url, &profile.api_key, true)
+        codex_config_toml_content_with_image(
+            &provider,
+            &model,
+            base_url,
+            &profile.api_key,
+            true,
+            &profile.image_api_key,
+            &image_base_url,
+        )
     } else {
         let auth_path = codex_auth_path();
         let mut auth = if auth_path.exists() {
@@ -2235,7 +2752,15 @@ fn write_codex_config_with_base_url(profile: &CodexProfile, base_url: &str) -> R
         let auth_str = serde_json::to_string_pretty(&auth).map_err(|e| e.to_string())?;
         fs::write(&auth_path, auth_str).map_err(|e| format!("写入 codex auth.json 失败: {}", e))?;
 
-        codex_config_toml_content(&provider, &model, base_url, &profile.api_key, false)
+        codex_config_toml_content_with_image(
+            &provider,
+            &model,
+            base_url,
+            &profile.api_key,
+            false,
+            &profile.image_api_key,
+            &image_base_url,
+        )
     };
     let final_toml = merge_codex_config_with_preserved_sections(&toml_content, &existing_config);
     fs::write(codex_config_path(), final_toml)
@@ -2268,14 +2793,36 @@ fn read_codex_status() -> Option<LocationStatus> {
         auth_api_key
     };
 
-    let base_url = config_str
-        .lines()
-        .find(|l| l.trim().starts_with("base_url"))
-        .and_then(|l| l.split('=').nth(1))
-        .map(|v| v.trim().trim_matches('"').to_string())
-        .unwrap_or_default();
+    let provider_name = toml_line_value(&config_str, "model_provider");
+    let provider_base_url = if provider_name.trim().is_empty() {
+        String::new()
+    } else {
+        toml_section_value(
+            &config_str,
+            &format!("model_providers.{}", provider_name.trim()),
+            "base_url",
+        )
+    };
+    let base_url = if !provider_base_url.trim().is_empty() {
+        provider_base_url
+    } else {
+        config_str
+            .lines()
+            .find(|l| l.trim().starts_with("base_url"))
+            .and_then(|l| l.split('=').nth(1))
+            .map(|v| v.trim().trim_matches('"').to_string())
+            .unwrap_or_default()
+    };
 
-    Some(LocationStatus { api_key, base_url })
+    let image_api_key = toml_section_value(&config_str, "gpt_image_2", "api_key");
+    let image_base_url = toml_section_value(&config_str, "gpt_image_2", "base_url");
+
+    Some(LocationStatus {
+        api_key,
+        base_url,
+        image_api_key,
+        image_base_url,
+    })
 }
 
 fn read_toolbox_state(app: &tauri::AppHandle) -> ToolboxState {
@@ -2951,25 +3498,13 @@ fn list_codex_builtin_plugins(config_text: &str) -> CodexBuiltinPluginStatus {
     }
 }
 
-fn ensure_openai_bundled_marketplace_config(config_text: &str) -> Result<String, String> {
-    let root = find_openai_bundled_marketplace_root().ok_or_else(|| {
-        "未找到 Codex App 自带 openai-bundled 插件市场，请确认已安装 OpenAI Codex App 或已有本地 openai-bundled 缓存".to_string()
-    })?;
-    Ok(ensure_plugin_marketplace_section(
-        config_text,
-        OPENAI_BUNDLED_MARKETPLACE_NAME,
-        &root.to_string_lossy(),
-        "local",
-    ))
-}
-
 fn ensure_discovered_plugin_marketplaces_config(config_text: &str) -> Result<String, String> {
     let marketplaces = discover_codex_plugin_marketplaces();
-    if marketplaces.is_empty() {
-        return Err("未找到可启用的 Codex 本地插件来源".into());
-    }
-    let mut next = config_text.to_string();
+    let mut next = remove_invalid_local_plugin_marketplace_sections(config_text);
     for (marketplace, root) in marketplaces {
+        if !plugin_marketplace_root_has_supported_manifest(&root) {
+            continue;
+        }
         next = ensure_plugin_marketplace_section(
             &next,
             &marketplace,
@@ -3454,6 +3989,34 @@ fn parse_toml_string_value(raw: &str) -> String {
     trimmed.to_string()
 }
 
+fn escape_toml_string_value(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn toml_section_value(config: &str, section: &str, key: &str) -> String {
+    let target_header = format!("[{section}]");
+    let prefix = format!("{key} =");
+    let mut in_target = false;
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if is_toml_section_header(trimmed) {
+            in_target = trimmed == target_header;
+            continue;
+        }
+        if in_target && trimmed.starts_with(&prefix) {
+            return trimmed
+                .split_once('=')
+                .map(|(_, value)| parse_toml_string_value(value))
+                .unwrap_or_default();
+        }
+    }
+    String::new()
+}
+
+fn is_managed_gpt_image_2_section(header: &str) -> bool {
+    matches!(header.trim(), "[gpt_image_2]")
+}
+
 fn list_plugin_marketplaces(config_text: &str, current_source: &str) -> Vec<PluginMarketplaceItem> {
     let mut result = Vec::new();
     let lines: Vec<&str> = config_text.lines().collect();
@@ -3549,7 +4112,8 @@ fn split_codex_config_root_and_sections(config_text: &str) -> (String, String) {
             index += 1;
             continue;
         }
-        let skip_managed_provider = header.starts_with("[model_providers.");
+        let skip_managed_provider =
+            header.starts_with("[model_providers.") || is_managed_gpt_image_2_section(header);
         let mut block = vec![lines[index].to_string()];
         index += 1;
         while index < lines.len() {
@@ -3682,6 +4246,77 @@ fn remove_all_plugin_marketplace_sections(existing: &str) -> String {
     compact.join("\n").trim().to_string()
 }
 
+fn plugin_marketplace_root_has_supported_manifest(path: &Path) -> bool {
+    [
+        path.join(".codex-plugin").join("marketplace.json"),
+        path.join(".agents")
+            .join("plugins")
+            .join("marketplace.json"),
+        path.join("marketplace.json"),
+    ]
+    .into_iter()
+    .any(|candidate| candidate.is_file())
+}
+
+fn marketplace_config_value(line: &str, key: &str) -> Option<String> {
+    let (left, right) = line.split_once('=')?;
+    if left.trim() != key {
+        return None;
+    }
+    let raw = right.trim();
+    if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
+        return Some(
+            raw[1..raw.len() - 1]
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\"),
+        );
+    }
+    Some(raw.trim_matches('\'').to_string())
+}
+
+fn remove_invalid_local_plugin_marketplace_sections(existing: &str) -> String {
+    let lines = existing.lines().collect::<Vec<_>>();
+    let mut output = Vec::new();
+    let mut index = 0;
+
+    while index < lines.len() {
+        let trimmed = lines[index].trim();
+        if !(trimmed.starts_with("[marketplaces.") && trimmed.ends_with(']')) {
+            output.push(lines[index].to_string());
+            index += 1;
+            continue;
+        }
+
+        let section_start = index;
+        index += 1;
+        while index < lines.len() {
+            let next = lines[index].trim();
+            if next.starts_with('[') && next.ends_with(']') {
+                break;
+            }
+            index += 1;
+        }
+        let section = &lines[section_start..index];
+        let source_type = section
+            .iter()
+            .find_map(|line| marketplace_config_value(line, "source_type"))
+            .unwrap_or_default();
+        let source = section
+            .iter()
+            .find_map(|line| marketplace_config_value(line, "source"))
+            .unwrap_or_default();
+        let invalid_local = source_type.eq_ignore_ascii_case("local")
+            && !source.is_empty()
+            && !plugin_marketplace_root_has_supported_manifest(Path::new(&source));
+
+        if !invalid_local {
+            output.extend(section.iter().map(|line| (*line).to_string()));
+        }
+    }
+
+    output.join("\n").trim().to_string()
+}
+
 fn plugin_marketplace_source_type(source: &str) -> &'static str {
     let lowered = source.to_ascii_lowercase();
     if lowered.starts_with("http://")
@@ -3770,41 +4405,6 @@ fn run_codex_plugin_marketplace_remove(name: &str) -> Result<(), String> {
     ))
 }
 
-fn run_codex_plugin_marketplace_upgrade(name: &str) -> Result<(), String> {
-    let executable = resolve_codex_command()?;
-    let mut command = codex_command(&executable);
-    command
-        .args(["plugin", "marketplace", "upgrade", name, "--json"])
-        .env("CODEX_HOME", codex_config_dir())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let output = command.output().map_err(|e| {
-        format!(
-            "启动 Codex CLI 刷新插件市场失败({}): {e}",
-            executable.display()
-        )
-    })?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let detail = [stdout, stderr]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    Err(format!(
-        "Codex CLI 刷新插件市场失败(exit {})：{}",
-        output.status.code().unwrap_or(-1),
-        if detail.is_empty() {
-            "无错误输出".to_string()
-        } else {
-            detail
-        }
-    ))
-}
-
 fn configure_git_longpaths_for_windows() {
     if !cfg!(windows) {
         return;
@@ -3834,14 +4434,18 @@ fn clean_plugin_marketplace_cache(name: &str) {
 }
 
 fn plugin_marketplace_snapshot_exists(name: &str) -> bool {
-    codex_config_dir()
-        .join(".tmp")
-        .join("marketplaces")
-        .join(name)
-        .join(".agents")
-        .join("plugins")
-        .join("marketplace.json")
-        .is_file()
+    let config_dir = codex_config_dir();
+    cached_marketplace_has_plugins(&config_dir.join("plugins").join("cache").join(name))
+        || plugin_marketplace_root_has_supported_manifest(
+            &config_dir
+                .join("plugins")
+                .join(".tmp")
+                .join("marketplaces")
+                .join(name),
+        )
+        || plugin_marketplace_root_has_supported_manifest(
+            &config_dir.join(".tmp").join("marketplaces").join(name),
+        )
 }
 
 fn is_marketplace_different_source_error(error: &str) -> bool {
@@ -7995,6 +8599,45 @@ fn measure_endpoint_latency(
     }
 }
 
+fn models_endpoint_candidates(base_url: &str) -> Result<Vec<String>, String> {
+    let normalized = normalize_endpoint_url(base_url)?;
+    if normalized.ends_with("/models") {
+        return Ok(vec![normalized]);
+    }
+    if normalized.ends_with("/v1") {
+        return Ok(vec![format!("{normalized}/models")]);
+    }
+    Ok(vec![
+        format!("{normalized}/v1/models"),
+        format!("{normalized}/models"),
+    ])
+}
+
+fn extract_model_ids(value: &serde_json::Value) -> Vec<String> {
+    let data = value
+        .get("data")
+        .and_then(|data| data.as_array())
+        .or_else(|| value.get("models").and_then(|models| models.as_array()));
+
+    let mut ids = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(items) = data {
+        for item in items {
+            let id = item
+                .as_str()
+                .or_else(|| item.get("id").and_then(|id| id.as_str()))
+                .or_else(|| item.get("name").and_then(|name| name.as_str()))
+                .unwrap_or("")
+                .trim();
+            if !id.is_empty() && seen.insert(id.to_string()) {
+                ids.push(id.to_string());
+            }
+        }
+    }
+    ids.sort();
+    ids
+}
+
 // ── Tauri Commands ──────────────────────────────────
 
 #[tauri::command]
@@ -8046,6 +8689,71 @@ fn test_api_endpoints(
     }
 
     Ok(results.into_iter().flatten().collect())
+}
+
+#[tauri::command]
+fn fetch_available_models(
+    base_url: String,
+    api_key: String,
+    timeout_secs: Option<u64>,
+) -> Result<Vec<AvailableModel>, String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err("API Key 不能为空".into());
+    }
+
+    let timeout = Duration::from_secs(sanitize_endpoint_timeout(timeout_secs));
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("VarSwitch model fetch")
+        .timeout(timeout)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut last_error = String::new();
+    for url in models_endpoint_candidates(&base_url)? {
+        match client
+            .get(&url)
+            .bearer_auth(api_key)
+            .header("Accept", "application/json")
+            .timeout(timeout)
+            .send()
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                let body = resp.text().map_err(|e| e.to_string())?;
+                if !status.is_success() {
+                    last_error = format!("{url} 返回 HTTP {}", status.as_u16());
+                    continue;
+                }
+                let value: serde_json::Value = serde_json::from_str(&body)
+                    .map_err(|e| format!("模型列表 JSON 解析失败: {e}"))?;
+                let models: Vec<AvailableModel> = extract_model_ids(&value)
+                    .into_iter()
+                    .map(|id| AvailableModel { id })
+                    .collect();
+                if models.is_empty() {
+                    last_error = format!("{url} 没有返回可识别的模型 ID");
+                    continue;
+                }
+                return Ok(models);
+            }
+            Err(e) => {
+                last_error = if e.is_timeout() {
+                    format!("{url} 请求超时")
+                } else if e.is_connect() {
+                    format!("{url} 连接失败")
+                } else {
+                    format!("{url} 请求失败: {e}")
+                };
+            }
+        }
+    }
+
+    Err(if last_error.is_empty() {
+        "未能获取模型列表".into()
+    } else {
+        last_error
+    })
 }
 
 #[tauri::command]
@@ -8167,14 +8875,14 @@ fn cancel_switch(state: State<'_, AppState>) {
 }
 
 // ── 配置自动备份 ─────────────────────────────────────
-// 切换配置前自动快照 profiles.json / codex_profiles.json，误操作可回滚。
+// 切换配置前自动快照 profiles.json / codex_profiles.json / grok_profiles.json，误操作可回滚。
 
 /// 返回给前端的备份信息。
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConfigBackupInfo {
     name: String,  // 备份文件名
-    kind: String,  // "claude" | "codex"
+    kind: String,  // "claude" | "codex" | "grok"
     stamp: String, // 紧凑时间戳，如 20260624-143025（前端格式化展示）
 }
 
@@ -8258,34 +8966,6 @@ fn backup_codex_runtime_files(app: &tauri::AppHandle) -> CodexConfigBackupResult
     }
 }
 
-fn backup_codex_session_inventory(app: &tauri::AppHandle, stamp: &str) -> Option<String> {
-    let dir = backups_dir(app).join("codex-sessions");
-    if fs::create_dir_all(&dir).is_err() {
-        return None;
-    }
-    let inventory_path = dir.join(format!("session-inventory-{stamp}.json"));
-    let payload = serde_json::json!({
-        "createdAt": chrono_now(),
-        "codexHome": codex_config_dir().to_string_lossy().to_string(),
-        "sessionIndexPath": codex_session_index_path().to_string_lossy().to_string(),
-        "sessionsRoot": codex_sessions_root().to_string_lossy().to_string(),
-        "threads": read_codex_threads(5000),
-    });
-    if let Ok(text) = serde_json::to_string_pretty(&payload) {
-        if fs::write(&inventory_path, text).is_ok() {
-            let _ = backup_one_file_with_ext(
-                &dir,
-                &codex_session_index_path(),
-                "session-index",
-                stamp,
-                "jsonl",
-            );
-            return Some(inventory_path.to_string_lossy().to_string());
-        }
-    }
-    None
-}
-
 /// 清理同类备份，只保留最近 keep 个（文件名时间戳字典序==时间序）。
 fn prune_backups(dir: &PathBuf, prefix: &str, keep: usize) {
     let mut files: Vec<PathBuf> = fs::read_dir(dir)
@@ -8296,7 +8976,7 @@ fn prune_backups(dir: &PathBuf, prefix: &str, keep: usize) {
         .filter(|path| {
             path.file_name()
                 .and_then(|n| n.to_str())
-                .map(|n| n.starts_with(&format!("{prefix}-")) && n.ends_with(".json"))
+                .map(|n| n.starts_with(&format!("{prefix}-")))
                 .unwrap_or(false)
         })
         .collect();
@@ -8316,16 +8996,30 @@ fn auto_backup_configs(app: &tauri::AppHandle) {
     let stamp = format_compact_time(chrono_timestamp_millis());
     backup_one_config(&dir, &profiles_path(app), "profiles", &stamp);
     backup_one_config(&dir, &codex_profiles_path(app), "codex", &stamp);
+    backup_one_config(&dir, &grok_profiles_path(app), "grok", &stamp);
     let runtime_backup = backup_codex_runtime_files(app);
-    let session_inventory = backup_codex_session_inventory(app, &stamp);
+    // 同时备份 Grok CLI 运行时配置 ~/.grok/config.toml
+    let grok_runtime_dir = dir.join("grok-runtime");
+    let _ = fs::create_dir_all(&grok_runtime_dir);
+    let grok_config_backup = backup_one_file_with_ext(
+        &grok_runtime_dir,
+        &grok_config_path(),
+        "config",
+        &stamp,
+        "toml",
+    );
     prune_backups(&dir, "profiles", 20);
     prune_backups(&dir, "codex", 20);
-    prune_backups(&dir.join("codex-sessions"), "session-inventory", 30);
+    prune_backups(&dir, "grok", 20);
+    let runtime_dir = dir.join("codex-runtime");
+    prune_backups(&runtime_dir, "config", 20);
+    prune_backups(&runtime_dir, "auth", 20);
+    prune_backups(&grok_runtime_dir, "config", 20);
     log_info!(
-        "[backup] 已自动备份配置 stamp={stamp} codex_config={:?} codex_auth={:?} codex_sessions={:?}",
+        "[backup] 已自动备份配置 stamp={stamp} codex_config={:?} codex_auth={:?} grok_config={:?}",
         runtime_backup.config_backup,
         runtime_backup.auth_backup,
-        session_inventory
+        grok_config_backup
     );
 }
 
@@ -8379,6 +9073,8 @@ fn read_codex_config_diagnostics(app: &tauri::AppHandle) -> CodexConfigDiagnosti
     let status = read_codex_status().unwrap_or(LocationStatus {
         api_key: String::new(),
         base_url: String::new(),
+        image_api_key: String::new(),
+        image_base_url: String::new(),
     });
     let model_provider = toml_line_value(&config, "model_provider");
     let model = toml_line_value(&config, "model");
@@ -8492,6 +9188,8 @@ fn list_config_backups(app: tauri::AppHandle) -> Vec<ConfigBackupInfo> {
             ("claude", rest.trim_end_matches(".json"))
         } else if let Some(rest) = fname.strip_prefix("codex-") {
             ("codex", rest.trim_end_matches(".json"))
+        } else if let Some(rest) = fname.strip_prefix("grok-") {
+            ("grok", rest.trim_end_matches(".json"))
         } else {
             continue;
         };
@@ -8520,6 +9218,8 @@ fn restore_config_backup(app: tauri::AppHandle, name: String) -> Result<(), Stri
         profiles_path(&app)
     } else if name.starts_with("codex-") {
         codex_profiles_path(&app)
+    } else if name.starts_with("grok-") {
+        grok_profiles_path(&app)
     } else {
         return Err("无法识别的备份类型".into());
     };
@@ -8554,9 +9254,6 @@ fn switch_profile(
 
     state.cancel_flag.store(false, Ordering::SeqCst);
 
-    // 切换前自动备份当前配置，误操作可在设置里回滚
-    auto_backup_configs(&app);
-
     let mut errors: Vec<String> = Vec::new();
     let mut details = SwitchDetails {
         env_vars: false,
@@ -8565,6 +9262,9 @@ fn switch_profile(
     };
 
     emit_switch_progress(&app, 1, "prepare");
+
+    // 切换前只备份配置文件；会话同步不属于切换热路径。
+    auto_backup_configs(&app);
 
     if state.cancel_flag.load(Ordering::SeqCst) {
         return Ok(SwitchResult {
@@ -8705,6 +9405,8 @@ fn get_status(app: tauri::AppHandle) -> StatusResult {
     let env_vars = Some(LocationStatus {
         api_key: read_auth_from_system_env(),
         base_url: reg_get_env(BASE_URL_ENV),
+        image_api_key: String::new(),
+        image_base_url: String::new(),
     });
 
     // 动态检测已安装的编辑器并读取状态
@@ -8716,6 +9418,8 @@ fn get_status(app: tauri::AppHandle) -> StatusResult {
             Some(LocationStatus {
                 api_key: read_auth_from_env_array(arr),
                 base_url: get_env_array_value(arr, BASE_URL_ENV).unwrap_or_default(),
+                image_api_key: String::new(),
+                image_base_url: String::new(),
             })
         })() {
             editors.insert(editor.id.to_string(), status);
@@ -8732,6 +9436,8 @@ fn get_status(app: tauri::AppHandle) -> StatusResult {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
+            image_api_key: String::new(),
+            image_base_url: String::new(),
         })
     })();
 
@@ -8855,6 +9561,8 @@ fn add_codex_profile(
     auth_mode: Option<String>,
     model: Option<String>,
     provider_name: Option<String>,
+    image_api_key: Option<String>,
+    image_base_url: Option<String>,
 ) -> Result<CodexProfile, String> {
     if name.is_empty() || api_key.is_empty() || base_url.is_empty() {
         return Err("所有字段都必须填写".into());
@@ -8868,6 +9576,12 @@ fn add_codex_profile(
         auth_mode: auth_mode.unwrap_or_else(default_codex_auth_mode),
         model: model.unwrap_or_default().trim().to_string(),
         provider_name: provider_name.unwrap_or_default().trim().to_string(),
+        image_api_key: image_api_key.unwrap_or_default().trim().to_string(),
+        image_base_url: image_base_url
+            .unwrap_or_else(default_gpt_image_2_base_url_string)
+            .trim()
+            .trim_end_matches('/')
+            .to_string(),
         is_active: false,
         created_at: chrono_now(),
     };
@@ -8886,6 +9600,8 @@ fn update_codex_profile(
     auth_mode: Option<String>,
     model: Option<String>,
     provider_name: Option<String>,
+    image_api_key: Option<String>,
+    image_base_url: Option<String>,
 ) -> Result<CodexProfile, String> {
     let mut data = read_codex_profiles(&app);
     let p = data
@@ -8909,6 +9625,12 @@ fn update_codex_profile(
     }
     p.model = model.unwrap_or_default().trim().to_string();
     p.provider_name = provider_name.unwrap_or_default().trim().to_string();
+    p.image_api_key = image_api_key.unwrap_or_default().trim().to_string();
+    p.image_base_url = image_base_url
+        .unwrap_or_else(default_gpt_image_2_base_url_string)
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
     let updated = p.clone();
     write_codex_profiles(&app, &data)?;
     Ok(updated)
@@ -8980,6 +9702,12 @@ fn import_codex_current(app: tauri::AppHandle, name: String) -> Result<CodexProf
         auth_mode,
         model: String::new(),
         provider_name: String::new(),
+        image_api_key: status.image_api_key,
+        image_base_url: if status.image_base_url.trim().is_empty() {
+            default_gpt_image_2_base_url_string()
+        } else {
+            status.image_base_url
+        },
         is_active: true,
         created_at: chrono_now(),
     };
@@ -8995,6 +9723,196 @@ fn import_codex_current(app: tauri::AppHandle, name: String) -> Result<CodexProf
 #[tauri::command]
 fn get_codex_status() -> Option<LocationStatus> {
     read_codex_status()
+}
+
+// ── Grok Profile Commands ───────────────────────────
+
+#[tauri::command]
+fn get_grok_profiles(app: tauri::AppHandle) -> GrokProfilesData {
+    read_grok_profiles(&app)
+}
+
+#[tauri::command]
+fn add_grok_profile(
+    app: tauri::AppHandle,
+    name: String,
+    api_key: String,
+    base_url: String,
+    model: Option<String>,
+    api_backend: Option<String>,
+) -> Result<GrokProfile, String> {
+    if name.is_empty() || api_key.is_empty() {
+        return Err("配置名称和 API Key 都必须填写".into());
+    }
+    let mut data = read_grok_profiles(&app);
+    let resolved_base = {
+        let trimmed = base_url.trim().trim_end_matches('/');
+        if trimmed.is_empty() {
+            default_xai_base_url()
+        } else {
+            trimmed.to_string()
+        }
+    };
+    let profile = GrokProfile {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: name.trim().to_string(),
+        api_key: api_key.trim().to_string(),
+        base_url: resolved_base,
+        model: model.unwrap_or_default().trim().to_string(),
+        api_backend: normalize_grok_api_backend(&api_backend.unwrap_or_default()),
+        is_active: false,
+        created_at: chrono_now(),
+    };
+    data.profiles.push(profile.clone());
+    write_grok_profiles(&app, &data)?;
+    Ok(profile)
+}
+
+#[tauri::command]
+fn update_grok_profile(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+    api_key: String,
+    base_url: String,
+    model: Option<String>,
+    api_backend: Option<String>,
+) -> Result<GrokProfile, String> {
+    let mut data = read_grok_profiles(&app);
+    let p = data
+        .profiles
+        .iter_mut()
+        .find(|x| x.id == id)
+        .ok_or("配置未找到")?;
+    if !name.is_empty() {
+        p.name = name.trim().to_string();
+    }
+    if !api_key.is_empty() {
+        p.api_key = api_key.trim().to_string();
+    }
+    if !base_url.trim().is_empty() {
+        p.base_url = base_url.trim().trim_end_matches('/').to_string();
+    }
+    p.model = model.unwrap_or_default().trim().to_string();
+    if let Some(backend) = api_backend {
+        p.api_backend = normalize_grok_api_backend(&backend);
+    }
+    let updated = p.clone();
+    write_grok_profiles(&app, &data)?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn delete_grok_profile(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let mut data = read_grok_profiles(&app);
+    data.profiles.retain(|x| x.id != id);
+    write_grok_profiles(&app, &data)
+}
+
+#[tauri::command]
+fn switch_grok_profile(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let mut data = read_grok_profiles(&app);
+    let profile = data
+        .profiles
+        .iter()
+        .find(|x| x.id == id)
+        .ok_or("配置未找到")?
+        .clone();
+
+    // 切换前自动备份当前配置（含 ~/.grok/config.toml）
+    auto_backup_configs(&app);
+
+    // 主路径：写入 ~/.grok/config.toml（Grok CLI 实际读取位置）
+    write_grok_config(&profile)?;
+    // 兼容路径：同步系统环境变量，供其它依赖 XAI_* 的工具使用
+    apply_grok_to_system_env(&profile.api_key, &profile.base_url, &profile.model)?;
+    broadcast_env_change();
+
+    for p in data.profiles.iter_mut() {
+        p.is_active = p.id == profile.id;
+    }
+    write_grok_profiles(&app, &data)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn import_grok_current(app: tauri::AppHandle, name: String) -> Result<GrokProfile, String> {
+    let status = read_grok_status().ok_or("未检测到当前 Grok 配置（~/.grok/config.toml 或环境变量）")?;
+    if status.api_key.is_empty() {
+        return Err("未检测到 API Key（请检查 ~/.grok/config.toml 或 XAI_API_KEY）".into());
+    }
+
+    let mut data = read_grok_profiles(&app);
+    if data
+        .profiles
+        .iter()
+        .any(|x| x.api_key == status.api_key && x.base_url == status.base_url)
+    {
+        return Err("该配置已存在".into());
+    }
+
+    let runtime = read_grok_runtime_status();
+    let profile = GrokProfile {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: if name.is_empty() {
+            "导入的 Grok 配置".into()
+        } else {
+            name
+        },
+        api_key: status.api_key,
+        base_url: if status.base_url.trim().is_empty() {
+            default_xai_base_url()
+        } else {
+            status.base_url
+        },
+        model: if runtime.model.is_empty() {
+            read_grok_current_model_id()
+        } else {
+            runtime.model
+        },
+        api_backend: normalize_grok_api_backend(&runtime.api_backend),
+        is_active: true,
+        created_at: chrono_now(),
+    };
+
+    for p in data.profiles.iter_mut() {
+        p.is_active = false;
+    }
+    data.profiles.push(profile.clone());
+    write_grok_profiles(&app, &data)?;
+    Ok(profile)
+}
+
+#[tauri::command]
+fn get_grok_status() -> Option<GrokRuntimeStatus> {
+    let status = read_grok_runtime_status();
+    if status.api_key.is_empty() && !status.config_exists {
+        return None;
+    }
+    Some(status)
+}
+
+#[tauri::command]
+fn get_grok_diagnostics(app: tauri::AppHandle) -> GrokConfigDiagnostics {
+    read_grok_config_diagnostics(&app)
+}
+
+#[tauri::command]
+fn backup_grok_runtime(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = backups_dir(&app).join("grok-runtime");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建备份目录失败: {e}"))?;
+    let stamp = format_compact_time(chrono_timestamp_millis());
+    match backup_one_file_with_ext(&dir, &grok_config_path(), "config", &stamp, "toml") {
+        Some(path) => Ok(path),
+        None => Err("没有可备份的 ~/.grok/config.toml".into()),
+    }
+}
+
+#[tauri::command]
+fn open_grok_config_folder() -> Result<(), String> {
+    let dir = grok_config_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("创建 ~/.grok 失败: {e}"))?;
+    open_folder(dir.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -9059,7 +9977,7 @@ fn repair_openai_bundled_plugins(app: tauri::AppHandle) -> Result<ToolboxSnapsho
     auto_backup_configs(&app);
     let config_path = codex_config_path();
     let existing = fs::read_to_string(&config_path).unwrap_or_default();
-    let next = ensure_openai_bundled_marketplace_config(&existing)?;
+    let next = remove_invalid_local_plugin_marketplace_sections(&existing);
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -9079,8 +9997,7 @@ fn enable_codex_builtin_plugin(
     auto_backup_configs(&app);
     let config_path = codex_config_path();
     let existing = fs::read_to_string(&config_path).unwrap_or_default();
-    let with_marketplaces = ensure_discovered_plugin_marketplaces_config(&existing)
-        .or_else(|_| ensure_openai_bundled_marketplace_config(&existing))?;
+    let with_marketplaces = ensure_discovered_plugin_marketplaces_config(&existing)?;
     let next = write_enabled_codex_plugin_config(&with_marketplaces, &normalized);
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -9096,8 +10013,7 @@ fn enable_important_codex_builtin_plugins(
     auto_backup_configs(&app);
     let config_path = codex_config_path();
     let existing = fs::read_to_string(&config_path).unwrap_or_default();
-    let mut next = ensure_discovered_plugin_marketplaces_config(&existing)
-        .or_else(|_| ensure_openai_bundled_marketplace_config(&existing))?;
+    let mut next = ensure_discovered_plugin_marketplaces_config(&existing)?;
     let status = list_codex_builtin_plugins(&next);
     if !status.available {
         return Err(status.last_error);
@@ -9175,20 +10091,6 @@ fn apply_plugin_marketplace_blocking(
 
     emit_plugin_marketplace_progress(&app, 3, "install");
     emit_plugin_marketplace_progress(&app, 4, "verify");
-    if !plugin_marketplace_snapshot_exists(default_plugin_marketplace_name()) {
-        if let Err(error) = run_codex_plugin_marketplace_upgrade(default_plugin_marketplace_name())
-        {
-            let lowered = error.to_ascii_lowercase();
-            if lowered.contains("filename too long") || lowered.contains("unable to checkout") {
-                configure_git_longpaths_for_windows();
-                clean_plugin_marketplace_cache(default_plugin_marketplace_name());
-                emit_plugin_marketplace_progress(&app, 5, "verify");
-                run_codex_plugin_marketplace_upgrade(default_plugin_marketplace_name())?;
-            } else {
-                return Err(error);
-            }
-        }
-    }
 
     let updated = fs::read_to_string(&config_path).unwrap_or_default();
     if !config_has_plugin_marketplace_source(&updated, trimmed) {
@@ -12587,6 +13489,30 @@ source_type = "local"
     }
 
     #[test]
+    fn invalid_local_plugin_marketplaces_are_removed_without_touching_git_sources() {
+        let config = r#"model = "gpt-5"
+
+[marketplaces.invalid-cache]
+source = "C:\\definitely-missing-varswitch-marketplace"
+source_type = "local"
+
+[marketplaces.community]
+source = "https://github.com/example/community-plugins.git"
+source_type = "git"
+
+[plugins]
+"browser@openai-bundled" = { enabled = true }
+"#;
+
+        let cleaned = remove_invalid_local_plugin_marketplace_sections(config);
+
+        assert!(!cleaned.contains("[marketplaces.invalid-cache]"));
+        assert!(cleaned.contains("[marketplaces.community]"));
+        assert!(cleaned.contains("https://github.com/example/community-plugins.git"));
+        assert!(cleaned.contains("browser@openai-bundled"));
+    }
+
+    #[test]
     fn normalize_toolbox_state_adds_mobile_channels() {
         let state = normalize_toolbox_state(ToolboxState::default());
 
@@ -12882,6 +13808,102 @@ source_type = "git"
         assert!(merged.contains("[marketplaces.varswitch-plugins]"));
         assert!(merged.contains("[plugins]"));
         assert!(!merged.contains("[model_providers.old]"));
+    }
+
+    #[test]
+    fn codex_config_writes_gpt_image_2_section_when_image_key_is_set() {
+        let generated = codex_config_toml_content_with_image(
+            "custom",
+            "gpt-5-codex",
+            "https://api.example.com/v1",
+            "sk-chat",
+            false,
+            "sk-image",
+            "",
+        );
+
+        assert!(generated.contains("[gpt_image_2]"));
+        assert!(generated.contains(r#"api_key = "sk-image""#));
+        assert!(generated.contains(r#"base_url = "https://hk.getelucid.com/v1""#));
+        assert!(generated.contains(r#"model = "gpt-image-2""#));
+    }
+
+    #[test]
+    fn codex_config_merge_replaces_existing_gpt_image_2_section() {
+        let existing = r#"
+model_provider = "old"
+
+[gpt_image_2]
+api_key = "old-image"
+base_url = "https://old.example.com/v1"
+
+[projects."H:/variable-switching"]
+trust_level = "trusted"
+"#;
+        let generated = codex_config_toml_content_with_image(
+            "custom",
+            "gpt-5-codex",
+            "https://api.example.com/v1",
+            "sk-chat",
+            false,
+            "sk-new-image",
+            "https://image.example.com/v1/",
+        );
+
+        let merged = merge_codex_config_with_preserved_sections(&generated, existing);
+
+        assert_eq!(merged.matches("[gpt_image_2]").count(), 1);
+        assert!(merged.contains(r#"api_key = "sk-new-image""#));
+        assert!(merged.contains(r#"base_url = "https://image.example.com/v1""#));
+        assert!(!merged.contains("old-image"));
+        assert!(merged.contains(r#"[projects."H:/variable-switching"]"#));
+    }
+
+    #[test]
+    fn toml_section_value_reads_gpt_image_2_api_from_config() {
+        let config = r#"
+model_provider = "custom"
+
+[model_providers.custom]
+base_url = "https://chat.example.com/v1"
+
+[gpt_image_2]
+api_key = "sk-image"
+base_url = "https://image.example.com/v1"
+model = "gpt-image-2"
+"#;
+
+        assert_eq!(
+            toml_section_value(config, "gpt_image_2", "api_key"),
+            "sk-image"
+        );
+        assert_eq!(
+            toml_section_value(config, "gpt_image_2", "base_url"),
+            "https://image.example.com/v1"
+        );
+    }
+
+    #[test]
+    fn toml_section_value_reads_provider_base_without_image_base_conflict() {
+        let config = r#"
+model_provider = "custom"
+
+[gpt_image_2]
+base_url = "https://image.example.com/v1"
+
+[model_providers.custom]
+base_url = "https://chat.example.com/v1"
+"#;
+
+        let provider_name = toml_line_value(config, "model_provider");
+        assert_eq!(
+            toml_section_value(
+                config,
+                &format!("model_providers.{provider_name}"),
+                "base_url"
+            ),
+            "https://chat.example.com/v1"
+        );
     }
 
     #[test]
@@ -13216,6 +14238,39 @@ source_type = "git"
     }
 
     #[test]
+    fn models_endpoint_candidates_support_v1_and_plain_base_urls() {
+        assert_eq!(
+            models_endpoint_candidates("https://api.example.com/v1").unwrap(),
+            vec!["https://api.example.com/v1/models"]
+        );
+        assert_eq!(
+            models_endpoint_candidates("https://api.example.com").unwrap(),
+            vec![
+                "https://api.example.com/v1/models",
+                "https://api.example.com/models"
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_model_ids_handles_openai_and_custom_shapes() {
+        let ids = extract_model_ids(&json!({
+            "data": [
+                {"id": "gpt-5.5"},
+                {"id": "gpt-5.5"},
+                {"name": "claude-opus-4.8"},
+                ""
+            ]
+        }));
+
+        assert_eq!(ids, vec!["claude-opus-4.8", "gpt-5.5"]);
+        assert_eq!(
+            extract_model_ids(&json!({"models": ["kimi-k2.7", {"id": "glm-5.1"}]})),
+            vec!["glm-5.1", "kimi-k2.7"]
+        );
+    }
+
+    #[test]
     fn known_editors_only_include_primary_supported_editors() {
         let editor_ids: Vec<&str> = KNOWN_EDITORS.iter().map(|editor| editor.id).collect();
         assert!(
@@ -13441,6 +14496,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_profiles,
             test_api_endpoints,
+            fetch_available_models,
             add_profile,
             update_profile,
             delete_profile,
@@ -13461,6 +14517,16 @@ pub fn run() {
             switch_codex_profile,
             import_codex_current,
             get_codex_status,
+            get_grok_profiles,
+            add_grok_profile,
+            update_grok_profile,
+            delete_grok_profile,
+            switch_grok_profile,
+            import_grok_current,
+            get_grok_status,
+            get_grok_diagnostics,
+            backup_grok_runtime,
+            open_grok_config_folder,
             get_codex_diagnostics,
             backup_codex_runtime,
             get_codex_toolbox,

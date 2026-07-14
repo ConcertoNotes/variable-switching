@@ -1,4 +1,28 @@
 const $ = (id) => document.getElementById(id);
+
+// 安全 DOM 写入，避免初始化因缺失节点中断
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value;
+}
+function setHtml(id, value) {
+  const el = $(id);
+  if (el) el.innerHTML = value;
+}
+function setPlaceholder(id, value) {
+  const el = $(id);
+  if (el) el.placeholder = value;
+}
+function setTitle(id, value) {
+  const el = $(id);
+  if (el) el.title = value;
+}
+function on(id, event, handler) {
+  const el = $(id);
+  if (el) el.addEventListener(event, handler);
+  return el;
+}
+
 const tauriApi = window.__TAURI__;
 const helpers = window.VarSwitchHelpers || {};
 
@@ -89,6 +113,21 @@ const CODEX_PRESETS = [
   },
 ];
 
+const GROK_PRESETS = [
+  {
+    id: "xai_official",
+    name: "xAI Official",
+    baseUrl: "https://api.x.ai/v1",
+    model: "grok-4",
+  },
+  {
+    id: "xai_fast",
+    name: "xAI Grok Fast",
+    baseUrl: "https://api.x.ai/v1",
+    model: "grok-3-mini",
+  },
+];
+
 const I18N = {
   en: {
     appTitle: "VarSwitch",
@@ -133,6 +172,10 @@ const I18N = {
     codexBaseUrlLabel: "Codex Base URL",
     codexModelLabel: "Codex Model",
     codexProviderLabel: "Codex Provider",
+    codexImageSectionTitle: "GPT Image 2",
+    codexImageSectionHint: "Optional image-only API. It is written to the same ~/.codex/config.toml used by Codex.",
+    codexImageApiKeyLabel: "Image API Key",
+    codexImageBaseUrlLabel: "Image Base URL",
     codexAuthModeLabel: "Write Mode",
     codexAuthModeDefaultTitle: "Default write",
     codexAuthModeDefaultHint: "~/.codex/auth.json + ~/.codex/config.toml",
@@ -141,6 +184,7 @@ const I18N = {
     codexOfficialConfigLabel: "Official account API quota config",
     copy: "Copy",
     codexActiveConfigLabel: "Active Codex Config",
+    codexSwitching: "Writing Codex configuration...",
     codexSwitchedTo: "Codex switched to {name}",
     codexImportPrompt: "Name for the imported Codex config:",
     codexImportDefaultName: "Current Codex Config",
@@ -151,6 +195,37 @@ const I18N = {
     codexNoConfigsTitle: "No Codex configs yet",
     codexNoConfigsDesc: "Create a config to sync Codex CLI settings in one click.",
     codexAddFirstConfig: "Add your first Codex config",
+    grokPageTab: "Grok / xAI",
+    grokStatusTitle: "Grok Status",
+    grokProfilesTitle: "Grok Config List",
+    grokAddConfig: "Add Grok Config",
+    grokEditConfig: "Edit Grok Config",
+    grokNameLabel: "Config Name",
+    grokPresetLabel: "Preset",
+    grokPresetCustom: "Custom",
+    grokPresetHintDefault: "Choose a preset to fill common xAI / Grok settings.",
+    grokApiKeyLabel: "XAI API Key",
+    grokBaseUrlLabel: "XAI Base URL",
+    grokModelLabel: "Model",
+    grokModelHint: "Optional. Written to [model.varswitch].model and XAI_MODEL.",
+    grokApiBackendLabel: "API Backend",
+    grokApiBackendHint: "Maps to api_backend in ~/.grok/config.toml.",
+    grokOpenFolder: "Open .grok folder",
+    grokBackupRuntime: "Backup config.toml",
+    grokImportCurrent: "Import current",
+    grokStatusHint: "Switching writes ~/.grok/config.toml (default model + API), and also syncs XAI_API_KEY / XAI_BASE_URL. Restart Grok CLI to apply.",
+    grokActiveConfigLabel: "Active Grok Config",
+    grokSwitching: "Writing ~/.grok/config.toml...",
+    grokSwitchedTo: "Grok switched to {name}",
+    grokImportPrompt: "Name for the imported Grok config:",
+    grokImportDefaultName: "Current Grok Config",
+    grokToastImported: "Current Grok config imported",
+    grokToastAdded: "Grok config added",
+    grokToastUpdated: "Grok config updated",
+    grokToastDeleted: "Grok config deleted",
+    grokNoConfigsTitle: "No Grok configs yet",
+    grokNoConfigsDesc: "Create a config to switch ~/.grok/config.toml (and env vars) in one click.",
+    grokAddFirstConfig: "Add your first Grok config",
     codexToolbox: "Toolbox",
     codexToolboxTitle: "Codex Toolbox",
     toolboxTabMarket: "Plugin Market",
@@ -300,6 +375,11 @@ const I18N = {
     endpointFailed: "Failed",
     endpointNoResults: "No endpoint results",
     endpointSelected: "Endpoint selected",
+    modelFetch: "Fetch Models",
+    modelFetching: "Fetching...",
+    modelFetchMissing: "Enter Base URL and API Key first.",
+    modelFetchNoResults: "No models returned",
+    modelSelected: "Model selected",
     skillsManage: "Skills",
     skillsTitle: "Skills Management",
     addSkill: "+ Add Skill",
@@ -511,6 +591,10 @@ const I18N = {
     codexBaseUrlLabel: "Codex Base URL",
     codexModelLabel: "Codex 模型",
     codexProviderLabel: "Codex 供应商",
+    codexImageSectionTitle: "GPT Image 2",
+    codexImageSectionHint: "可选的图片专用 API，会写入 Codex 使用的同一份 ~/.codex/config.toml。",
+    codexImageApiKeyLabel: "图片 API Key",
+    codexImageBaseUrlLabel: "图片 Base URL",
     codexAuthModeLabel: "写入方式",
     codexAuthModeDefaultTitle: "默认写入",
     codexAuthModeDefaultHint: "~/.codex/auth.json + ~/.codex/config.toml",
@@ -519,6 +603,7 @@ const I18N = {
     codexOfficialConfigLabel: "官方账号登录，api额度消耗配置",
     copy: "复制",
     codexActiveConfigLabel: "当前 Codex 配置",
+    codexSwitching: "正在写入 Codex 配置...",
     codexSwitchedTo: "Codex 已切换到 {name}",
     codexImportPrompt: "请输入导入的 Codex 配置名称：",
     codexImportDefaultName: "当前 Codex 配置",
@@ -529,6 +614,37 @@ const I18N = {
     codexNoConfigsTitle: "暂无 Codex 配置",
     codexNoConfigsDesc: "创建一个配置，一键同步 Codex CLI 设置。",
     codexAddFirstConfig: "添加第一个 Codex 配置",
+    grokPageTab: "Grok / xAI",
+    grokStatusTitle: "Grok 状态",
+    grokProfilesTitle: "Grok 配置列表",
+    grokAddConfig: "添加 Grok 配置",
+    grokEditConfig: "编辑 Grok 配置",
+    grokNameLabel: "配置名称",
+    grokPresetLabel: "预设",
+    grokPresetCustom: "自定义",
+    grokPresetHintDefault: "选择预设可自动填充常用 xAI / Grok 配置。",
+    grokApiKeyLabel: "XAI API Key",
+    grokBaseUrlLabel: "XAI Base URL",
+    grokModelLabel: "模型",
+    grokModelHint: "可选。写入 [model.varswitch].model，并同步 XAI_MODEL。",
+    grokApiBackendLabel: "API Backend",
+    grokApiBackendHint: "对应 ~/.grok/config.toml 的 api_backend 字段。",
+    grokOpenFolder: "打开 .grok 目录",
+    grokBackupRuntime: "备份 config.toml",
+    grokImportCurrent: "导入当前配置",
+    grokStatusHint: "切换后会写入 ~/.grok/config.toml（默认模型与 API），并同步 XAI_API_KEY / XAI_BASE_URL。请重启 Grok CLI 使配置生效。",
+    grokActiveConfigLabel: "当前 Grok 配置",
+    grokSwitching: "正在写入 ~/.grok/config.toml...",
+    grokSwitchedTo: "Grok 已切换到 {name}",
+    grokImportPrompt: "请输入导入的 Grok 配置名称：",
+    grokImportDefaultName: "当前 Grok 配置",
+    grokToastImported: "当前 Grok 配置已导入",
+    grokToastAdded: "Grok 配置已添加",
+    grokToastUpdated: "Grok 配置已更新",
+    grokToastDeleted: "Grok 配置已删除",
+    grokNoConfigsTitle: "暂无 Grok 配置",
+    grokNoConfigsDesc: "创建一个配置，一键切换 ~/.grok/config.toml（并同步环境变量）。",
+    grokAddFirstConfig: "添加第一个 Grok 配置",
     codexToolbox: "工具箱",
     codexToolboxTitle: "Codex 工具箱",
     toolboxTabMarket: "插件市场",
@@ -678,6 +794,11 @@ const I18N = {
     endpointFailed: "失败",
     endpointNoResults: "暂无测速结果",
     endpointSelected: "已选择端点",
+    modelFetch: "获取模型",
+    modelFetching: "获取中...",
+    modelFetchMissing: "请先填写 Base URL 和 API Key。",
+    modelFetchNoResults: "没有返回模型",
+    modelSelected: "已选择模型",
     skillsManage: "技能",
     skillsTitle: "技能管理",
     addSkill: "+ 添加技能",
@@ -858,13 +979,29 @@ if (currentTheme !== "light" && currentTheme !== "dark") {
 
 let profiles = [];
 let codexProfiles = [];
+let grokProfiles = [];
+let grokDiagnostics = null;
 let codexToolbox = null;
 let codexDiagnostics = null;
-let currentPage = "claude";
+let currentPage = "overview";
+let activeConsolePage = "overview";
+let codexWizardStep = 1;
+let codexWizardEnableAfterSave = false;
+let overviewEvents = [];
+let configurationFilter = "all";
+let configurationSearch = "";
+let pluginFilter = "all";
+let pluginSearch = "";
+let codexDiagExpanded = false;
+let lastClaudeStatus = null;
+let lastCodexStatus = null;
+let lastGrokStatus = null;
+let editingGrokId = null;
 let detectedEditors = {}; // { id: displayName }
 let editingId = null;
 let switchingSnapshot = null;
 let progressUnlisten = null;
+let isSwitchingProfile = false;
 let skillsData = [];
 let editingSkillName = null;
 let mcpServers = {};
@@ -962,6 +1099,11 @@ function productIcon(kind) {
         <path d="M22 25.5 32 19l10 6.5v13L32 45l-10-6.5v-13Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
         <path d="M32 19v26M22 25.5l20 13M42 25.5l-20 13" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
       </svg>
+    </span>`;
+  }
+  if (kind === "grok") {
+    return `<span class="product-icon product-icon-grok" aria-hidden="true">
+      <img src="grok-color.svg" width="16" height="16" alt="">
     </span>`;
   }
   return "";
@@ -1304,6 +1446,7 @@ async function openGitHubRepo() {
 function updateThemeSegControl() {
   const lightBtn = $("themeLightBtn");
   const darkBtn = $("themeDarkBtn");
+  if (!lightBtn || !darkBtn) return;
   if (currentTheme === "light") {
     lightBtn.classList.add("active");
     darkBtn.classList.remove("active");
@@ -1318,6 +1461,7 @@ function updateThemeSegControl() {
 function updateLangSegControl() {
   const zhBtn = $("langZhBtn");
   const enBtn = $("langEnBtn");
+  if (!zhBtn || !enBtn) return;
   if (currentLang === "zh") {
     zhBtn.classList.add("active");
     enBtn.classList.remove("active");
@@ -1333,151 +1477,186 @@ function applyTheme() {
 }
 
 function applyLanguage() {
+  try {
   document.documentElement.lang = currentLang === "zh" ? "zh-CN" : "en";
   document.title = t("appTitle");
 
-  $("appTitle").textContent = t("appTitle");
-  $("appSubtitle").textContent = t("appSubtitle");
-  $("importBtnText").textContent = t("importBtn");
-  $("addBtn").textContent = t("addBtn");
+  setText("appTitle", t("appTitle"));
+  setText("appSubtitle", t("appSubtitle"));
   const supportTitle = $("supportSectionTitle");
   if (supportTitle) supportTitle.textContent = t("supportSectionTitle");
-  $("usageGuideBtnText").textContent = t("usageGuideBtn");
+  setText("usageGuideBtnText", t("usageGuideBtn"));
   const downloadSiteBtnText = $("downloadSiteBtnText");
   if (downloadSiteBtnText) downloadSiteBtnText.textContent = t("downloadSiteBtn");
-  $("githubRepoBtnText").textContent = t("githubRepoBtn");
-  $("statusSectionTitle").textContent = t("statusTitle");
-  $("statusHint").textContent = t("statusHint");
-  $("profilesSectionTitle").textContent = t("profilesTitle");
-  $("profileNameLabel").textContent = t("nameLabel");
-  $("profileApiKeyLabel").textContent = t("tokenLabel");
-  $("profileBaseUrlLabel").textContent = t("urlLabel");
-  $("profileEndpointTestBtn").textContent = t("endpointTest");
-  $("cancelBtn").textContent = t("cancel");
-  $("submitBtn").textContent = t("save");
-  $("switchPanelTitle").textContent = t("switchingTo");
-  $("switchStep1Text").textContent = t("stepSystem");
-  $("switchStep2Text").textContent = t("stepEditors");
-  $("switchStep3Text").textContent = t("stepClaude");
-  $("switchCancelBtn").textContent = t("cancelSwitch");
-  $("switchStepLabel").textContent = t("preparing");
-  $("activeConfigLabel").textContent = t("activeConfigLabel");
-  $("syncNowBtnText").textContent = t("syncNow");
-  $("usageGuideKicker").textContent = t("usageGuideKicker");
-  $("usageGuideTitle").textContent = t("usageGuideTitle");
-  $("usageGuideIntro").textContent = t("usageGuideIntro");
-  $("usageGuideStep1Title").textContent = t("usageGuideStep1Title");
-  $("usageGuideStep1Desc").textContent = t("usageGuideStep1Desc");
-  $("usageGuideStep2Title").textContent = t("usageGuideStep2Title");
-  $("usageGuideStep2Desc").textContent = t("usageGuideStep2Desc");
-  $("usageGuideStep3Title").textContent = t("usageGuideStep3Title");
-  $("usageGuideStep3Desc").textContent = t("usageGuideStep3Desc");
-  $("usageGuideStep4Title").textContent = t("usageGuideStep4Title");
-  $("usageGuideStep4Desc").textContent = t("usageGuideStep4Desc");
-  $("usageGuideStep5Title").textContent = t("usageGuideStep5Title");
-  $("usageGuideStep5Desc").textContent = t("usageGuideStep5Desc");
-  $("usageGuideStep6Title").textContent = t("usageGuideStep6Title");
-  $("usageGuideStep6Desc").textContent = t("usageGuideStep6Desc");
-  $("usageGuideCloseBtn").textContent = t("usageGuideClose");
-  $("usageGuideNeverBtn").textContent = t("usageGuideNever");
+  setText("githubRepoBtnText", t("githubRepoBtn"));
+  setText("statusSectionTitle", t("statusTitle"));
+  setText("statusHint", t("statusHint"));
+  setText("profilesSectionTitle", t("profilesTitle"));
+  setText("profileNameLabel", t("nameLabel"));
+  setText("profileApiKeyLabel", t("tokenLabel"));
+  setText("profileBaseUrlLabel", t("urlLabel"));
+  setText("profileEndpointTestBtn", t("endpointTest"));
+  setText("profileModelFetchBtn", t("modelFetch"));
+  setText("cancelBtn", t("cancel"));
+  setText("submitBtn", t("save"));
+  setText("switchPanelTitle", t("switchingTo"));
+  setText("switchStep1Text", t("stepSystem"));
+  setText("switchStep2Text", t("stepEditors"));
+  setText("switchStep3Text", t("stepClaude"));
+  setText("switchCancelBtn", t("cancelSwitch"));
+  setText("switchStepLabel", t("preparing"));
+  setText("activeConfigLabel", t("activeConfigLabel"));
+  setText("claudeSyncBtn", t("syncNow"));
+  setText("claudePageImportBtn", t("importBtn"));
+  setText("usageGuideKicker", t("usageGuideKicker"));
+  setText("usageGuideTitle", t("usageGuideTitle"));
+  setText("usageGuideIntro", t("usageGuideIntro"));
+  setText("usageGuideStep1Title", t("usageGuideStep1Title"));
+  setText("usageGuideStep1Desc", t("usageGuideStep1Desc"));
+  setText("usageGuideStep2Title", t("usageGuideStep2Title"));
+  setText("usageGuideStep2Desc", t("usageGuideStep2Desc"));
+  setText("usageGuideStep3Title", t("usageGuideStep3Title"));
+  setText("usageGuideStep3Desc", t("usageGuideStep3Desc"));
+  setText("usageGuideStep4Title", t("usageGuideStep4Title"));
+  setText("usageGuideStep4Desc", t("usageGuideStep4Desc"));
+  setText("usageGuideStep5Title", t("usageGuideStep5Title"));
+  setText("usageGuideStep5Desc", t("usageGuideStep5Desc"));
+  setText("usageGuideStep6Title", t("usageGuideStep6Title"));
+  setText("usageGuideStep6Desc", t("usageGuideStep6Desc"));
+  setText("usageGuideCloseBtn", t("usageGuideClose"));
+  setText("usageGuideNeverBtn", t("usageGuideNever"));
 
-  $("profileName").placeholder = t("placeholderName");
-  $("profileApiKey").placeholder = t("placeholderApiKey");
-  $("profileBaseUrl").placeholder = t("placeholderBaseUrl");
-  $("profileModelIdLabel").textContent = t("modelIdLabel");
-  $("profileModelId").placeholder = t("placeholderModelId");
-  $("profileModelIdHint").textContent = t("modelIdHint");
+  setPlaceholder("profileName", t("placeholderName"));
+  setPlaceholder("profileApiKey", t("placeholderApiKey"));
+  setPlaceholder("profileBaseUrl", t("placeholderBaseUrl"));
+  setText("profileModelIdLabel", t("modelIdLabel"));
+  setPlaceholder("profileModelId", t("placeholderModelId"));
+  setText("profileModelIdHint", t("modelIdHint"));
 
   // Codex page labels
-  $("codexStatusSectionTitle").textContent = t("codexStatusTitle");
-  $("codexProfilesSectionTitle").textContent = t("codexProfilesTitle");
-  $("codexActiveConfigLabel").textContent = t("codexActiveConfigLabel");
-  $("codexSyncNowBtnText").textContent = t("syncNow");
-  $("codexPresetLabel").textContent = t("codexPresetLabel");
-  $("codexNameLabel").textContent = t("codexNameLabel");
-  $("codexApiKeyLabel").textContent = t("codexApiKeyLabel");
-  $("codexBaseUrlLabel").textContent = t("codexBaseUrlLabel");
-  $("codexEndpointTestBtn").textContent = t("endpointTest");
-  $("codexModelLabel").textContent = t("codexModelLabel");
-  $("codexProviderLabel").textContent = t("codexProviderLabel");
-  $("codexAuthModeLabel").textContent = t("codexAuthModeLabel");
-  $("codexAuthModeDefaultTitle").textContent = t("codexAuthModeDefaultTitle");
-  $("codexAuthModeDefaultHint").textContent = t("codexAuthModeDefaultHint");
-  $("codexAuthModeOfficialTitle").textContent = t("codexAuthModeOfficialTitle");
-  $("codexAuthModeOfficialHint").textContent = t("codexAuthModeOfficialHint");
-  $("codexOfficialConfigLabel").textContent = t("codexOfficialConfigLabel");
-  $("codexCopyOfficialConfigBtn").textContent = t("copy");
-  $("codexCancelBtn").textContent = t("cancel");
-  $("codexSubmitBtn").textContent = t("save");
+  setText("codexStatusSectionTitle", t("codexStatusTitle"));
+  setText("codexProfilesSectionTitle", t("codexProfilesTitle"));
+  setText("codexActiveConfigLabel", t("codexActiveConfigLabel"));
+  setText("codexCardSyncBtn", t("syncNow"));
+  setText("codexPageImportBtn", t("importBtn"));
+  setText("codexPresetLabel", t("codexPresetLabel"));
+  setText("codexNameLabel", t("codexNameLabel"));
+  setText("codexApiKeyLabel", t("codexApiKeyLabel"));
+  setText("codexBaseUrlLabel", t("codexBaseUrlLabel"));
+  setText("codexEndpointTestBtn", t("endpointTest"));
+  setText("codexModelFetchBtn", t("modelFetch"));
+  setText("codexModelLabel", t("codexModelLabel"));
+  setText("codexProviderLabel", t("codexProviderLabel"));
+  setText("codexImageSectionTitle", t("codexImageSectionTitle"));
+  setText("codexImageSectionHint", t("codexImageSectionHint"));
+  setText("codexImageApiKeyLabel", t("codexImageApiKeyLabel"));
+  setText("codexImageBaseUrlLabel", t("codexImageBaseUrlLabel"));
+  setText("codexAuthModeLabel", t("codexAuthModeLabel"));
+  setText("codexAuthModeDefaultTitle", t("codexAuthModeDefaultTitle"));
+  setText("codexAuthModeDefaultHint", t("codexAuthModeDefaultHint"));
+  setText("codexAuthModeOfficialTitle", t("codexAuthModeOfficialTitle"));
+  setText("codexAuthModeOfficialHint", t("codexAuthModeOfficialHint"));
+  setText("codexOfficialConfigLabel", t("codexOfficialConfigLabel"));
+  setText("codexCopyOfficialConfigBtn", t("copy"));
+  setText("codexCancelBtn", t("cancel"));
+  setText("codexSubmitBtn", t("save"));
+  // Grok page labels
+  if ($("grokStatusSectionTitle")) setText("grokStatusSectionTitle", t("grokStatusTitle"));
+  if ($("grokProfilesSectionTitle")) setText("grokProfilesSectionTitle", t("grokProfilesTitle"));
+  if ($("grokActiveConfigLabel")) setText("grokActiveConfigLabel", t("grokActiveConfigLabel"));
+  if ($("grokSyncNowBtnText")) setText("grokSyncNowBtnText", t("syncNow"));
+  if ($("grokStatusHint")) setText("grokStatusHint", t("grokStatusHint"));
+  if ($("grokPresetLabel")) setText("grokPresetLabel", t("grokPresetLabel"));
+  if ($("grokNameLabel")) setText("grokNameLabel", t("grokNameLabel"));
+  if ($("grokApiKeyLabel")) setText("grokApiKeyLabel", t("grokApiKeyLabel"));
+  if ($("grokBaseUrlLabel")) setText("grokBaseUrlLabel", t("grokBaseUrlLabel"));
+  if ($("grokEndpointTestBtn")) setText("grokEndpointTestBtn", t("endpointTest"));
+  if ($("grokModelFetchBtn")) setText("grokModelFetchBtn", t("modelFetch"));
+  if ($("grokModelLabel")) setText("grokModelLabel", t("grokModelLabel"));
+  if ($("grokModelHint")) setText("grokModelHint", t("grokModelHint"));
+  if ($("grokApiBackendLabel")) setText("grokApiBackendLabel", t("grokApiBackendLabel"));
+  if ($("grokApiBackendHint")) setText("grokApiBackendHint", t("grokApiBackendHint"));
+  if ($("grokCancelBtn")) setText("grokCancelBtn", t("cancel"));
+  if ($("grokSubmitBtn")) setText("grokSubmitBtn", t("save"));
+  if ($("grokPageAddBtn")) setText("grokPageAddBtn", t("grokAddConfig"));
+  if ($("grokRefreshBtn")) setText("grokRefreshBtn", currentLang === "zh" ? "刷新状态" : "Refresh");
+  if ($("grokOpenFolderBtn")) setText("grokOpenFolderBtn", t("grokOpenFolder"));
+  if ($("grokBackupRuntimeBtn")) setText("grokBackupRuntimeBtn", t("grokBackupRuntime"));
+  if ($("grokPageImportBtn")) setText("grokPageImportBtn", t("grokImportCurrent"));
+  if ($("grokProfileName")) setPlaceholder("grokProfileName", t("placeholderName"));
+  if ($("grokApiKey")) setPlaceholder("grokApiKey", "xai-...");
+  if ($("grokBaseUrl")) setPlaceholder("grokBaseUrl", "https://api.x.ai/v1");
+  if ($("grokModel")) setPlaceholder("grokModel", "e.g. grok-4");
+  renderGrokPresetOptions();
   const codexToolboxBtn = $("codexToolboxBtn");
   if (codexToolboxBtn) codexToolboxBtn.textContent = t("codexToolbox");
-  $("codexToolboxTitle").textContent = t("codexToolboxTitle");
-  $("toolboxTabMarket").textContent = t("toolboxTabMarket");
-  $("toolboxTabSession").textContent = t("toolboxTabSession");
-  $("toolboxTabRemote").textContent = t("toolboxTabRemote");
-  $("toolboxMarketHint").textContent = t("toolboxMarketHint");
-  $("toolboxMarketInputLabel").textContent = t("toolboxMarketInputLabel");
-  $("toolboxMarketApplyBtn").textContent = t("toolboxMarketApply");
-  $("toolboxSessionHint").textContent = t("toolboxSessionHint");
-  $("toolboxSessionSyncBtn").textContent = t("toolboxSyncNow");
-  $("toolboxSyncedThreadsTitle").textContent = t("toolboxSyncedThreadsTitle");
-  $("toolboxSessionSafeNote").textContent = t("toolboxSessionSafeNote");
-  $("toolboxSessionSearchInput").placeholder = t("toolboxSessionSearchPlaceholder");
-  $("toolboxSessionTrashTitle").textContent = t("toolboxSessionTrashTitle");
-  $("toolboxSessionTrashHint").textContent = t("toolboxSessionTrashHint");
-  $("toolboxSessionTrashCloseBtn").textContent = t("toolboxSessionTrashClose");
-  $("toolboxSessionRestoreBtn").textContent = t("toolboxSessionRestoreSelected");
-  $("toolboxRemoteHint").textContent = t("toolboxRemoteHint");
-  $("toolboxMobileAppLabel").textContent = t("toolboxMobileAppLabel");
-  $("toolboxMobileThreadLabel").textContent = t("toolboxMobileThreadLabel");
-  $("toolboxRemoteStartBtn").textContent = t("toolboxRemoteStart");
-  $("toolboxRemoteStopBtn").textContent = t("toolboxRemoteStop");
+  setText("codexToolboxTitle", t("codexToolboxTitle"));
+  setText("toolboxTabMarket", t("toolboxTabMarket"));
+  setText("toolboxTabSession", t("toolboxTabSession"));
+  setText("toolboxTabRemote", t("toolboxTabRemote"));
+  setText("toolboxMarketHint", t("toolboxMarketHint"));
+  setText("toolboxMarketInputLabel", t("toolboxMarketInputLabel"));
+  setText("toolboxMarketApplyBtn", t("toolboxMarketApply"));
+  setText("toolboxSessionHint", t("toolboxSessionHint"));
+  setText("sessionPageSyncBtn", t("toolboxSyncNow"));
+  setText("toolboxSyncedThreadsTitle", t("toolboxSyncedThreadsTitle"));
+  setText("toolboxSessionSafeNote", t("toolboxSessionSafeNote"));
+  setPlaceholder("toolboxSessionSearchInput", t("toolboxSessionSearchPlaceholder"));
+  setText("toolboxSessionTrashTitle", t("toolboxSessionTrashTitle"));
+  setText("toolboxSessionTrashHint", t("toolboxSessionTrashHint"));
+  setText("toolboxSessionTrashCloseBtn", t("toolboxSessionTrashClose"));
+  setText("toolboxSessionRestoreBtn", t("toolboxSessionRestoreSelected"));
+  setText("toolboxRemoteHint", t("toolboxRemoteHint"));
+  setText("toolboxMobileAppLabel", t("toolboxMobileAppLabel"));
+  setText("toolboxMobileThreadLabel", t("toolboxMobileThreadLabel"));
+  setText("toolboxRemoteStartBtn", t("toolboxRemoteStart"));
+  setText("toolboxRemoteStopBtn", t("toolboxRemoteStop"));
   renderCodexPresetOptions();
   updateCodexPresetHint();
 
   // Management panel labels
-  $("skillsBtn").title = t("skillsManage");
-  $("promptsBtn").title = t("promptsManage");
-  $("mcpBtn").title = t("mcpManage");
-  $("skillsTitle").textContent = t("skillsTitle");
-  $("addSkillBtn").textContent = t("addSkill");
-  $("skillNameLabel2").textContent = t("skillName");
-  $("skillContentLabel").textContent = t("skillContent");
-  $("skillNameInput").placeholder = t("skillNamePlaceholder");
-  $("skillCancelBtn").textContent = t("cancel");
-  $("skillSaveBtn").textContent = t("save");
-  $("promptsTitle2").textContent = t("promptsTitle");
-  $("promptsPath").textContent = t("promptsPathLabel");
-  $("promptSaveBtn").textContent = t("save");
-  $("mcpTitle2").textContent = t("mcpTitle");
-  $("mcpTabInstalled").textContent = t("mcpTabInstalled");
-  $("mcpTabPresets").textContent = t("mcpTabPresets");
-  $("mcpPresetSearch").placeholder = t("mcpSearchPlaceholder");
-  $("mcpPresetLoadingText").textContent = t("mcpSearchLoading");
-  $("mcpPath").textContent = t("mcpPathLabel");
-  $("addMcpBtn").textContent = t("addMcp");
-  $("mcpNameLabel2").textContent = t("mcpName");
-  $("mcpConfigLabel").textContent = t("mcpConfig");
-  $("mcpNameInput").placeholder = t("mcpNamePlaceholder");
-  $("mcpCancelBtn").textContent = t("cancel");
-  $("mcpSaveBtn").textContent = t("save");
+  setTitle("skillsBtn", t("skillsManage"));
+  setTitle("promptsBtn", t("promptsManage"));
+  setTitle("mcpBtn", t("mcpManage"));
+  setText("skillsTitle", t("skillsTitle"));
+  setText("addSkillBtn", t("addSkill"));
+  setText("skillNameLabel2", t("skillName"));
+  setText("skillContentLabel", t("skillContent"));
+  setPlaceholder("skillNameInput", t("skillNamePlaceholder"));
+  setText("skillCancelBtn", t("cancel"));
+  setText("skillSaveBtn", t("save"));
+  setText("promptsTitle2", t("promptsTitle"));
+  setText("promptsPath", t("promptsPathLabel"));
+  setText("promptSaveBtn", t("save"));
+  setText("mcpTitle2", t("mcpTitle"));
+  setText("mcpTabInstalled", t("mcpTabInstalled"));
+  setText("mcpTabPresets", t("mcpTabPresets"));
+  setPlaceholder("mcpPresetSearch", t("mcpSearchPlaceholder"));
+  setText("mcpPresetLoadingText", t("mcpSearchLoading"));
+  setText("mcpPath", t("mcpPathLabel"));
+  setText("addMcpBtn", t("addMcp"));
+  setText("mcpNameLabel2", t("mcpName"));
+  setText("mcpConfigLabel", t("mcpConfig"));
+  setPlaceholder("mcpNameInput", t("mcpNamePlaceholder"));
+  setText("mcpCancelBtn", t("cancel"));
+  setText("mcpSaveBtn", t("save"));
 
   // Skills Discovery labels
-  $("skillsTabInstalled").textContent = t("skillsTabInstalled");
-  $("skillsTabDiscover").textContent = t("skillsTabDiscover");
-  $("discoverSearch").placeholder = t("discoverSearchPlaceholder");
-  $("discoverLoadingText").textContent = t("discoverLoading");
-  $("manageReposBtn").textContent = t("manageRepos");
-  $("repoManagerTitle").textContent = t("repoManagerTitle");
-  $("addRepoLabel").textContent = t("addRepoLabel");
-  $("repoUrlInput").placeholder = t("addRepoPlaceholder");
-  $("searchGithubSkillsBtnText").textContent = t("skillsSearchGithub");
-  $("discoverGithubBannerText").textContent = t("skillsGithubResults");
-  $("backToCatalogBtnText").textContent = t("skillsBackToCatalog");
+  setText("skillsTabInstalled", t("skillsTabInstalled"));
+  setText("skillsTabDiscover", t("skillsTabDiscover"));
+  setPlaceholder("discoverSearch", t("discoverSearchPlaceholder"));
+  setText("discoverLoadingText", t("discoverLoading"));
+  setText("manageReposBtn", t("manageRepos"));
+  setText("repoManagerTitle", t("repoManagerTitle"));
+  setText("addRepoLabel", t("addRepoLabel"));
+  setPlaceholder("repoUrlInput", t("addRepoPlaceholder"));
+  setText("searchGithubSkillsBtnText", t("skillsSearchGithub"));
+  setText("discoverGithubBannerText", t("skillsGithubResults"));
+  setText("backToCatalogBtnText", t("skillsBackToCatalog"));
 
   // Prompt tabs
-  $("promptTabEditor").textContent = t("promptTabEditor");
-  $("promptTabTemplates").textContent = t("promptTabTemplates");
+  setText("promptTabEditor", t("promptTabEditor"));
+  setText("promptTabTemplates", t("promptTabTemplates"));
   const insertSelect = $("promptInsertSelect");
   if (insertSelect.options.length > 0) {
     insertSelect.options[0].textContent = t("insertSnippet");
@@ -1496,40 +1675,42 @@ function applyLanguage() {
   }
 
   // Settings panel labels
-  $("settingsBtn").title = t("settingsTitle");
-  $("settingsTitle2").textContent = t("settingsTitle");
-  $("settingsGroupGeneral").textContent = t("settingsGroupGeneral");
-  $("settingsGroupPaths").textContent = t("settingsGroupPaths");
-  $("settingsGroupBackup").textContent = t("settingsGroupBackup");
-  $("settingsAutoStartLabel").textContent = t("settingsAutoStart");
-  $("settingsAutoStartDesc").textContent = t("settingsAutoStartDesc");
-  $("settingsMinTrayLabel").textContent = t("settingsMinTray");
-  $("settingsMinTrayDesc").textContent = t("settingsMinTrayDesc");
-  $("settingsConfigDirLabel").textContent = t("settingsConfigDir");
-  $("settingsClaudePathLabel").textContent = t("settingsClaudePath");
-  $("settingsCodexPathLabel").textContent = t("settingsCodexPath");
-  $("settingsLogsLabel").textContent = t("settingsLogs");
-  $("settingsLogsValue").textContent = t("settingsLogsDesc");
-  $("settingsOpenConfigDir").textContent = t("settingsOpen");
-  $("settingsOpenClaudeDir").textContent = t("settingsOpen");
-  $("settingsOpenCodexDir").textContent = t("settingsOpen");
-  $("settingsExportBtn").textContent = t("settingsExport");
-  $("settingsImportBtn").textContent = t("settingsImport");
-  $("settingsAutoBackupLabel").textContent = t("settingsAutoBackup");
-  $("settingsAutoBackupDesc").textContent = t("settingsAutoBackupDesc");
-  $("settingsViewBackupsBtn").textContent = t("settingsViewBackups");
-  $("settingsSilentStartLabel").textContent = t("settingsSilentStart");
-  $("settingsSilentStartDesc").textContent = t("settingsSilentStartDesc");
-  if ($("settingsOverlay").classList.contains("open")) {
-    renderSettingsEditorPaths(getSettingsEditorPathInfos());
-  }
+  setText("settingsTitle2", t("settingsTitle"));
+  setText("settingsGroupGeneral", t("settingsGroupGeneral"));
+  setText("settingsGroupPaths", t("settingsGroupPaths"));
+  setText("settingsGroupBackup", t("settingsGroupBackup"));
+  setText("settingsAutoStartLabel", t("settingsAutoStart"));
+  setText("settingsAutoStartDesc", t("settingsAutoStartDesc"));
+  setText("settingsMinTrayLabel", t("settingsMinTray"));
+  setText("settingsMinTrayDesc", t("settingsMinTrayDesc"));
+  setText("settingsConfigDirLabel", t("settingsConfigDir"));
+  setText("settingsClaudePathLabel", t("settingsClaudePath"));
+  setText("settingsCodexPathLabel", t("settingsCodexPath"));
+  setText("settingsLogsLabel", t("settingsLogs"));
+  setText("settingsLogsValue", t("settingsLogsDesc"));
+  setText("settingsOpenConfigDir", t("settingsOpen"));
+  setText("settingsOpenClaudeDir", t("settingsOpen"));
+  setText("settingsOpenCodexDir", t("settingsOpen"));
+  setText("settingsExportBtn", t("settingsExport"));
+  setText("settingsImportBtn", t("settingsImport"));
+  setText("settingsAutoBackupLabel", t("settingsAutoBackup"));
+  setText("settingsAutoBackupDesc", t("settingsAutoBackupDesc"));
+  setText("settingsViewBackupsBtn", t("settingsViewBackups"));
+  setText("settingsSilentStartLabel", t("settingsSilentStart"));
+  setText("settingsSilentStartDesc", t("settingsSilentStartDesc"));
 
   updateLangSegControl();
   updateThemeSegControl();
   renderUpdateButton();
 
-  if ($("modalOverlay").classList.contains("open")) {
-    $("modalTitle").textContent = editingId ? t("editConfig") : t("addConfig");
+  if ($("modalOverlay")?.classList.contains("open")) {
+    setText("modalTitle", editingId ? t("editConfig") : t("addConfig"));
+  }
+  if ($("settingsOverlay")?.classList.contains("open")) {
+    try { renderSettingsEditorPaths(getSettingsEditorPathInfos()); } catch (_) {}
+  }
+  } catch (error) {
+    console.error("applyLanguage failed:", error);
   }
 }
 
@@ -1543,6 +1724,11 @@ function setLanguage(lang) {
   if (currentPage === "codex") {
     renderCodexProfiles();
     loadCodexStatus();
+  }
+  if (currentPage === "grok") {
+    renderGrokProfiles();
+    loadGrokStatus();
+    loadGrokDiagnostics();
   }
   if (codexToolbox) {
     renderCodexToolbox();
@@ -1561,8 +1747,11 @@ async function loadCodexToolbox() {
     codexToolbox = await invoke("get_codex_toolbox");
     await loadSmartControlDebug(false);
     renderCodexToolbox();
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+    if (typeof applyPluginFilters === "function") applyPluginFilters();
   } catch (error) {
-    showToast(String(error), "error");
+    console.error("loadCodexToolbox failed:", error);
+    if (typeof showToast === "function") showToast(String(error), "error");
   }
 }
 
@@ -1578,17 +1767,28 @@ async function loadSmartControlDebug(showError = false) {
 
 function switchToolboxTab(tab) {
   activeToolboxTab = tab;
-  $("toolboxTabMarket").classList.toggle("active", tab === "market");
-  $("toolboxTabSession").classList.toggle("active", tab === "session");
-  $("toolboxTabRemote").classList.toggle("active", tab === "remote");
-  $("toolboxMarketContent").style.display = tab === "market" ? "" : "none";
-  $("toolboxSessionContent").style.display = tab === "session" ? "" : "none";
-  $("toolboxRemoteContent").style.display = tab === "remote" ? "" : "none";
+  $("toolboxTabMarket")?.classList.toggle("active", tab === "market");
+  $("toolboxTabSession")?.classList.toggle("active", tab === "session");
+  $("toolboxTabRemote")?.classList.toggle("active", tab === "remote");
+  // 控制台一级页面会把内容挂到 host 中，始终显示对应区块
+  const market = $("toolboxMarketContent");
+  const session = $("toolboxSessionContent");
+  const remote = $("toolboxRemoteContent");
+  if (market) market.style.display = tab === "market" || activeConsolePage === "plugins" ? "" : "none";
+  if (session) session.style.display = tab === "session" || activeConsolePage === "sessions" ? "" : "none";
+  if (remote) remote.style.display = tab === "remote" || activeConsolePage === "mobile" ? "" : "none";
+  // 在独立页面中强制显示
+  if (activeConsolePage === "plugins" && market) market.style.display = "";
+  if (activeConsolePage === "sessions" && session) session.style.display = "";
+  if (activeConsolePage === "mobile" && remote) remote.style.display = "";
 }
 
 function openCodexToolbox() {
-  $("codexToolboxOverlay").classList.add("open");
-  switchToolboxTab(activeToolboxTab);
+  // Toolbox 已拆分为一级导航页面，默认进入插件市场
+  const tab = activeToolboxTab || "market";
+  if (tab === "session") switchConsolePage("sessions");
+  else if (tab === "remote") switchConsolePage("mobile");
+  else switchConsolePage("plugins");
   loadCodexToolbox();
 }
 
@@ -1672,6 +1872,7 @@ function renderCodexToolbox() {
   renderToolboxSyncedThreads();
   renderToolboxMobileControl();
   renderToolboxRemote();
+  applyPluginFilters();
 }
 
 function builtinPluginStatusText(status) {
@@ -1785,12 +1986,10 @@ function renderToolboxSessionProgress() {
   const progress = $("toolboxSessionProgress");
   if (!progress) return;
   progress.hidden = !toolboxSessionSyncBusy;
-  $("toolboxSessionSyncBtn").disabled = toolboxSessionSyncBusy;
-  if (toolboxSessionSyncBusy) {
-    $("toolboxSessionSyncBtn").classList.add("is-busy");
-  } else {
-    $("toolboxSessionSyncBtn").classList.remove("is-busy");
-  }
+  [$("sessionPageSyncBtn")].filter(Boolean).forEach((button) => {
+    button.disabled = toolboxSessionSyncBusy;
+    button.classList.toggle("is-busy", toolboxSessionSyncBusy);
+  });
 }
 
 function updateToolboxSessionProgress(percent, label) {
@@ -2137,7 +2336,7 @@ function bindToolboxSessionManagerEvents(filteredThreads) {
 async function handleToolboxMoveSelectedToTrash() {
   const threadIds = [...toolboxSelectedSessionIds];
   if (threadIds.length === 0) return;
-  if (!window.confirm(t("toolboxSessionConfirmTrash"))) return;
+  if (!(await appConfirm(t("toolboxSessionConfirmTrash"), { title: currentLang === "zh" ? "移入回收站" : "Move to trash", danger: true, confirmText: currentLang === "zh" ? "移入回收站" : "Move" }))) return;
   try {
     codexToolbox = await invoke("trash_codex_sessions", { threadIds });
     toolboxSelectedSessionIds.clear();
@@ -2659,20 +2858,46 @@ async function copySmartControlDebugEvent() {
   }
 }
 
-function showSwitchOverlay(profileName) {
+function waitForNextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
+function showSwitchOverlay(profileName, kind = "claude") {
+  const state = helpers.getSwitchOverlayState?.(kind) || {
+    cancellable: kind === "claude",
+    indeterminate: kind !== "claude",
+    showSteps: kind === "claude",
+  };
+  const progressBar = $("switchProgressBar");
   $("switchProfileName").textContent = profileName;
-  $("switchProgressBar").style.width = "0%";
-  $("switchStepLabel").textContent = t("preparing");
+  progressBar.classList.toggle("indeterminate", state.indeterminate);
+  progressBar.style.width = state.indeterminate ? "38%" : "0%";
+  const switchingLabel =
+    kind === "codex" ? t("codexSwitching") : kind === "grok" ? t("grokSwitching") : t("preparing");
+  $("switchStepLabel").textContent = switchingLabel;
   $("switchProgressPercent").textContent = "0%";
+  $("switchProgressPercent").hidden = state.indeterminate;
   $("switchStep1").className = "switch-step";
   $("switchStep2").className = "switch-step";
   $("switchStep3").className = "switch-step";
+  $("switchSteps").hidden = !state.showSteps;
+  $("switchCancelBtn").hidden = !state.cancellable;
   $("switchCancelBtn").disabled = false;
   $("switchOverlay").classList.add("open");
 }
 
 function hideSwitchOverlay() {
   $("switchOverlay").classList.remove("open");
+}
+
+function completeSwitchOverlay() {
+  $("switchProgressBar").classList.remove("indeterminate");
+  $("switchProgressBar").style.width = "100%";
+  $("switchProgressPercent").hidden = false;
+  $("switchProgressPercent").textContent = "100%";
+  $("switchStepLabel").textContent = t("switchDone");
 }
 
 function switchProgressLabel(step) {
@@ -2766,6 +2991,7 @@ async function loadStatus() {
       invoke("get_detected_editors"),
     ]);
     detectedEditors = editors || {};
+    lastClaudeStatus = status;
     const grid = $("statusGrid");
 
     // 构建编辑器列表
@@ -2798,8 +3024,13 @@ async function loadStatus() {
           <div class="status-card error-card ${extraClass || ""}">
             <div class="status-card-title">
               <span class="status-card-title-text">${productIcon(loc.icon)}${loc.title}</span>
+              <span class="status-badge-console error">${currentLang === "zh" ? "读取失败" : "Failed"}</span>
             </div>
-            <div style="font-size:13px;color:var(--error-text)">${t("readFailed")}</div>
+            <div style="font-size:13px;color:var(--console-muted)">${t("readFailed")}</div>
+            <div style="margin-top:10px;display:flex;gap:8px;">
+              <button class="btn btn-secondary btn-sm" type="button" data-action="claude-fix">${currentLang === "zh" ? "修复" : "Fix"}</button>
+              <button class="btn btn-ghost btn-sm" type="button" data-action="claude-detail">${currentLang === "zh" ? "查看详情" : "Details"}</button>
+            </div>
           </div>`;
       }
       const badgeClass = synced ? "synced" : "unsynced";
@@ -2889,8 +3120,49 @@ async function loadStatus() {
         }
       });
     });
+
+    // 错误卡片：修复 / 查看详情
+    grid.querySelectorAll("button[data-action='claude-fix']").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        switchConsolePage("settings");
+        showToast(currentLang === "zh" ? "请在设置中检查编辑器路径后重试同步" : "Check editor paths in Settings, then sync again", "warning");
+      });
+    });
+    grid.querySelectorAll("button[data-action='claude-detail']").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await appConfirm(
+          currentLang === "zh"
+            ? "错误原因：配置文件读取失败。\n建议：确认 Cursor / 编辑器已安装，或在设置中手动指定配置路径。"
+            : "Reason: failed to read editor settings.\nSuggestion: confirm the editor is installed or set a custom path in Settings.",
+          {
+            title: currentLang === "zh" ? "读取失败详情" : "Read failure details",
+            confirmText: currentLang === "zh" ? "知道了" : "OK",
+            cancelText: currentLang === "zh" ? "关闭" : "Close",
+          }
+        );
+      });
+    });
+
+    // 环境状态矩阵（精简版）
+    const matrix = $("claudeEnvMatrix");
+    if (matrix) {
+      const items = [
+        { title: currentLang === "zh" ? "系统环境变量" : "System Env", ok: !!status.envVars, detail: status.envVars ? (currentLang === "zh" ? "已同步" : "Synced") : (currentLang === "zh" ? "读取失败" : "Failed") },
+        { title: currentLang === "zh" ? "编辑器配置" : "Editor Config", ok: editorLocations.some((l) => l.data), detail: editorLocations.some((l) => l.data) ? (currentLang === "zh" ? "可读取" : "Readable") : (currentLang === "zh" ? "读取失败" : "Failed") },
+        { title: currentLang === "zh" ? "Claude 设置" : "Claude Settings", ok: !!status.claude, detail: status.claude ? (currentLang === "zh" ? "已同步" : "Synced") : (currentLang === "zh" ? "读取失败" : "Failed") },
+      ];
+      matrix.innerHTML = items
+        .map((item) => `<div class="env-matrix-item"><span class="status-badge-console ${item.ok ? "healthy" : "error"}">${item.ok ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "异常" : "Error")}</span><strong>${esc(item.title)}</strong><small>${esc(item.detail)}</small></div>`)
+        .join("");
+    }
+
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
   } catch (error) {
+    console.error("loadStatus failed:", error);
     showToast(t("loadStatusFailed", { error: String(error) }), "error");
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
   }
 }
 
@@ -2899,7 +3171,9 @@ async function loadProfiles() {
     const data = await invoke("get_profiles");
     profiles = data.profiles || [];
     renderProfiles();
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
   } catch (error) {
+    console.error(error);
     showToast(t("loadProfilesFailed", { error: String(error) }), "error");
   }
 }
@@ -2919,22 +3193,7 @@ function renderProfiles() {
         </svg>
         <div class="empty-state-title">${t("noConfigsTitle")}</div>
         <p>${t("noConfigsDesc")}</p>
-        <div class="empty-state-actions">
-          <button class="btn btn-primary" id="addFirstBtn" type="button">${t("addFirstConfig")}</button>
-          <button class="btn btn-secondary" id="importFirstBtn" type="button">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            ${t("importBtn")}
-          </button>
-        </div>
       </div>`;
-    const addFirstBtn = $("addFirstBtn");
-    if (addFirstBtn) {
-      addFirstBtn.addEventListener("click", () => $("addBtn").click());
-    }
-    const importFirstBtn = $("importFirstBtn");
-    if (importFirstBtn) {
-      importFirstBtn.addEventListener("click", handleImport);
-    }
     updateActiveConfigBar();
     return;
   }
@@ -3034,8 +3293,42 @@ function uniqueEndpointCandidates(values) {
   return result;
 }
 
+function productFieldMap(kind) {
+  if (kind === "codex") {
+    return {
+      baseUrl: "codexBaseUrl",
+      apiKey: "codexApiKey",
+      model: "codexModel",
+      endpointResults: "codexEndpointResults",
+      modelResults: "codexModelResults",
+      modelFetchBtn: "codexModelFetchBtn",
+      endpointTestBtn: "codexEndpointTestBtn",
+    };
+  }
+  if (kind === "grok") {
+    return {
+      baseUrl: "grokBaseUrl",
+      apiKey: "grokApiKey",
+      model: "grokModel",
+      endpointResults: "grokEndpointResults",
+      modelResults: "grokModelResults",
+      modelFetchBtn: "grokModelFetchBtn",
+      endpointTestBtn: "grokEndpointTestBtn",
+    };
+  }
+  return {
+    baseUrl: "profileBaseUrl",
+    apiKey: "profileApiKey",
+    model: "profileModelId",
+    endpointResults: "profileEndpointResults",
+    modelResults: "profileModelResults",
+    modelFetchBtn: "profileModelFetchBtn",
+    endpointTestBtn: "profileEndpointTestBtn",
+  };
+}
+
 function getEndpointCandidates(kind) {
-  const inputId = kind === "codex" ? "codexBaseUrl" : "profileBaseUrl";
+  const inputId = productFieldMap(kind).baseUrl;
   return uniqueEndpointCandidates([$(inputId)?.value]);
 }
 
@@ -3054,8 +3347,9 @@ function endpointMetaText(result) {
 }
 
 function renderEndpointResults(kind, results) {
-  const inputId = kind === "codex" ? "codexBaseUrl" : "profileBaseUrl";
-  const resultsId = kind === "codex" ? "codexEndpointResults" : "profileEndpointResults";
+  const fields = productFieldMap(kind);
+  const inputId = fields.baseUrl;
+  const resultsId = fields.endpointResults;
   const container = $(resultsId);
   if (!container) return;
 
@@ -3091,15 +3385,86 @@ function renderEndpointResults(kind, results) {
 }
 
 function clearEndpointResults(kind) {
-  const resultsId = kind === "codex" ? "codexEndpointResults" : "profileEndpointResults";
+  const resultsId = productFieldMap(kind).endpointResults;
   const container = $(resultsId);
   if (!container) return;
   container.innerHTML = "";
   container.classList.remove("open");
 }
 
+function modelInputId(kind) {
+  return productFieldMap(kind).model;
+}
+
+function clearModelResults(kind) {
+  const resultsId = productFieldMap(kind).modelResults;
+  const container = $(resultsId);
+  if (!container) return;
+  container.innerHTML = "";
+  container.classList.remove("open");
+}
+
+function renderModelResults(kind, models) {
+  const resultsId = productFieldMap(kind).modelResults;
+  const container = $(resultsId);
+  if (!container) return;
+  const normalizedModels = helpers.normalizeFetchedModels
+    ? helpers.normalizeFetchedModels(models)
+    : (models || []).map((item) => item.id || item).filter(Boolean).sort();
+
+  if (normalizedModels.length === 0) {
+    container.innerHTML = `<div class="model-row"><span class="model-id">${t("modelFetchNoResults")}</span></div>`;
+    container.classList.add("open");
+    return;
+  }
+
+  container.innerHTML = normalizedModels.map((model) => `
+    <button class="model-row model-use-btn" data-model="${esc(model)}" type="button" title="${esc(model)}">
+      <span class="model-id">${esc(model)}</span>
+      <span class="model-use">${t("endpointUse")}</span>
+    </button>
+  `).join("");
+  container.classList.add("open");
+  container.querySelectorAll(".model-use-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      const model = button.getAttribute("data-model");
+      if (!model) return;
+      $(modelInputId(kind)).value = model;
+      updateCodexOfficialConfigPreview();
+      showToast(t("modelSelected"), "success");
+    });
+  });
+}
+
+async function handleModelFetch(kind) {
+  const fields = productFieldMap(kind);
+  const buttonId = fields.modelFetchBtn;
+  const baseUrlId = fields.baseUrl;
+  const apiKeyId = fields.apiKey;
+  const button = $(buttonId);
+  const baseUrl = $(baseUrlId).value.trim();
+  const apiKey = $(apiKeyId).value.trim();
+  if (!baseUrl || !apiKey) {
+    showToast(t("modelFetchMissing"), "warning");
+    return;
+  }
+
+  const previousText = button.textContent;
+  button.disabled = true;
+  button.textContent = t("modelFetching");
+  try {
+    const models = await invoke("fetch_available_models", { baseUrl, apiKey, timeoutSecs: 12 });
+    renderModelResults(kind, models || []);
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = previousText || t("modelFetch");
+  }
+}
+
 async function handleEndpointTest(kind) {
-  const buttonId = kind === "codex" ? "codexEndpointTestBtn" : "profileEndpointTestBtn";
+  const buttonId = productFieldMap(kind).endpointTestBtn;
   const button = $(buttonId);
   const urls = getEndpointCandidates(kind);
   if (urls.length === 0) {
@@ -3130,6 +3495,7 @@ function openModal(profile) {
   $("profileBaseUrl").value = profile ? profile.baseUrl : "";
   $("profileModelId").value = profile ? (profile.modelId || "") : "";
   clearEndpointResults("claude");
+  clearModelResults("claude");
   $("modalOverlay").classList.add("open");
   $("profileName").focus();
 }
@@ -3165,37 +3531,28 @@ async function handleSubmit(event) {
 }
 
 async function handleSwitch(id) {
+  if (isSwitchingProfile) return;
   const profile = profiles.find((item) => item.id === id);
   if (!profile) return;
 
-  showSwitchOverlay(profile.name);
+  isSwitchingProfile = true;
+  showSwitchOverlay(profile.name, "claude");
 
   try {
+    await waitForNextPaint();
+    progressUnlisten = await listen("switch-progress", (event) => {
+      updateSwitchProgress(event.payload);
+    });
     switchingSnapshot = await invoke("snapshot_config");
-  } catch (error) {
-    hideSwitchOverlay();
-    showToast(t("snapshotFailed", { error: String(error) }), "error");
-    return;
-  }
-
-  progressUnlisten = await listen("switch-progress", (event) => {
-    updateSwitchProgress(event.payload);
-  });
-
-  try {
     const result = await invoke("switch_profile", { id });
 
     if (result.success) {
-      $("switchProgressBar").style.width = "100%";
-      $("switchProgressPercent").textContent = "100%";
+      completeSwitchOverlay();
       $("switchStep1").className = "switch-step done";
       $("switchStep2").className = "switch-step done";
       $("switchStep3").className = "switch-step done";
-      $("switchStepLabel").textContent = t("switchDone");
       await new Promise((resolve) => setTimeout(resolve, 350));
     }
-
-    hideSwitchOverlay();
 
     if (result.cancelled) {
       try {
@@ -3226,16 +3583,19 @@ async function handleSwitch(id) {
       );
     }
   } catch (error) {
-    hideSwitchOverlay();
-    showToast(t("switchFailed", { error: String(error) }), "error");
+    const message = switchingSnapshot
+      ? t("switchFailed", { error: String(error) })
+      : t("snapshotFailed", { error: String(error) });
+    showToast(message, "error");
   } finally {
     if (progressUnlisten) {
       progressUnlisten();
       progressUnlisten = null;
     }
     switchingSnapshot = null;
-    await loadProfiles();
-    await loadStatus();
+    hideSwitchOverlay();
+    isSwitchingProfile = false;
+    await Promise.all([loadProfiles(), loadStatus()]);
   }
 }
 
@@ -3260,10 +3620,10 @@ async function handleDelete(id) {
   const profile = profiles.find((item) => item.id === id);
   if (!profile) return;
 
-  const dialog = window.__TAURI_PLUGIN_DIALOG__;
-  const confirmed = await dialog.ask(t("confirmDelete", { name: profile.name }), {
+  const confirmed = await appConfirm(t("confirmDelete", { name: profile.name }), {
     title: t("delete"),
-    kind: "warning",
+    confirmText: currentLang === "zh" ? "删除配置" : "Delete",
+    danger: true,
   });
   if (!confirmed) return;
 
@@ -3278,10 +3638,20 @@ async function handleDelete(id) {
 }
 
 async function handleImport() {
-  const input = window.prompt(t("importPrompt"), t("importDefaultName"));
+  const input = await appPrompt(
+    currentLang === "zh"
+      ? "系统将从当前 Claude 环境读取 Token / Base URL，并保存为新配置。"
+      : "Import current Claude environment as a new profile.",
+    t("importDefaultName"),
+    {
+      title: currentLang === "zh" ? "导入当前 Claude 配置" : "Import Claude Config",
+      inputLabel: currentLang === "zh" ? "配置名称" : "Config name",
+      confirmText: currentLang === "zh" ? "导入配置" : "Import",
+    }
+  );
   if (input === null) return;
 
-  const name = input.trim() || t("importDefaultName");
+  const name = String(input).trim() || t("importDefaultName");
   try {
     await invoke("import_current", { name });
     showToast(t("toastImported"), "success");
@@ -3295,20 +3665,405 @@ async function handleImport() {
 // ── Page Switching ──────────────────────────────────
 
 function switchPage(page) {
-  currentPage = page;
-  document.querySelectorAll(".page-tab").forEach((tab) => {
-    tab.classList.toggle("active", tab.getAttribute("data-page") === page);
+  // 兼容旧横向 Tab：统一走控制台导航
+  const map = { claude: "claude", codex: "codex", grok: "grok" };
+  switchConsolePage(map[page] || page || "overview");
+}
+
+// ── Grok Profile Management ─────────────────────────
+
+function getSelectedGrokPreset() {
+  const presetId = $("grokPresetSelect")?.value || "";
+  return GROK_PRESETS.find((preset) => preset.id === presetId) || null;
+}
+
+function renderGrokPresetOptions() {
+  const select = $("grokPresetSelect");
+  if (!select) return;
+  const currentValue = select.value;
+  select.innerHTML = [
+    `<option value="">${t("grokPresetCustom")}</option>`,
+    ...GROK_PRESETS.map((preset) => `<option value="${esc(preset.id)}">${esc(preset.name)}</option>`),
+  ].join("");
+  select.value = GROK_PRESETS.some((preset) => preset.id === currentValue) ? currentValue : "";
+}
+
+function updateGrokPresetHint() {
+  const hint = $("grokPresetHint");
+  if (!hint) return;
+  hint.textContent = t("grokPresetHintDefault");
+}
+
+function applyGrokPreset(preset) {
+  if (!preset) {
+    updateGrokPresetHint();
+    return;
+  }
+  if (!$("grokProfileName").value.trim()) {
+    $("grokProfileName").value = preset.name;
+  }
+  $("grokBaseUrl").value = preset.baseUrl;
+  $("grokModel").value = preset.model || "";
+  clearEndpointResults("grok");
+  clearModelResults("grok");
+  updateGrokPresetHint();
+}
+
+async function loadGrokProfiles() {
+  try {
+    const data = await invoke("get_grok_profiles");
+    grokProfiles = data.profiles || [];
+    renderGrokProfiles();
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+function renderGrokProfiles() {
+  const grid = $("grokProfilesGrid");
+  if (!grid) return;
+
+  if (grokProfiles.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="18" x2="12" y2="12"/>
+          <line x1="9" y1="15" x2="15" y2="15"/>
+        </svg>
+        <div class="empty-state-title">${t("grokNoConfigsTitle")}</div>
+        <p>${t("grokNoConfigsDesc")}</p>
+      </div>`;
+    updateGrokActiveConfigBar();
+    return;
+  }
+
+  grid.innerHTML = grokProfiles.map((profile) => `
+    <div class="profile-card ${profile.isActive ? "active" : ""}">
+      <div class="profile-header">
+        <span class="profile-name">${esc(profile.name)}</span>
+        ${profile.isActive ? `<span class="active-badge">${t("inUse")}</span>` : ""}
+      </div>
+      <div class="profile-body">
+        <div class="profile-field">
+          <span class="field-label">${t("grokApiKeyLabel")}</span>
+          <span class="field-value">${maskKey(profile.apiKey)}</span>
+        </div>
+        <div class="profile-field">
+          <span class="field-label">${t("grokBaseUrlLabel")}</span>
+          <span class="field-value">${truncUrl(profile.baseUrl, 50)}</span>
+        </div>
+        ${profile.model ? `<div class="profile-field">
+          <span class="field-label">${t("grokModelLabel")}</span>
+          <span class="field-value">${esc(profile.model)}</span>
+        </div>` : ""}
+        ${profile.apiBackend ? `<div class="profile-field">
+          <span class="field-label">${t("grokApiBackendLabel")}</span>
+          <span class="field-value">${esc(profile.apiBackend)}</span>
+        </div>` : ""}
+      </div>
+      <div class="profile-actions">
+        ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="grok-switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
+        <button class="btn btn-secondary btn-sm" data-action="grok-edit" data-id="${profile.id}" type="button">${t("edit")}</button>
+        <button class="btn btn-danger btn-sm" data-action="grok-delete" data-id="${profile.id}" type="button">${t("delete")}</button>
+      </div>
+    </div>
+  `).join("");
+
+  grid.querySelectorAll("button[data-action]").forEach((btn) => {
+    const action = btn.getAttribute("data-action");
+    const id = btn.getAttribute("data-id");
+    if (!id) return;
+    btn.addEventListener("click", () => {
+      if (action === "grok-switch") handleGrokSwitch(id);
+      if (action === "grok-edit") {
+        const p = grokProfiles.find((x) => x.id === id);
+        if (p) openGrokModal(p);
+      }
+      if (action === "grok-delete") handleGrokDelete(id);
+    });
   });
-  document.querySelectorAll(".page-content").forEach((content) => {
-    content.classList.remove("active");
-  });
-  if (page === "claude") {
-    $("pageClaudeCode").classList.add("active");
+
+  updateGrokActiveConfigBar();
+}
+
+function updateGrokActiveConfigBar() {
+  const section = $("grokActiveConfigSection");
+  const nameEl = $("grokActiveConfigName");
+  if (!section || !nameEl) return;
+  const active = grokProfiles.find((p) => p.isActive);
+  if (active) {
+    nameEl.textContent = active.name;
+    section.style.display = "";
   } else {
-    $("pageCodex").classList.add("active");
-    loadCodexProfiles();
-    loadCodexStatus();
-    loadCodexDiagnostics();
+    section.style.display = "none";
+  }
+}
+
+async function loadGrokStatus() {
+  try {
+    const status = await invoke("get_grok_status");
+    lastGrokStatus = status;
+    const grid = $("grokStatusGrid");
+    if (!grid) {
+      if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+      return;
+    }
+    if (!status || (!status.apiKey && !status.configExists)) {
+      grid.innerHTML = `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">Grok (~/.grok/config.toml): --</div>`;
+      if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+      return;
+    }
+    const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+    grid.innerHTML = `
+      <div class="status-card">
+        <div class="status-card-title">
+          <span class="status-card-title-text">${productIcon("grok")}Grok CLI · ~/.grok/config.toml</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("grokApiKeyLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${maskKey(status.apiKey)}</span>
+            <button class="copy-btn" type="button" data-copy="${esc(status.apiKey || "")}" title="Copy">${COPY_ICON}</button>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("grokBaseUrlLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value has-tooltip" data-tooltip="${esc(status.baseUrl || "")}">${truncUrl(status.baseUrl)}</span>
+            <button class="copy-btn" type="button" data-copy="${esc(status.baseUrl || "")}" title="Copy">${COPY_ICON}</button>
+          </div>
+        </div>
+        ${status.model ? `<div class="status-item">
+          <span class="status-label">${t("grokModelLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${esc(status.model)}</span>
+            <button class="copy-btn" type="button" data-copy="${esc(status.model || "")}" title="Copy">${COPY_ICON}</button>
+          </div>
+        </div>` : ""}
+        ${status.defaultModelId ? `<div class="status-item">
+          <span class="status-label">default</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${esc(status.defaultModelId)}</span>
+          </div>
+        </div>` : ""}
+        ${status.apiBackend ? `<div class="status-item">
+          <span class="status-label">${t("grokApiBackendLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${esc(status.apiBackend)}</span>
+          </div>
+        </div>` : ""}
+        <div class="status-item">
+          <span class="status-label">source</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${esc(status.source || "--")}</span>
+          </div>
+        </div>
+      </div>`;
+    grid.querySelectorAll(".copy-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const text = btn.getAttribute("data-copy");
+        if (text) navigator.clipboard.writeText(text).then(() => showToast(t("toastCopied"), "success"));
+      });
+    });
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+  } catch (error) {
+    console.error("Failed to load grok status:", error);
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+  }
+}
+
+function renderGrokDiagnostics() {
+  const panel = $("grokDiagnosticsPanel");
+  if (!panel) return;
+  const d = grokDiagnostics;
+  if (!d) {
+    panel.innerHTML = `<div class="diagnostics-card muted">Grok diagnostics: --</div>`;
+    return;
+  }
+  const healthy = Array.isArray(d.issues) && d.issues.length === 0;
+  const issueItems = (d.issues || []).map((item) => `<li>${esc(item)}</li>`).join("");
+  const suggestionItems = (d.suggestions || []).map((item) => `<li>${esc(item)}</li>`).join("");
+  panel.innerHTML = `
+    <div class="diagnostics-card ${healthy ? "healthy" : "warning"}">
+      <div class="diagnostics-head">
+        <div>
+          <div class="diagnostics-kicker">Grok Health</div>
+          <div class="diagnostics-title">${healthy ? (currentLang === "zh" ? "配置健康" : "Healthy") : (currentLang === "zh" ? "需要处理" : "Needs attention")}</div>
+        </div>
+        <span class="diagnostics-state ${healthy ? "ok" : "warn"}">${healthy ? "OK" : `${d.issues.length} issues`}</span>
+      </div>
+      <div class="diagnostics-grid">
+        <div><span>Active</span><strong>${esc(d.activeProfileName || "--")}</strong></div>
+        <div><span>default</span><strong>${esc(d.defaultModelId || "--")}</strong></div>
+        <div><span>Model</span><strong>${esc(d.model || "--")}</strong></div>
+        <div><span>Backend</span><strong>${esc(d.apiBackend || "--")}</strong></div>
+      </div>
+      <div class="diagnostics-paths">
+        <div title="${esc(d.configPath || "")}">config: ${esc(d.configExists ? d.configPath : (currentLang === "zh" ? "未找到" : "missing"))}</div>
+        <div>source: ${esc(d.source || "--")}</div>
+      </div>
+      ${issueItems ? `<div class="diagnostics-list"><strong>${currentLang === "zh" ? "问题" : "Issues"}</strong><ul>${issueItems}</ul></div>` : ""}
+      ${suggestionItems ? `<div class="diagnostics-list"><strong>${currentLang === "zh" ? "建议" : "Suggestions"}</strong><ul>${suggestionItems}</ul></div>` : ""}
+      <div class="diagnostics-footer">Last checked: ${esc(d.lastCheckedAt || "--")}</div>
+    </div>`;
+}
+
+async function loadGrokDiagnostics() {
+  try {
+    grokDiagnostics = await invoke("get_grok_diagnostics");
+    renderGrokDiagnostics();
+  } catch (error) {
+    const panel = $("grokDiagnosticsPanel");
+    if (panel) {
+      panel.innerHTML = `<div class="diagnostics-card warning">${currentLang === "zh" ? "诊断加载失败" : "Diagnostics failed"}：${esc(String(error))}</div>`;
+    }
+  }
+}
+
+async function handleGrokRuntimeBackup() {
+  try {
+    const path = await invoke("backup_grok_runtime");
+    showToast(currentLang === "zh" ? `已备份: ${path}` : `Backed up: ${path}`, "success");
+    await loadGrokDiagnostics();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleOpenGrokFolder() {
+  try {
+    await invoke("open_grok_config_folder");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+function openGrokModal(profile) {
+  editingGrokId = profile ? profile.id : null;
+  $("grokModalTitle").textContent = profile ? t("grokEditConfig") : t("grokAddConfig");
+  $("grokProfileId").value = editingGrokId || "";
+  $("grokPresetSelect").value = "";
+  $("grokProfileName").value = profile ? profile.name : "";
+  $("grokApiKey").value = profile ? profile.apiKey : "";
+  $("grokBaseUrl").value = profile ? profile.baseUrl : "https://api.x.ai/v1";
+  $("grokModel").value = profile ? (profile.model || "") : "";
+  if ($("grokApiBackend")) {
+    $("grokApiBackend").value = profile?.apiBackend || "chat_completions";
+  }
+  updateGrokPresetHint();
+  clearEndpointResults("grok");
+  clearModelResults("grok");
+  $("grokModalOverlay").classList.add("open");
+  document.body.classList.add("modal-open");
+  $("grokProfileName").focus();
+}
+
+function closeGrokModal() {
+  $("grokModalOverlay").classList.remove("open");
+  document.body.classList.remove("modal-open");
+  editingGrokId = null;
+}
+
+async function handleGrokSubmit(event) {
+  event.preventDefault();
+  const name = $("grokProfileName").value.trim();
+  const apiKey = $("grokApiKey").value.trim();
+  const baseUrl = $("grokBaseUrl").value.trim() || "https://api.x.ai/v1";
+  const model = $("grokModel").value.trim();
+  const apiBackend = $("grokApiBackend")?.value || "chat_completions";
+
+  try {
+    if (editingGrokId) {
+      await invoke("update_grok_profile", {
+        id: editingGrokId,
+        name,
+        apiKey,
+        baseUrl,
+        model: model || null,
+        apiBackend,
+      });
+      showToast(t("grokToastUpdated"), "success");
+    } else {
+      await invoke("add_grok_profile", {
+        name,
+        apiKey,
+        baseUrl,
+        model: model || null,
+        apiBackend,
+      });
+      showToast(t("grokToastAdded"), "success");
+    }
+    closeGrokModal();
+    await Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]);
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleGrokSwitch(id) {
+  if (isSwitchingProfile) return;
+  const profile = grokProfiles.find((item) => item.id === id);
+  if (!profile) return;
+
+  isSwitchingProfile = true;
+  showSwitchOverlay(profile.name, "grok");
+  try {
+    await waitForNextPaint();
+    await invoke("switch_grok_profile", { id });
+    completeSwitchOverlay();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    showToast(t("grokSwitchedTo", { name: profile?.name || "" }), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    hideSwitchOverlay();
+    isSwitchingProfile = false;
+    await Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]);
+  }
+}
+
+async function handleGrokDelete(id) {
+  const profile = grokProfiles.find((x) => x.id === id);
+  if (!profile) return;
+  const confirmed = await appConfirm(t("confirmDelete", { name: profile.name }), {
+    title: t("delete"),
+    confirmText: currentLang === "zh" ? "删除配置" : "Delete",
+    danger: true,
+  });
+  if (!confirmed) return;
+  try {
+    await invoke("delete_grok_profile", { id });
+    showToast(t("grokToastDeleted"), "success");
+    await Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]);
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleGrokImport() {
+  const input = await appPrompt(
+    currentLang === "zh"
+      ? "系统将从 ~/.grok/config.toml 读取当前 Grok 配置并保存。"
+      : "Import current Grok config.toml as a new profile.",
+    t("grokImportDefaultName"),
+    {
+      title: currentLang === "zh" ? "导入当前 Grok 配置" : "Import Grok Config",
+      inputLabel: currentLang === "zh" ? "配置名称" : "Config name",
+      confirmText: currentLang === "zh" ? "导入配置" : "Import",
+    }
+  );
+  if (input === null) return;
+  const name = String(input).trim() || t("grokImportDefaultName");
+  try {
+    await invoke("import_grok_current", { name });
+    showToast(t("grokToastImported"), "success");
+    await Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]);
+  } catch (error) {
+    showToast(String(error), "error");
   }
 }
 
@@ -3351,24 +4106,37 @@ function applyCodexPreset(preset) {
   $("codexModel").value = preset.model;
   $("codexProvider").value = preset.providerName;
   clearEndpointResults("codex");
+  clearModelResults("codex");
   updateCodexPresetHint();
   updateCodexOfficialConfigPreview();
 }
 
 function getCodexAuthMode() {
-  return $("codexAuthModeOfficial")?.checked ? "official_account_api_quota" : "auth_json";
+  if ($("codexAuthModeSaveOnly")?.checked) return "save_only";
+  if ($("codexAuthModeOfficial")?.checked) return "official_account_api_quota";
+  return "auth_json";
 }
 
 function setCodexAuthMode(mode) {
   const official = mode === "official_account_api_quota";
-  $("codexAuthModeOfficial").checked = official;
-  $("codexAuthModeDefault").checked = !official;
+  const saveOnly = mode === "save_only";
+  if ($("codexAuthModeOfficial")) $("codexAuthModeOfficial").checked = official;
+  if ($("codexAuthModeSaveOnly")) $("codexAuthModeSaveOnly").checked = saveOnly;
+  if ($("codexAuthModeDefault")) $("codexAuthModeDefault").checked = !official && !saveOnly;
   updateCodexAuthModeUi();
 }
 
 function buildCodexOfficialConfig() {
   const baseUrl = $("codexBaseUrl").value.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const apiKey = $("codexApiKey").value.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const imageApiKey = $("codexImageApiKey").value.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const imageBaseUrl = ($("codexImageBaseUrl").value.trim() || "https://hk.getelucid.com/v1").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const imageConfig = imageApiKey ? `
+
+[gpt_image_2]
+api_key = "${imageApiKey}"
+base_url = "${imageBaseUrl}"
+model = "gpt-image-2"` : "";
   return `model_provider = "customer"
 model = "gpt-5.5"
 review_model = "gpt-5.5"
@@ -3381,7 +4149,7 @@ name = "customer"
 wire_api = "responses"
 requires_openai_auth = true
 base_url = "${baseUrl}"
-experimental_bearer_token = "${apiKey}"`;
+experimental_bearer_token = "${apiKey}"${imageConfig}`;
 }
 
 function updateCodexOfficialConfigPreview() {
@@ -3390,8 +4158,16 @@ function updateCodexOfficialConfigPreview() {
 }
 
 function updateCodexAuthModeUi() {
-  const isOfficialMode = getCodexAuthMode() === "official_account_api_quota";
-  $("codexOfficialConfigGroup").style.display = isOfficialMode ? "block" : "none";
+  const mode = getCodexAuthMode();
+  const isOfficialMode = mode === "official_account_api_quota";
+  const saveOnly = mode === "save_only";
+  if ($("codexOfficialConfigGroup")) {
+    $("codexOfficialConfigGroup").style.display = isOfficialMode ? "block" : "none";
+  }
+  // 官方账号模式 / 仅保存：API Key 可不填
+  if ($("codexApiKey")) {
+    $("codexApiKey").required = !(isOfficialMode || saveOnly);
+  }
   updateCodexOfficialConfigPreview();
 }
 
@@ -3410,6 +4186,7 @@ async function loadCodexProfiles() {
     const data = await invoke("get_codex_profiles");
     codexProfiles = data.profiles || [];
     renderCodexProfiles();
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
   } catch (error) {
     showToast(String(error), "error");
   }
@@ -3430,12 +4207,7 @@ function renderCodexProfiles() {
         </svg>
         <div class="empty-state-title">${t("codexNoConfigsTitle")}</div>
         <p>${t("codexNoConfigsDesc")}</p>
-        <div class="empty-state-actions">
-          <button class="btn btn-primary" id="codexAddFirstBtn" type="button">${t("codexAddFirstConfig")}</button>
-        </div>
       </div>`;
-    const btn = $("codexAddFirstBtn");
-    if (btn) btn.addEventListener("click", () => openCodexModal(null));
     updateCodexActiveConfigBar();
     return;
   }
@@ -3462,6 +4234,14 @@ function renderCodexProfiles() {
         ${profile.providerName ? `<div class="profile-field">
           <span class="field-label">${t("codexProviderLabel")}</span>
           <span class="field-value">${esc(profile.providerName)}</span>
+        </div>` : ""}
+        ${profile.imageApiKey ? `<div class="profile-field">
+          <span class="field-label">${t("codexImageApiKeyLabel")}</span>
+          <span class="field-value">${maskKey(profile.imageApiKey)}</span>
+        </div>` : ""}
+        ${profile.imageApiKey && profile.imageBaseUrl ? `<div class="profile-field">
+          <span class="field-label">${t("codexImageBaseUrlLabel")}</span>
+          <span class="field-value">${truncUrl(profile.imageBaseUrl, 50)}</span>
         </div>` : ""}
       </div>
       <div class="profile-actions">
@@ -3567,9 +4347,14 @@ async function handleCodexRuntimeBackup() {
 async function loadCodexStatus() {
   try {
     const status = await invoke("get_codex_status");
+    lastCodexStatus = status;
     const grid = $("codexStatusGrid");
     if (!status || !status.apiKey) {
-      grid.innerHTML = `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">Codex: --</div>`;
+      if (grid) {
+        grid.innerHTML = `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">Codex: --</div>`;
+      }
+      if (typeof renderCodexCurrentCard === "function") renderCodexCurrentCard();
+      if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
       return;
     }
     const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
@@ -3588,39 +4373,70 @@ async function loadCodexStatus() {
         <div class="status-item">
           <span class="status-label">${t("codexBaseUrlLabel")}</span>
           <div class="status-value-wrapper">
-            <span class="status-value has-tooltip" data-tooltip="${esc(status.baseUrl || "")}">${truncUrl(status.baseUrl)}</span>
+            <span class="status-value has-tooltip" data-tooltip="${esc(status.baseUrl || "")}" title="${esc(status.baseUrl || "")}">${esc(status.baseUrl || "--")}</span>
             <button class="copy-btn" type="button" data-copy="${esc(status.baseUrl || "")}" title="Copy">${COPY_ICON}</button>
           </div>
         </div>
+        ${status.imageApiKey ? `<div class="status-item">
+          <span class="status-label">${t("codexImageApiKeyLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${maskKey(status.imageApiKey)}</span>
+            <button class="copy-btn" type="button" data-copy="${esc(status.imageApiKey || "")}" title="Copy">${COPY_ICON}</button>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("codexImageBaseUrlLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value has-tooltip" data-tooltip="${esc(status.imageBaseUrl || "")}" title="${esc(status.imageBaseUrl || "")}">${esc(status.imageBaseUrl || "--")}</span>
+            <button class="copy-btn" type="button" data-copy="${esc(status.imageBaseUrl || "")}" title="Copy">${COPY_ICON}</button>
+          </div>
+        </div>` : ""}
       </div>`;
-    grid.querySelectorAll(".copy-btn").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const text = btn.getAttribute("data-copy");
-        if (text) navigator.clipboard.writeText(text).then(() => showToast(t("toastCopied"), "success"));
+    if (grid) {
+      grid.querySelectorAll(".copy-btn").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const text = btn.getAttribute("data-copy");
+          if (text) navigator.clipboard.writeText(text).then(() => showToast(t("toastCopied"), "success"));
+        });
       });
-    });
+    }
+    if (typeof renderCodexCurrentCard === "function") renderCodexCurrentCard();
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
   } catch (error) {
     console.error("Failed to load codex status:", error);
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
   }
 }
 
 function openCodexModal(profile) {
   editingCodexId = profile ? profile.id : null;
+  codexWizardEnableAfterSave = false;
   $("codexModalTitle").textContent = profile ? t("codexEditConfig") : t("codexAddConfig");
   $("codexProfileId").value = editingCodexId || "";
-  $("codexPresetSelect").value = "";
-  $("codexProfileName").value = profile ? profile.name : "";
-  $("codexApiKey").value = profile ? profile.apiKey : "";
-  $("codexBaseUrl").value = profile ? profile.baseUrl : "";
-  $("codexModel").value = profile ? (profile.model || "") : "";
-  $("codexProvider").value = profile ? (profile.providerName || "") : "";
+  if ($("codexPresetSelect")) $("codexPresetSelect").value = "";
+  if ($("codexProfileName")) $("codexProfileName").value = profile ? profile.name : "";
+  if ($("codexApiKey")) {
+    $("codexApiKey").value = profile ? profile.apiKey : "";
+    $("codexApiKey").type = "password";
+  }
+  if ($("codexApiKeyToggle")) $("codexApiKeyToggle").textContent = currentLang === "zh" ? "显示" : "Show";
+  if ($("codexBaseUrl")) $("codexBaseUrl").value = profile ? profile.baseUrl : "";
+  if ($("codexModel")) $("codexModel").value = profile ? (profile.model || "") : "";
+  if ($("codexProvider")) $("codexProvider").value = profile ? (profile.providerName || "") : "";
+  if ($("codexImageApiKey")) $("codexImageApiKey").value = profile ? (profile.imageApiKey || "") : "";
+  if ($("codexImageBaseUrl")) $("codexImageBaseUrl").value = profile ? (profile.imageBaseUrl || "https://hk.getelucid.com/v1") : "https://hk.getelucid.com/v1";
   setCodexAuthMode(profile ? (profile.authMode || "auth_json") : "auth_json");
   updateCodexPresetHint();
   clearEndpointResults("codex");
+  clearModelResults("codex");
+  setCodexWizardStep(profile ? 3 : 1);
   $("codexModalOverlay").classList.add("open");
   document.body.classList.add("modal-open");
-  $("codexProfileName").focus();
+  setTimeout(() => {
+    if (profile) $("codexProfileName")?.focus();
+    else $("codexPresetSelect")?.focus();
+  }, 20);
 }
 
 function closeCodexModal() {
@@ -3631,51 +4447,87 @@ function closeCodexModal() {
 
 async function handleCodexSubmit(event) {
   event.preventDefault();
+  if (!validateCodexWizardStep(3)) {
+    setCodexWizardStep(3);
+    return;
+  }
   const name = $("codexProfileName").value.trim();
   const apiKey = $("codexApiKey").value.trim();
   const baseUrl = $("codexBaseUrl").value.trim();
   const model = $("codexModel").value.trim();
   const providerName = $("codexProvider").value.trim();
-  const authMode = getCodexAuthMode();
+  const imageApiKey = $("codexImageApiKey").value.trim();
+  const imageBaseUrl = $("codexImageBaseUrl").value.trim();
+  let authMode = getCodexAuthMode();
+  // save_only：前端仅保存配置，后端仍用 auth_json 字段存储，不自动切换
+  const saveOnly = authMode === "save_only";
+  if (saveOnly) authMode = "auth_json";
+  const enableAfter = codexWizardEnableAfterSave && !saveOnly;
+  codexWizardEnableAfterSave = false;
 
   try {
+    let savedId = editingCodexId;
     if (editingCodexId) {
-      await invoke("update_codex_profile", { id: editingCodexId, name, apiKey, baseUrl, model: model || null, providerName: providerName || null, authMode });
+      await invoke("update_codex_profile", { id: editingCodexId, name, apiKey, baseUrl, model: model || null, providerName: providerName || null, authMode, imageApiKey: imageApiKey || null, imageBaseUrl: imageBaseUrl || null });
       showToast(t("codexToastUpdated"), "success");
     } else {
-      await invoke("add_codex_profile", { name, apiKey, baseUrl, model: model || null, providerName: providerName || null, authMode });
+      const created = await invoke("add_codex_profile", { name, apiKey, baseUrl, model: model || null, providerName: providerName || null, authMode, imageApiKey: imageApiKey || null, imageBaseUrl: imageBaseUrl || null });
+      savedId = created?.id || created?.profile?.id || null;
       showToast(t("codexToastAdded"), "success");
     }
     closeCodexModal();
     await loadCodexProfiles();
-    await loadCodexStatus();
-    await loadCodexDiagnostics();
+    if (!savedId) {
+      const found = codexProfiles.find((p) => p.name === name);
+      savedId = found?.id || null;
+    }
+    if (enableAfter && savedId) {
+      await handleCodexSwitch(savedId);
+    } else {
+      await loadCodexStatus();
+      await loadCodexDiagnostics();
+    }
+    renderOverviewDashboard();
   } catch (error) {
     showToast(String(error), "error");
   }
 }
 
 async function handleCodexSwitch(id) {
+  if (isSwitchingProfile) return;
+  const profile = codexProfiles.find((item) => item.id === id);
+  if (!profile) return;
+
+  isSwitchingProfile = true;
+  showSwitchOverlay(profile.name, "codex");
   try {
+    await waitForNextPaint();
     await invoke("switch_codex_profile", { id });
-    const profile = codexProfiles.find((x) => x.id === id);
+    completeSwitchOverlay();
+    await new Promise((resolve) => setTimeout(resolve, 250));
     showToast(t("codexSwitchedTo", { name: profile?.name || "" }), "success");
-    await loadCodexProfiles();
-    await loadCodexStatus();
-    await loadCodexDiagnostics();
   } catch (error) {
     showToast(String(error), "error");
+  } finally {
+    hideSwitchOverlay();
+    isSwitchingProfile = false;
+    await Promise.all([loadCodexProfiles(), loadCodexStatus(), loadCodexDiagnostics()]);
   }
 }
 
 async function handleCodexDelete(id) {
   const profile = codexProfiles.find((x) => x.id === id);
   if (!profile) return;
-  const dialog = window.__TAURI_PLUGIN_DIALOG__;
-  const confirmed = await dialog.ask(t("confirmDelete", { name: profile.name }), {
-    title: t("delete"),
-    kind: "warning",
-  });
+  const confirmed = await appConfirm(
+    currentLang === "zh"
+      ? `删除配置 “${profile.name}”？\n\n删除后将无法从 VarSwitch 中恢复，但不会自动删除远程 API 服务。`
+      : t("confirmDelete", { name: profile.name }),
+    {
+      title: t("delete"),
+      confirmText: currentLang === "zh" ? "删除配置" : "Delete",
+      danger: true,
+    }
+  );
   if (!confirmed) return;
   try {
     await invoke("delete_codex_profile", { id });
@@ -3688,9 +4540,19 @@ async function handleCodexDelete(id) {
 }
 
 async function handleCodexImport() {
-  const input = window.prompt(t("codexImportPrompt"), t("codexImportDefaultName"));
+  const input = await appPrompt(
+    currentLang === "zh"
+      ? "系统将从本地 Codex 配置文件读取 API Key、Base URL、模型等信息，并保存为一个新的 VarSwitch 配置项。"
+      : "Import current Codex runtime files as a new profile.",
+    t("codexImportDefaultName"),
+    {
+      title: currentLang === "zh" ? "导入当前 Codex 配置" : "Import Codex Config",
+      inputLabel: currentLang === "zh" ? "配置名称" : "Config name",
+      confirmText: currentLang === "zh" ? "导入配置" : "Import",
+    }
+  );
   if (input === null) return;
-  const name = input.trim() || t("codexImportDefaultName");
+  const name = String(input).trim() || t("codexImportDefaultName");
   try {
     await invoke("import_codex_current", { name });
     showToast(t("codexToastImported"), "success");
@@ -3813,10 +4675,10 @@ async function handleSaveSkill() {
 }
 
 async function handleDeleteSkill(name, sourceType) {
-  const dialog = window.__TAURI_PLUGIN_DIALOG__;
-  const confirmed = await dialog.ask(t("confirmDeleteSkill", { name }), {
+  const confirmed = await appConfirm(t("confirmDeleteSkill", { name }), {
     title: t("delete"),
-    kind: "warning",
+    danger: true,
+    confirmText: currentLang === "zh" ? "删除" : "Delete",
   });
   if (!confirmed) return;
   try {
@@ -4292,10 +5154,10 @@ async function handleSaveMcp() {
 }
 
 async function handleDeleteMcp(name) {
-  const dialog = window.__TAURI_PLUGIN_DIALOG__;
-  const confirmed = await dialog.ask(t("confirmDeleteMcp", { name }), {
+  const confirmed = await appConfirm(t("confirmDeleteMcp", { name }), {
     title: t("delete"),
-    kind: "warning",
+    danger: true,
+    confirmText: currentLang === "zh" ? "删除" : "Delete",
   });
   if (!confirmed) return;
   try {
@@ -4426,47 +5288,990 @@ function renderMcpPresets() {
 }
 
 function showToast(message, type = "success") {
-  const container = $("toastContainer");
-  const toast = document.createElement("div");
-  toast.className = `toast ${type}`;
-  toast.textContent = String(message);
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.opacity = "0";
-    setTimeout(() => toast.remove(), 300);
-  }, 3200);
+  try {
+    const container = $("toastContainer");
+    if (container) {
+      const toast = document.createElement("div");
+      toast.className = `toast ${type}`;
+      toast.textContent = String(message);
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = "0";
+        setTimeout(() => toast.remove(), 300);
+      }, 3200);
+    }
+    if (typeof pushOverviewEvent === "function" && Array.isArray(overviewEvents)) {
+      // 直接写入，避免 toast->event->render 链路异常阻断
+      overviewEvents.unshift({
+        message: String(message || ""),
+        level: type === "error" ? "error" : type === "warning" ? "warning" : "info",
+        time: new Date(),
+      });
+      overviewEvents = overviewEvents.slice(0, 12);
+      if (typeof renderOverviewEvents === "function") renderOverviewEvents();
+    }
+  } catch (e) {
+    console.error("showToast failed", e, message);
+  }
 }
 
+// ── 统一 Dialog（替代 alert/confirm/prompt）────────────────
+let appDialogResolver = null;
+
+function closeAppDialog(result) {
+  const overlay = $("appDialogOverlay");
+  if (overlay) overlay.classList.remove("open");
+  document.body.classList.remove("modal-open");
+  const resolver = appDialogResolver;
+  appDialogResolver = null;
+  if (resolver) resolver(result);
+}
+
+function openAppDialog(options = {}) {
+  return new Promise((resolve) => {
+    appDialogResolver = resolve;
+    const overlay = $("appDialogOverlay");
+    const dialog = overlay?.querySelector(".app-dialog");
+    if (!overlay || !dialog) {
+      resolve(options.mode === "prompt" ? null : false);
+      return;
+    }
+
+    dialog.classList.toggle("danger", !!options.danger);
+    $("appDialogKicker").textContent = options.kicker || "VarSwitch";
+    $("appDialogTitle").textContent = options.title || (currentLang === "zh" ? "确认操作" : "Confirm");
+    $("appDialogMessage").textContent = options.message || "";
+    $("appDialogCancel").textContent = options.cancelText || t("cancel");
+    $("appDialogConfirm").textContent = options.confirmText || (currentLang === "zh" ? "确认" : "Confirm");
+
+    const inputGroup = $("appDialogInputGroup");
+    const input = $("appDialogInput");
+    if (options.mode === "prompt") {
+      inputGroup.hidden = false;
+      $("appDialogInputLabel").textContent = options.inputLabel || (currentLang === "zh" ? "配置名称" : "Name");
+      $("appDialogInputHint").textContent = options.inputHint || "";
+      input.value = options.defaultValue || "";
+      input.placeholder = options.placeholder || "";
+    } else {
+      inputGroup.hidden = true;
+      input.value = "";
+    }
+
+    overlay.classList.add("open");
+    document.body.classList.add("modal-open");
+    setTimeout(() => {
+      if (options.mode === "prompt") input.focus();
+      else $("appDialogConfirm").focus();
+    }, 30);
+  });
+}
+
+async function appConfirm(message, options = {}) {
+  return openAppDialog({
+    mode: "confirm",
+    title: options.title || (currentLang === "zh" ? "确认操作" : "Confirm"),
+    message,
+    confirmText: options.confirmText || (currentLang === "zh" ? "确认" : "Confirm"),
+    cancelText: options.cancelText || t("cancel"),
+    danger: !!options.danger,
+    kicker: options.kicker || "VarSwitch",
+  });
+}
+
+async function appPrompt(message, defaultValue = "", options = {}) {
+  const result = await openAppDialog({
+    mode: "prompt",
+    title: options.title || (currentLang === "zh" ? "请输入" : "Input"),
+    message,
+    defaultValue,
+    inputLabel: options.inputLabel,
+    inputHint: options.inputHint,
+    confirmText: options.confirmText || (currentLang === "zh" ? "确定" : "OK"),
+    cancelText: options.cancelText || t("cancel"),
+    kicker: options.kicker || "VarSwitch",
+  });
+  return result;
+}
+
+function bindAppDialogOnce() {
+  if (window.__varswitchDialogBound) return;
+  window.__varswitchDialogBound = true;
+  $("appDialogClose")?.addEventListener("click", () => closeAppDialog(null));
+  $("appDialogCancel")?.addEventListener("click", () => closeAppDialog(null));
+  $("appDialogConfirm")?.addEventListener("click", () => {
+    const inputGroup = $("appDialogInputGroup");
+    if (inputGroup && !inputGroup.hidden) {
+      closeAppDialog($("appDialogInput").value);
+    } else {
+      closeAppDialog(true);
+    }
+  });
+  $("appDialogOverlay")?.addEventListener("click", (event) => {
+    if (event.target === $("appDialogOverlay")) closeAppDialog(null);
+  });
+  $("appDialogInput")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      $("appDialogConfirm")?.click();
+    }
+  });
+}
+
+// ── Overview 事件与控制台导航 ──────────────────────────────
+function pushOverviewEvent(message, level = "info") {
+  overviewEvents.unshift({
+    message: String(message || ""),
+    level,
+    time: new Date(),
+  });
+  overviewEvents = overviewEvents.slice(0, 12);
+  renderOverviewEvents();
+}
+
+function formatRelativeTime(date) {
+  if (!date) return "--";
+  const diff = Math.max(0, Date.now() - date.getTime());
+  if (diff < 60_000) return currentLang === "zh" ? "刚刚" : "just now";
+  if (diff < 3_600_000) {
+    const m = Math.floor(diff / 60_000);
+    return currentLang === "zh" ? `${m} 分钟前` : `${m}m ago`;
+  }
+  if (diff < 86_400_000) {
+    const h = Math.floor(diff / 3_600_000);
+    return currentLang === "zh" ? `${h} 小时前` : `${h}h ago`;
+  }
+  const d = Math.floor(diff / 86_400_000);
+  return currentLang === "zh" ? `${d} 天前` : `${d}d ago`;
+}
+
+function setBadge(el, text, tone = "") {
+  if (!el) return;
+  el.textContent = text;
+  el.className = `status-badge-console${tone ? ` ${tone}` : ""}`;
+}
+
+function setNavDot(id, tone = "") {
+  const el = $(id);
+  if (!el) return;
+  el.className = `nav-state-dot${tone ? ` ${tone}` : ""}`;
+}
+
+function mountToolboxPages() {
+  const market = $("toolboxMarketContent");
+  const session = $("toolboxSessionContent");
+  const remote = $("toolboxRemoteContent");
+  const pluginHost = $("pluginPageHost");
+  const sessionHost = $("sessionPageHost");
+  const mobileHost = $("mobilePageHost");
+  if (market && pluginHost && market.parentElement !== pluginHost) {
+    pluginHost.appendChild(market);
+    market.style.display = "";
+  }
+  if (session && sessionHost && session.parentElement !== sessionHost) {
+    sessionHost.appendChild(session);
+    session.style.display = "";
+  }
+  if (remote && mobileHost && remote.parentElement !== mobileHost) {
+    mobileHost.appendChild(remote);
+    remote.style.display = "";
+  }
+
+  // 设置页：把设置面板 body 挂入页面
+  const settingsBody = document.querySelector("#settingsOverlay .settings-body");
+  const settingsHost = $("settingsPageHost");
+  if (settingsBody && settingsHost && settingsBody.parentElement !== settingsHost) {
+    settingsHost.appendChild(settingsBody);
+  }
+}
+
+function switchConsolePage(page) {
+  const next = page || "overview";
+  activeConsolePage = next;
+  // 与旧 page 切换兼容
+  if (next === "claude" || next === "codex" || next === "grok") {
+    currentPage = next;
+  }
+
+  document.querySelectorAll(".sidebar-item[data-console-page]").forEach((item) => {
+    const isActive = item.getAttribute("data-console-page") === next;
+    item.classList.toggle("active", isActive);
+    if (isActive) {
+      item.setAttribute("aria-current", "page");
+    } else {
+      item.removeAttribute("aria-current");
+    }
+  });
+  document.querySelectorAll("[data-console-page-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.getAttribute("data-console-page-panel") === next);
+  });
+
+  // 旧横向 tab 同步
+  document.querySelectorAll(".page-tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.getAttribute("data-page") === next);
+  });
+
+  if (next === "claude") {
+    loadStatus();
+    loadProfiles();
+  } else if (next === "codex") {
+    loadCodexProfiles();
+    loadCodexStatus();
+    loadCodexDiagnostics();
+  } else if (next === "grok") {
+    loadGrokProfiles();
+    loadGrokStatus();
+  } else if (next === "configurations") {
+    renderConfigurationList();
+  } else if (next === "plugins" || next === "sessions" || next === "mobile") {
+    mountToolboxPages();
+    loadCodexToolbox();
+    if (next === "plugins") switchToolboxTab("market");
+    if (next === "sessions") switchToolboxTab("session");
+    if (next === "mobile") switchToolboxTab("remote");
+  } else if (next === "settings") {
+    mountToolboxPages();
+    openSettingsInline();
+  } else if (next === "overview") {
+    renderOverviewDashboard();
+  }
+
+  renderGlobalConfigStatus();
+
+  // 滚动到主内容顶部
+  $("workspaceMain")?.scrollTo?.({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function openSettingsInline() {
+  try {
+    // 复用 openSettingsPanel 的数据加载，但不打开遮罩
+    if (typeof loadAppSettings === "function") await loadAppSettings();
+    const paths = await invoke("get_app_paths").catch(() => null);
+    appPaths = paths || appPaths;
+    if (paths) {
+      if ($("settingsConfigDirValue")) $("settingsConfigDirValue").textContent = paths.configDir || "--";
+      if ($("settingsClaudePathValue")) $("settingsClaudePathValue").textContent = paths.claudeSettings || "--";
+      if ($("settingsCodexPathValue")) $("settingsCodexPathValue").textContent = paths.codexDir || paths.codexSettings || "--";
+    }
+    // 同步设置页语言/主题按钮
+    $("settingsLangZh")?.classList.toggle("active", currentLang === "zh");
+    $("settingsLangEn")?.classList.toggle("active", currentLang === "en");
+    $("settingsThemeLight")?.classList.toggle("active", currentTheme === "light");
+    $("settingsThemeDark")?.classList.toggle("active", currentTheme === "dark");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+function renderOverviewEvents() {
+  const list = $("overviewEventList");
+  if (!list) return;
+  if (!overviewEvents.length) {
+    list.innerHTML = `<div class="event-item"><span class="event-dot"></span><div><strong>${currentLang === "zh" ? "暂无事件" : "No events yet"}</strong><small>${currentLang === "zh" ? "同步、导入、切换后会出现在这里" : "Sync, import and switch actions will appear here"}</small></div><span class="event-time">--</span></div>`;
+    return;
+  }
+  list.innerHTML = overviewEvents
+    .map((item) => {
+      const tone = item.level === "error" ? "warning" : item.level === "warning" ? "warning" : "";
+      return `<div class="event-item"><span class="event-dot ${tone}"></span><div><strong>${esc(item.message)}</strong></div><span class="event-time">${formatRelativeTime(item.time)}</span></div>`;
+    })
+    .join("");
+}
+
+function renderOverviewRecentConfigs() {
+  const host = $("overviewRecentConfigs");
+  if (!host) return;
+  const items = [];
+  const activeClaude = profiles.find((p) => p.isActive);
+  const activeCodex = codexProfiles.find((p) => p.isActive);
+  const activeGrok = grokProfiles.find((p) => p.isActive);
+  if (activeClaude) items.push({ type: "claude", profile: activeClaude });
+  if (activeCodex) items.push({ type: "codex", profile: activeCodex });
+  if (activeGrok) items.push({ type: "grok", profile: activeGrok });
+  // 补充最近非激活配置
+  [...profiles, ...codexProfiles, ...grokProfiles]
+    .filter((p) => !p.isActive)
+    .slice(0, 4)
+    .forEach((p) => {
+      const type = profiles.includes(p) ? "claude" : codexProfiles.includes(p) ? "codex" : "grok";
+      if (!items.find((x) => x.profile.id === p.id && x.type === type)) {
+        items.push({ type, profile: p });
+      }
+    });
+
+  if (!items.length) {
+    host.innerHTML = `<div class="empty-inline">${currentLang === "zh" ? "还没有配置，点击右上角添加。" : "No configs yet. Add one from the top bar."}</div>`;
+    return;
+  }
+
+  host.innerHTML = items
+    .slice(0, 6)
+    .map(({ type, profile }) => {
+      const icon = type === "claude" ? "anthropic-color.svg" : type === "codex" ? "OpenAI-black-monoblossom.svg" : "grok-color.svg";
+      const typeLabel = type === "claude" ? "Claude" : type === "codex" ? "Codex" : "Grok";
+      const badge = profile.isActive
+        ? `<span class="status-badge-console healthy">${currentLang === "zh" ? "使用中" : "Active"}</span>`
+        : `<span class="status-badge-console">${currentLang === "zh" ? "可切换" : "Ready"}</span>`;
+      return `<div class="configuration-row configuration-row-overview">
+        <div class="configuration-data">
+          <div class="configuration-main"><img src="${icon}" alt=""><div><strong>${esc(profile.name)}</strong><small>${typeLabel} · ${esc(truncUrl(profile.baseUrl || "", 36))}</small></div></div>
+          <div class="configuration-meta">${esc(maskKey(profile.apiKey || ""))}</div>
+          <div class="configuration-state">${badge}</div>
+        </div>
+        <div class="configuration-actions">
+          ${profile.isActive
+            ? `<span class="configuration-action-slot" aria-hidden="true"></span>`
+            : `<button class="btn btn-secondary btn-sm" data-overview-switch="${type}:${esc(profile.id)}" type="button">${currentLang === "zh" ? "切换" : "Switch"}</button>`}
+          <button class="btn btn-ghost btn-sm" data-console-page="${type === "claude" ? "claude" : type === "codex" ? "codex" : "grok"}" type="button">${currentLang === "zh" ? "查看" : "Open"}</button>
+        </div>
+      </div>`;
+    })
+    .join("");
+
+  host.querySelectorAll("[data-overview-switch]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const [type, id] = (btn.getAttribute("data-overview-switch") || "").split(":");
+      if (type === "claude") await handleSwitch(id);
+      else if (type === "codex") await handleCodexSwitch(id);
+      else if (type === "grok") await handleGrokSwitch(id);
+      renderOverviewDashboard();
+    });
+  });
+  host.querySelectorAll("[data-console-page]").forEach((btn) => {
+    btn.addEventListener("click", () => switchConsolePage(btn.getAttribute("data-console-page")));
+  });
+}
+
+function renderConfigurationList() {
+  const host = $("configurationList");
+  if (!host) return;
+  const q = (configurationSearch || "").trim().toLowerCase();
+  const rows = [];
+  profiles.forEach((p) => rows.push({ type: "claude", profile: p }));
+  codexProfiles.forEach((p) => rows.push({ type: "codex", profile: p }));
+  grokProfiles.forEach((p) => rows.push({ type: "grok", profile: p }));
+
+  const filtered = rows.filter(({ type, profile }) => {
+    if (configurationFilter === "claude" && type !== "claude") return false;
+    if (configurationFilter === "codex" && type !== "codex") return false;
+    if (configurationFilter === "grok" && type !== "grok") return false;
+    if (configurationFilter === "active" && !profile.isActive) return false;
+    if (!q) return true;
+    const hay = `${profile.name || ""} ${profile.baseUrl || ""} ${profile.providerName || ""} ${profile.model || ""}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  if ($("configNavCount")) $("configNavCount").textContent = String(rows.length);
+
+  if (!filtered.length) {
+    host.innerHTML = `<div class="empty-inline">${currentLang === "zh" ? "没有匹配的配置" : "No matching configs"}</div>`;
+    return;
+  }
+
+  host.innerHTML = filtered
+    .map(({ type, profile }) => {
+      const icon = type === "claude" ? "anthropic-color.svg" : type === "codex" ? "OpenAI-black-monoblossom.svg" : "grok-color.svg";
+      const typeLabel = type === "claude" ? "Claude" : type === "codex" ? "Codex" : "Grok";
+      const badge = profile.isActive
+        ? `<span class="status-badge-console healthy">${currentLang === "zh" ? "使用中" : "Active"}</span>`
+        : `<span class="status-badge-console">${currentLang === "zh" ? "未启用" : "Idle"}</span>`;
+      return `<div class="configuration-row configuration-row-manager" data-config-type="${type}" data-config-id="${esc(profile.id)}">
+        <div class="configuration-data">
+          <div class="configuration-main"><img src="${icon}" alt=""><div><strong>${esc(profile.name)}</strong><small>${typeLabel}</small></div></div>
+          <div class="configuration-meta">${esc(maskKey(profile.apiKey || ""))}<br>${esc(truncUrl(profile.baseUrl || "", 42))}</div>
+          <div class="configuration-state">${badge}<div class="configuration-meta configuration-model">${esc(profile.model || profile.providerName || "--")}</div></div>
+        </div>
+        <div class="configuration-actions">
+          ${profile.isActive
+            ? `<span class="configuration-action-slot" aria-hidden="true"></span>`
+            : `<button class="btn btn-secondary btn-sm" data-action="switch" type="button">${currentLang === "zh" ? "切换" : "Use"}</button>`}
+          <button class="btn btn-ghost btn-sm" data-action="edit" type="button">${currentLang === "zh" ? "编辑" : "Edit"}</button>
+          <button class="btn btn-ghost btn-sm" data-action="copy" type="button">${currentLang === "zh" ? "复制" : "Duplicate"}</button>
+          <button class="btn btn-danger btn-sm" data-action="delete" type="button">${currentLang === "zh" ? "删除" : "Delete"}</button>
+        </div>
+      </div>`;
+    })
+    .join("");
+
+  host.querySelectorAll(".configuration-row").forEach((row) => {
+    const type = row.getAttribute("data-config-type");
+    const id = row.getAttribute("data-config-id");
+    row.querySelectorAll("button[data-action]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const action = btn.getAttribute("data-action");
+        if (action === "switch") {
+          if (type === "claude") await handleSwitch(id);
+          else if (type === "codex") await handleCodexSwitch(id);
+          else await handleGrokSwitch(id);
+        } else if (action === "edit") {
+          if (type === "claude") handleEdit(id);
+          else if (type === "codex") {
+            const p = codexProfiles.find((x) => x.id === id);
+            if (p) openCodexModal(p);
+          } else {
+            const p = grokProfiles.find((x) => x.id === id);
+            if (p) openGrokModal(p);
+          }
+        } else if (action === "copy") {
+          duplicateConfiguration(type, id);
+        } else if (action === "delete") {
+          if (type === "claude") await handleDelete(id);
+          else if (type === "codex") await handleCodexDelete(id);
+          else await handleGrokDelete(id);
+        }
+        renderConfigurationList();
+        renderOverviewDashboard();
+      });
+    });
+  });
+}
+
+function renderOverviewDashboard() {
+  try {
+  const activeClaude = profiles.find((p) => p.isActive);
+  const activeCodex = codexProfiles.find((p) => p.isActive);
+  const activeGrok = grokProfiles.find((p) => p.isActive);
+  const mainName = activeCodex?.name || activeClaude?.name || activeGrok?.name || (currentLang === "zh" ? "尚未启用配置" : "No active config");
+  if ($("overviewActiveName")) $("overviewActiveName").textContent = mainName;
+  renderGlobalConfigStatus();
+
+  // Claude：只要状态已读取就不再显示“检查中”
+  const claudeLoaded = lastClaudeStatus != null || profiles.length > 0;
+  const claudeOk = !!(lastClaudeStatus?.envVars || lastClaudeStatus?.claude || activeClaude);
+  setBadge(
+    $("overviewClaudeBadge"),
+    !claudeLoaded ? (currentLang === "zh" ? "检查中" : "...") : claudeOk ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "待配置" : "Idle"),
+    !claudeLoaded ? "" : claudeOk ? "healthy" : "warning"
+  );
+  if ($("overviewClaudeStatus")) {
+    $("overviewClaudeStatus").textContent = !claudeLoaded
+      ? (currentLang === "zh" ? "检查中" : "Checking")
+      : (activeClaude?.name || (currentLang === "zh" ? "未启用" : "Inactive"));
+  }
+  setNavDot("claudeNavState", !claudeLoaded ? "" : claudeOk ? "healthy" : "warning");
+
+  // Codex
+  const codexLoaded = lastCodexStatus != null || codexProfiles.length > 0;
+  const codexOk = !!(lastCodexStatus?.apiKey || activeCodex);
+  setBadge(
+    $("overviewCodexBadge"),
+    !codexLoaded ? (currentLang === "zh" ? "检查中" : "...") : codexOk ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "待配置" : "Idle"),
+    !codexLoaded ? "" : codexOk ? "healthy" : "warning"
+  );
+  if ($("overviewCodexStatus")) {
+    $("overviewCodexStatus").textContent = !codexLoaded
+      ? (currentLang === "zh" ? "检查中" : "Checking")
+      : (activeCodex?.name || (currentLang === "zh" ? "未启用" : "Inactive"));
+  }
+  setNavDot("codexNavState", !codexLoaded ? "" : codexOk ? "healthy" : "warning");
+
+  // Grok
+  const grokLoaded = lastGrokStatus != null || grokProfiles.length > 0;
+  const grokOk = !!(lastGrokStatus?.apiKey || activeGrok);
+  setBadge(
+    $("overviewGrokBadge"),
+    !grokLoaded ? (currentLang === "zh" ? "检查中" : "...") : grokOk ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "待配置" : "Idle"),
+    !grokLoaded ? "" : grokOk ? "healthy" : ""
+  );
+  if ($("overviewGrokStatus")) {
+    $("overviewGrokStatus").textContent = !grokLoaded
+      ? (currentLang === "zh" ? "检查中" : "Checking")
+      : (activeGrok?.name || (currentLang === "zh" ? "未启用" : "Inactive"));
+  }
+  setNavDot("grokNavState", !grokLoaded ? "" : grokOk ? "healthy" : "");
+
+  // Plugins / sessions / mobile from toolbox
+  const plugins = codexToolbox?.builtinPlugins?.plugins || codexToolbox?.plugins || [];
+  const pluginEnabled = Array.isArray(plugins) ? plugins.filter((p) => p.enabled || p.isEnabled).length : 0;
+  const pluginTotal = Array.isArray(plugins) ? plugins.length : 0;
+  if ($("overviewPluginStatus")) $("overviewPluginStatus").textContent = pluginTotal ? `${pluginEnabled}/${pluginTotal}` : (currentLang === "zh" ? "未加载" : "N/A");
+  setBadge($("overviewPluginBadge"), pluginTotal ? (currentLang === "zh" ? "已就绪" : "Ready") : "--", pluginTotal ? "healthy" : "");
+  setNavDot("pluginNavState", pluginTotal ? "healthy" : "");
+
+  const sessionMetrics = helpers.getCodexSessionMetrics?.(codexToolbox) || { count: 0 };
+  const sessionCount = sessionMetrics.count;
+  if ($("overviewSessionStatus")) $("overviewSessionStatus").textContent = sessionCount ? `${sessionCount}` : (currentLang === "zh" ? "0" : "0");
+  setBadge($("overviewSessionBadge"), sessionCount ? (currentLang === "zh" ? "已同步" : "Synced") : (currentLang === "zh" ? "空" : "Empty"), sessionCount ? "healthy" : "");
+  if ($("sessionNavCount")) $("sessionNavCount").textContent = String(sessionCount || 0);
+
+  const channels = codexToolbox?.mobileChannels || [];
+  const bound = Array.isArray(channels) ? channels.some((c) => c.bound || c.appId || c.botToken) : false;
+  setNavDot("mobileNavState", bound ? "healthy" : "");
+
+  const healthTone = claudeOk || codexOk ? "healthy" : "warning";
+  setBadge($("overviewHealthBadge"), healthTone === "healthy" ? (currentLang === "zh" ? "环境健康" : "Healthy") : (currentLang === "zh" ? "需要关注" : "Needs attention"), healthTone);
+  if ($("overviewHealthSummary")) {
+    $("overviewHealthSummary").textContent = currentLang === "zh"
+      ? `Claude ${claudeOk ? "正常" : "待配置"} · Codex ${codexOk ? "正常" : "待配置"} · 会话 ${sessionCount || 0}`
+      : `Claude ${claudeOk ? "OK" : "idle"} · Codex ${codexOk ? "OK" : "idle"} · Sessions ${sessionCount || 0}`;
+  }
+  if ($("globalStatusText")) {
+    $("globalStatusText").textContent = currentLang === "zh"
+      ? `Codex ${codexOk ? "正常" : "待配置"} · Claude ${claudeOk ? "正常" : "待配置"}`
+      : `Codex ${codexOk ? "OK" : "idle"} · Claude ${claudeOk ? "OK" : "idle"}`;
+  }
+  $("globalStatusDot")?.classList.toggle("healthy", healthTone === "healthy");
+  $("globalStatusDot")?.classList.toggle("warning", healthTone !== "healthy");
+
+  renderOverviewRecentConfigs();
+  renderOverviewEvents();
+  renderConfigurationList();
+  renderCodexCurrentCard();
+  renderSessionStatusCard();
+  renderMobileTimeline();
+  } catch (error) {
+    console.error("renderOverviewDashboard failed:", error);
+  }
+}
+
+function renderCodexCurrentCard() {
+  const grid = $("codexCurrentGrid");
+  if (!grid) return;
+  const active = codexProfiles.find((p) => p.isActive);
+  const status = lastCodexStatus || {};
+  const healthy = !!(status.apiKey || active);
+  setBadge($("codexCurrentHealthBadge"), healthy ? (currentLang === "zh" ? "正常" : "Healthy") : (currentLang === "zh" ? "未启用" : "Idle"), healthy ? "healthy" : "warning");
+  const rows = [
+    [currentLang === "zh" ? "当前配置" : "Active", active?.name || "--"],
+    ["Provider", status.providerName || active?.providerName || "--"],
+    ["Model", status.model || active?.model || "--"],
+    ["Auth", status.authMode || active?.authMode || "--"],
+    ["API Key", maskKey(status.apiKey || active?.apiKey || "")],
+    ["Base URL", truncUrl(status.baseUrl || active?.baseUrl || "", 48)],
+  ];
+  grid.innerHTML = rows
+    .map(([k, v]) => `<div class="wizard-review-item"><small>${esc(k)}</small><strong title="${esc(String(v))}">${esc(String(v))}</strong></div>`)
+    .join("");
+
+  const panel = $("codexDiagnosticsPanel");
+  if (panel) panel.style.display = codexDiagExpanded ? "" : "none";
+}
+
+function renderSessionStatusCard() {
+  const summary = $("sessionStatusSummary");
+  const metrics = $("sessionStatusMetrics");
+  if (!summary || !metrics) return;
+  const sessionMetrics = helpers.getCodexSessionMetrics?.(codexToolbox) || { count: 0, trashCount: 0, lastSyncedAt: "" };
+  const { count, trashCount, lastSyncedAt } = sessionMetrics;
+  const lastSyncLabel = lastSyncedAt ? formatToolboxSessionTime(lastSyncedAt) : "--";
+  summary.textContent = currentLang === "zh" ? `已同步 ${count} 个会话` : `${count} sessions synced`;
+  metrics.innerHTML = `
+    <div class="wizard-review-item"><small>${currentLang === "zh" ? "已同步" : "Synced"}</small><strong>${count}</strong></div>
+    <div class="wizard-review-item"><small>${currentLang === "zh" ? "回收站" : "Trash"}</small><strong>${trashCount}</strong></div>
+    <div class="wizard-review-item"><small>${currentLang === "zh" ? "最近同步" : "Last sync"}</small><strong>${esc(lastSyncLabel)}</strong></div>
+  `;
+  metrics.className = "wizard-review";
+  if ($("sessionNavCount")) $("sessionNavCount").textContent = String(count);
+}
+
+function renderGlobalConfigStatus() {
+  const activeClaude = profiles.find((profile) => profile.isActive);
+  const activeCodex = codexProfiles.find((profile) => profile.isActive);
+  const activeGrok = grokProfiles.find((profile) => profile.isActive);
+  const display = helpers.getGlobalConfigDisplay?.(
+    activeConsolePage,
+    {
+      claude: activeClaude?.name || "",
+      codex: activeCodex?.name || "",
+      grok: activeGrok?.name || "",
+      total: profiles.length + codexProfiles.length + grokProfiles.length,
+    },
+    currentLang
+  );
+  if (!display) return;
+  if ($("globalConfigLabel")) $("globalConfigLabel").textContent = display.label;
+  if ($("globalConfigName")) $("globalConfigName").textContent = display.name;
+  if ($("globalConfigPill")) $("globalConfigPill").title = display.title;
+}
+
+function renderMobileTimeline() {
+  const list = $("mobileTimeline");
+  if (!list || !codexToolbox) return;
+  const channels = codexToolbox.mobileChannels || [];
+  const bound = channels.some((c) => c.bound || c.appId || c.botToken || c.qrDeviceCode);
+  const hasSession = !!(selectedCodexThreadId || codexToolbox.selectedThreadId);
+  const listening = !!(codexToolbox.remoteRunning || codexToolbox.isListening);
+  list.querySelectorAll("li").forEach((li) => {
+    const step = li.getAttribute("data-step");
+    let done = false;
+    if (step === "bind") done = bound;
+    if (step === "session") done = hasSession;
+    if (step === "listen") done = listening;
+    if (step === "wait") done = listening;
+    li.classList.toggle("done", done);
+    li.classList.toggle("active", !done && ((step === "bind" && !bound) || (step === "session" && bound && !hasSession) || (step === "listen" && bound && hasSession && !listening) || (step === "wait" && listening)));
+  });
+}
+
+function applyPluginFilters() {
+  const q = (pluginSearch || "").trim().toLowerCase();
+  const cards = document.querySelectorAll("#builtinPluginList .builtin-plugin-card, #builtinPluginList .builtin-plugin-item, #builtinPluginList .plugin-card, #pluginPageHost .builtin-plugin-item");
+  cards.forEach((card) => {
+    const text = (card.textContent || "").toLowerCase();
+    const enabled = /enabled|已启用|active/i.test(text);
+    const needsRepair = /repair|修复|broken|error|异常/i.test(text);
+    const installed = true;
+    const show = helpers.matchesPluginFilter
+      ? helpers.matchesPluginFilter({ text, enabled, needsRepair, installed }, pluginFilter, q)
+      : (!q || text.includes(q));
+    card.style.display = show ? "" : "none";
+  });
+}
+
+function duplicateConfiguration(type, id) {
+  const copySuffix = currentLang === "zh" ? "副本" : "Copy";
+  if (type === "claude") {
+    const profile = profiles.find((item) => item.id === id);
+    if (!profile) return;
+    openModal(null);
+    $("profileName").value = `${profile.name} ${copySuffix}`;
+    $("profileApiKey").value = profile.apiKey || "";
+    $("profileBaseUrl").value = profile.baseUrl || "";
+    $("profileModelId").value = profile.modelId || "";
+  } else if (type === "codex") {
+    const profile = codexProfiles.find((item) => item.id === id);
+    if (!profile) return;
+    openCodexModal(null);
+    $("codexProfileName").value = `${profile.name} ${copySuffix}`;
+    $("codexApiKey").value = profile.apiKey || "";
+    $("codexBaseUrl").value = profile.baseUrl || "";
+    $("codexModel").value = profile.model || "";
+    $("codexProvider").value = profile.providerName || "";
+    $("codexImageApiKey").value = profile.imageApiKey || "";
+    $("codexImageBaseUrl").value = profile.imageBaseUrl || "https://hk.getelucid.com/v1";
+    setCodexAuthMode(profile.authMode || "auth_json");
+    setCodexWizardStep(3);
+  } else {
+    const profile = grokProfiles.find((item) => item.id === id);
+    if (!profile) return;
+    openGrokModal(null);
+    $("grokProfileName").value = `${profile.name} ${copySuffix}`;
+    $("grokApiKey").value = profile.apiKey || "";
+    $("grokBaseUrl").value = profile.baseUrl || "https://api.x.ai/v1";
+    $("grokModel").value = profile.model || "";
+    if ($("grokApiBackend")) $("grokApiBackend").value = profile.apiBackend || "chat_completions";
+  }
+  showToast(currentLang === "zh" ? "已创建配置副本，请确认后保存" : "Config duplicated. Review and save it.", "success");
+}
+
+// ── Codex 分步向导 ────────────────────────────────────────
+function setCodexWizardStep(step) {
+  codexWizardStep = Math.min(5, Math.max(1, step));
+  document.querySelectorAll("#codexWizardStepper .wizard-step-indicator").forEach((el) => {
+    const n = Number(el.getAttribute("data-wizard-step"));
+    el.classList.toggle("active", n === codexWizardStep);
+    el.classList.toggle("done", n < codexWizardStep);
+  });
+  document.querySelectorAll("#codexProfileForm .wizard-step-panel").forEach((panel) => {
+    panel.classList.toggle("active", Number(panel.getAttribute("data-wizard-panel")) === codexWizardStep);
+  });
+  const back = $("codexWizardBackBtn");
+  const next = $("codexWizardNextBtn");
+  const submit = $("codexSubmitBtn");
+  const enable = $("codexSaveEnableBtn");
+  if (back) back.style.visibility = codexWizardStep === 1 ? "hidden" : "visible";
+  if (next) next.style.display = codexWizardStep < 5 ? "" : "none";
+  if (submit) submit.style.display = codexWizardStep === 5 ? "" : "none";
+  if (enable) enable.style.display = codexWizardStep === 5 ? "" : "none";
+  if (codexWizardStep === 5) renderCodexWizardReview();
+}
+
+function validateCodexWizardStep(step) {
+  if (step === 3) {
+    const name = $("codexProfileName")?.value.trim();
+    const baseUrl = $("codexBaseUrl")?.value.trim();
+    const apiKey = $("codexApiKey")?.value.trim();
+    const mode = getCodexAuthMode();
+    if (!name) {
+      showToast(currentLang === "zh" ? "请填写配置名称" : "Config name is required", "warning");
+      return false;
+    }
+    if (!baseUrl) {
+      showToast(currentLang === "zh" ? "请填写 Base URL" : "Base URL is required", "warning");
+      return false;
+    }
+    if (mode !== "official_account_api_quota" && mode !== "save_only" && !apiKey) {
+      showToast(currentLang === "zh" ? "当前写入方式需要 API Key" : "API Key is required for this write mode", "warning");
+      return false;
+    }
+  }
+  return true;
+}
+
+function renderCodexWizardReview() {
+  const host = $("codexWizardReview");
+  if (!host) return;
+  const mode = getCodexAuthMode();
+  const modeLabel =
+    mode === "official_account_api_quota"
+      ? (currentLang === "zh" ? "仅配置文件" : "Config only")
+      : mode === "save_only"
+        ? (currentLang === "zh" ? "仅保存" : "Save only")
+        : (currentLang === "zh" ? "默认写入" : "Default write");
+  const rows = [
+    [currentLang === "zh" ? "名称" : "Name", $("codexProfileName")?.value || "--"],
+    ["API Key", maskKey($("codexApiKey")?.value || "")],
+    ["Base URL", $("codexBaseUrl")?.value || "--"],
+    ["Model", $("codexModel")?.value || "--"],
+    ["Provider", $("codexProvider")?.value || "--"],
+    [currentLang === "zh" ? "写入方式" : "Write mode", modeLabel],
+  ];
+  host.innerHTML = rows
+    .map(([k, v]) => `<div class="wizard-review-item"><small>${esc(k)}</small><strong>${esc(String(v))}</strong></div>`)
+    .join("");
+}
+
+async function runCodexWizardTests() {
+  const apiKey = $("codexApiKey")?.value.trim() || "";
+  const baseUrl = $("codexBaseUrl")?.value.trim() || "";
+  const model = $("codexModel")?.value.trim() || "";
+  const keyOk = apiKey.length >= 8 || getCodexAuthMode() === "official_account_api_quota" || getCodexAuthMode() === "save_only";
+  setBadge($("codexTestKey"), keyOk ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "异常" : "Fail"), keyOk ? "healthy" : "error");
+
+  let urlOk = false;
+  try {
+    if (baseUrl) {
+      setBadge($("codexTestUrl"), currentLang === "zh" ? "检测中" : "Testing", "warning");
+      await handleEndpointTest("codex");
+      urlOk = true;
+    }
+  } catch (_) {
+    urlOk = false;
+  }
+  setBadge($("codexTestUrl"), urlOk ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "异常" : "Fail"), urlOk ? "healthy" : "error");
+  setBadge($("codexTestModel"), model ? (currentLang === "zh" ? "已填写" : "Set") : (currentLang === "zh" ? "可选" : "Optional"), model ? "healthy" : "");
+  setBadge($("codexTestPerm"), currentLang === "zh" ? "正常" : "OK", "healthy");
+}
+
+function bindConsoleUiOnce() {
+  if (window.__varswitchConsoleBound) return;
+  window.__varswitchConsoleBound = true;
+
+  // 事件委托：侧边栏 / 指标卡 / 快捷入口一定可点
+  document.addEventListener("click", (event) => {
+    const nav = event.target.closest("[data-console-page]");
+    if (!nav) return;
+    // 忽略弹窗表单内的无关节点
+    if (nav.closest(".modal-overlay") || nav.closest(".mgmt-overlay")) return;
+    const page = nav.getAttribute("data-console-page");
+    if (!page) return;
+    if (
+      nav.tagName === "BUTTON" ||
+      nav.classList.contains("metric-card") ||
+      nav.classList.contains("sidebar-item") ||
+      nav.classList.contains("quick-action") ||
+      nav.classList.contains("sidebar-settings")
+    ) {
+      event.preventDefault();
+      switchConsolePage(page);
+    }
+  });
+
+  $("overviewAddBtn")?.addEventListener("click", () => openConfigTypeDialog("add"));
+  $("overviewImportBtn")?.addEventListener("click", () => openConfigTypeDialog("import"));
+  $("overviewSyncBtn")?.addEventListener("click", async () => {
+    const activeCodex = codexProfiles.find((p) => p.isActive);
+    const activeClaude = profiles.find((p) => p.isActive);
+    if (activeCodex) await handleCodexSwitch(activeCodex.id);
+    else if (activeClaude) await handleSwitch(activeClaude.id);
+    else showToast(currentLang === "zh" ? "没有可同步的活动配置" : "No active config to sync", "warning");
+    renderOverviewDashboard();
+  });
+  $("quickClaudeAdd")?.addEventListener("click", () => {
+    switchConsolePage("claude");
+    openModal(null);
+  });
+  $("quickCodexAdd")?.addEventListener("click", () => {
+    switchConsolePage("codex");
+    openCodexModal(null);
+  });
+  $("configAddBtn")?.addEventListener("click", () => openConfigTypeDialog("add"));
+  $("configImportBtn")?.addEventListener("click", () => openConfigTypeDialog("import"));
+  $("claudePageAddBtn")?.addEventListener("click", () => openModal(null));
+  $("claudePageImportBtn")?.addEventListener("click", handleImport);
+  $("claudeRefreshBtn")?.addEventListener("click", async () => {
+    await Promise.all([loadStatus(), loadProfiles()]);
+    showToast(currentLang === "zh" ? "Claude 状态已刷新" : "Claude status refreshed", "success");
+  });
+  $("claudeSyncBtn")?.addEventListener("click", handleSyncNow);
+  $("codexPageAddBtn")?.addEventListener("click", () => openCodexModal(null));
+  $("codexPageImportBtn")?.addEventListener("click", handleCodexImport);
+  $("codexCardSyncBtn")?.addEventListener("click", () => {
+    const active = codexProfiles.find((profile) => profile.isActive);
+    if (active) handleCodexSwitch(active.id);
+  });
+  $("codexOpenDirBtn")?.addEventListener("click", async () => {
+    try {
+      await invoke("open_codex_dir");
+    } catch (error) {
+      // 回退到设置里的路径打开
+      try {
+        await invoke("open_path", { pathType: "codex" });
+      } catch (e2) {
+        showToast(String(error || e2), "error");
+      }
+    }
+  });
+  $("codexToggleDiagBtn")?.addEventListener("click", () => {
+    codexDiagExpanded = !codexDiagExpanded;
+    $("codexToggleDiagBtn").textContent = codexDiagExpanded
+      ? (currentLang === "zh" ? "收起诊断详情" : "Hide diagnostics")
+      : (currentLang === "zh" ? "查看诊断详情" : "View diagnostics");
+    renderCodexCurrentCard();
+  });
+  $("sessionPageSyncBtn")?.addEventListener("click", handleToolboxSessionSync);
+
+  $("configurationSearch")?.addEventListener("input", (event) => {
+    configurationSearch = event.target.value || "";
+    renderConfigurationList();
+  });
+  $("configurationFilter")?.querySelectorAll("button[data-config-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      configurationFilter = btn.getAttribute("data-config-filter") || "all";
+      $("configurationFilter").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      renderConfigurationList();
+    });
+  });
+  $("pluginSearchInput")?.addEventListener("input", (event) => {
+    pluginSearch = event.target.value || "";
+    applyPluginFilters();
+  });
+  $("pluginFilter")?.querySelectorAll("button[data-plugin-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      pluginFilter = btn.getAttribute("data-plugin-filter") || "all";
+      $("pluginFilter").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      applyPluginFilters();
+    });
+  });
+
+  $("settingsLangZh")?.addEventListener("click", () => setLanguage("zh"));
+  $("settingsLangEn")?.addEventListener("click", () => setLanguage("en"));
+  $("settingsThemeLight")?.addEventListener("click", () => setTheme("light"));
+  $("settingsThemeDark")?.addEventListener("click", () => setTheme("dark"));
+  $("settingsGuideBtn")?.addEventListener("click", () => openUsageGuide());
+  $("settingsUpdateBtn")?.addEventListener("click", () => handleUpdateButton());
+  $("settingsDownloadBtn")?.addEventListener("click", () => openUpdateReleasePage());
+  $("settingsGithubBtn")?.addEventListener("click", () => openGitHubRepo());
+  $("settingsSkillsBtn")?.addEventListener("click", () => openSkillsPanel());
+  $("settingsPromptsBtn")?.addEventListener("click", () => openPromptsPanel());
+  $("settingsMcpBtn")?.addEventListener("click", () => openMcpPanel());
+
+  // Codex wizard controls
+  $("codexWizardNextBtn")?.addEventListener("click", async () => {
+    if (!validateCodexWizardStep(codexWizardStep)) return;
+    if (codexWizardStep === 4) await runCodexWizardTests();
+    setCodexWizardStep(codexWizardStep + 1);
+  });
+  $("codexWizardBackBtn")?.addEventListener("click", () => setCodexWizardStep(codexWizardStep - 1));
+  $("codexWizardRunTestBtn")?.addEventListener("click", () => runCodexWizardTests());
+  $("codexSaveEnableBtn")?.addEventListener("click", async () => {
+    codexWizardEnableAfterSave = true;
+    $("codexSubmitBtn")?.click();
+  });
+  $("codexApiKeyToggle")?.addEventListener("click", () => {
+    const input = $("codexApiKey");
+    if (!input) return;
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    $("codexApiKeyToggle").textContent = show ? (currentLang === "zh" ? "隐藏" : "Hide") : (currentLang === "zh" ? "显示" : "Show");
+  });
+  document.querySelectorAll("#codexWizardStepper .wizard-step-indicator").forEach((el) => {
+    el.addEventListener("click", () => {
+      const step = Number(el.getAttribute("data-wizard-step"));
+      if (step < codexWizardStep) setCodexWizardStep(step);
+    });
+  });
+}
+
+function enhanceAfterDataLoad() {
+  mountToolboxPages();
+  renderOverviewDashboard();
+  applyPluginFilters();
+}
+
+let configTypeAction = "add";
+
+function closeConfigTypeDialog() {
+  $("configTypeOverlay")?.classList.remove("open");
+  document.body.classList.remove("modal-open");
+}
+
+function openConfigTypeDialog(action = "add") {
+  configTypeAction = action === "import" ? "import" : "add";
+  if ($("configTypeTitle")) {
+    $("configTypeTitle").textContent = configTypeAction === "import"
+      ? (currentLang === "zh" ? "选择导入类型" : "Choose import type")
+      : (currentLang === "zh" ? "选择配置类型" : "Choose config type");
+  }
+  if ($("configTypeMessage")) {
+    $("configTypeMessage").textContent = configTypeAction === "import"
+      ? (currentLang === "zh" ? "选择要从当前本机环境导入的配置类型。" : "Choose which current local configuration to import.")
+      : (currentLang === "zh" ? "选择要添加的配置类型。" : "Choose the configuration type to add.");
+  }
+  $("configTypeOverlay")?.classList.add("open");
+  document.body.classList.add("modal-open");
+  setTimeout(() => $("configTypeOverlay")?.querySelector("[data-config-kind]")?.focus(), 30);
+}
+
+function runConfigTypeAction(kind) {
+  closeConfigTypeDialog();
+  switchConsolePage(kind);
+  if (configTypeAction === "import") {
+    if (kind === "claude") handleImport();
+    else if (kind === "codex") handleCodexImport();
+    else handleGrokImport();
+    return;
+  }
+  if (kind === "claude") openModal(null);
+  else if (kind === "codex") openCodexModal(null);
+  else openGrokModal(null);
+}
+
+function bindConfigTypeDialogOnce() {
+  if (window.__varswitchConfigTypeBound) return;
+  window.__varswitchConfigTypeBound = true;
+  $("configTypeClose")?.addEventListener("click", closeConfigTypeDialog);
+  $("configTypeCancel")?.addEventListener("click", closeConfigTypeDialog);
+  $("configTypeOverlay")?.addEventListener("click", (event) => {
+    if (event.target === $("configTypeOverlay")) closeConfigTypeDialog();
+  });
+  $("configTypeOverlay")?.querySelectorAll("[data-config-kind]").forEach((button) => {
+    button.addEventListener("click", () => runConfigTypeAction(button.getAttribute("data-config-kind")));
+  });
+}
+
+
 function triggerCurrentAdd() {
-  if (currentPage === "codex") openCodexModal(null);
-  else openModal(null);
+  if (activeConsolePage === "codex") openCodexModal(null);
+  else if (activeConsolePage === "grok") openGrokModal(null);
+  else if (activeConsolePage === "claude") openModal(null);
+  else openConfigTypeDialog("add");
 }
 
 function triggerCurrentImport() {
-  if (currentPage === "codex") handleCodexImport();
-  else handleImport();
+  if (activeConsolePage === "codex") handleCodexImport();
+  else if (activeConsolePage === "grok") handleGrokImport();
+  else if (activeConsolePage === "claude") handleImport();
+  else openConfigTypeDialog("import");
 }
 
-$("addBtn").addEventListener("click", triggerCurrentAdd);
-$("importBtn").addEventListener("click", triggerCurrentImport);
 $("codexRefreshDiagnosticsBtn")?.addEventListener("click", loadCodexDiagnostics);
 $("codexBackupRuntimeBtn")?.addEventListener("click", handleCodexRuntimeBackup);
 $("heroToolboxBtn")?.addEventListener("click", openCodexToolbox);
 $("codexToolboxOpenBtn")?.addEventListener("click", openCodexToolbox);
-$("langZhBtn").addEventListener("click", () => setLanguage("zh"));
-$("langEnBtn").addEventListener("click", () => setLanguage("en"));
-$("themeLightBtn").addEventListener("click", () => setTheme("light"));
-$("themeDarkBtn").addEventListener("click", () => setTheme("dark"));
-$("cancelBtn").addEventListener("click", closeModal);
-$("modalClose").addEventListener("click", closeModal);
-$("switchCancelBtn").addEventListener("click", handleCancelSwitch);
-$("profileForm").addEventListener("submit", handleSubmit);
-$("profileBaseUrl").addEventListener("focus", () => tryClipboardAutoFill("url", "profileBaseUrl"));
-$("profileApiKey").addEventListener("focus", () => tryClipboardAutoFill("key", "profileApiKey"));
-$("profileEndpointTestBtn").addEventListener("click", () => handleEndpointTest("claude"));
-$("syncNowBtn").addEventListener("click", handleSyncNow);
-$("modalOverlay").addEventListener("click", (event) => {
+on("langZhBtn", "click", () => setLanguage("zh"));
+on("langEnBtn", "click", () => setLanguage("en"));
+on("themeLightBtn", "click", () => setTheme("light"));
+on("themeDarkBtn", "click", () => setTheme("dark"));
+on("cancelBtn", "click", closeModal);
+on("modalClose", "click", closeModal);
+on("switchCancelBtn", "click", handleCancelSwitch);
+on("profileForm", "submit", handleSubmit);
+on("profileBaseUrl", "focus", () => tryClipboardAutoFill("url", "profileBaseUrl"));
+on("profileApiKey", "focus", () => tryClipboardAutoFill("key", "profileApiKey"));
+on("profileModelFetchBtn", "click", () => handleModelFetch("claude"));
+on("profileEndpointTestBtn", "click", () => handleEndpointTest("claude"));
+on("modalOverlay", "click", (event) => {
   if (event.target === $("modalOverlay")) {
     closeModal();
   }
@@ -4482,38 +6287,70 @@ document.querySelectorAll(".page-tab[data-page]").forEach((tab) => {
 
 // ── Codex Modal Event Listeners ─────────────────────
 
-$("codexCancelBtn").addEventListener("click", closeCodexModal);
-$("codexModalClose").addEventListener("click", closeCodexModal);
-$("codexProfileForm").addEventListener("submit", handleCodexSubmit);
-$("codexPresetSelect").addEventListener("change", () => applyCodexPreset(getSelectedCodexPreset()));
-$("codexBaseUrl").addEventListener("focus", () => tryClipboardAutoFill("url", "codexBaseUrl"));
-$("codexApiKey").addEventListener("focus", () => tryClipboardAutoFill("key", "codexApiKey"));
-$("codexBaseUrl").addEventListener("input", updateCodexOfficialConfigPreview);
-$("codexApiKey").addEventListener("input", updateCodexOfficialConfigPreview);
-$("codexAuthModeDefault").addEventListener("change", updateCodexAuthModeUi);
-$("codexAuthModeOfficial").addEventListener("change", updateCodexAuthModeUi);
-$("codexCopyOfficialConfigBtn").addEventListener("click", copyCodexOfficialConfig);
-$("codexEndpointTestBtn").addEventListener("click", () => handleEndpointTest("codex"));
-$("codexModalOverlay").addEventListener("click", (event) => {
+on("codexCancelBtn", "click", closeCodexModal);
+on("codexModalClose", "click", closeCodexModal);
+on("codexProfileForm", "submit", handleCodexSubmit);
+on("codexPresetSelect", "change", () => applyCodexPreset(getSelectedCodexPreset()));
+on("codexBaseUrl", "focus", () => tryClipboardAutoFill("url", "codexBaseUrl"));
+on("codexApiKey", "focus", () => tryClipboardAutoFill("key", "codexApiKey"));
+on("codexImageBaseUrl", "focus", () => tryClipboardAutoFill("url", "codexImageBaseUrl"));
+on("codexImageApiKey", "focus", () => tryClipboardAutoFill("key", "codexImageApiKey"));
+on("codexBaseUrl", "input", updateCodexOfficialConfigPreview);
+on("codexApiKey", "input", updateCodexOfficialConfigPreview);
+on("codexImageBaseUrl", "input", updateCodexOfficialConfigPreview);
+on("codexImageApiKey", "input", updateCodexOfficialConfigPreview);
+$("codexAuthModeDefault")?.addEventListener("change", updateCodexAuthModeUi);
+$("codexAuthModeOfficial")?.addEventListener("change", updateCodexAuthModeUi);
+$("codexAuthModeSaveOnly")?.addEventListener("change", updateCodexAuthModeUi);
+on("codexCopyOfficialConfigBtn", "click", copyCodexOfficialConfig);
+on("codexModelFetchBtn", "click", () => handleModelFetch("codex"));
+on("codexEndpointTestBtn", "click", () => handleEndpointTest("codex"));
+on("codexModalOverlay", "click", (event) => {
   if (event.target === $("codexModalOverlay")) closeCodexModal();
 });
-$("codexSyncNowBtn").addEventListener("click", () => {
-  const active = codexProfiles.find((p) => p.isActive);
-  if (active) handleCodexSwitch(active.id);
+
+// ── Grok Modal Event Listeners ──────────────────────
+
+$("grokCancelBtn")?.addEventListener("click", closeGrokModal);
+$("grokModalClose")?.addEventListener("click", closeGrokModal);
+$("grokProfileForm")?.addEventListener("submit", handleGrokSubmit);
+$("grokPresetSelect")?.addEventListener("change", () => applyGrokPreset(getSelectedGrokPreset()));
+$("grokBaseUrl")?.addEventListener("focus", () => tryClipboardAutoFill("url", "grokBaseUrl"));
+$("grokApiKey")?.addEventListener("focus", () => tryClipboardAutoFill("key", "grokApiKey"));
+$("grokModelFetchBtn")?.addEventListener("click", () => handleModelFetch("grok"));
+$("grokEndpointTestBtn")?.addEventListener("click", () => handleEndpointTest("grok"));
+$("grokModalOverlay")?.addEventListener("click", (event) => {
+  if (event.target === $("grokModalOverlay")) closeGrokModal();
+});
+$("grokSyncNowBtn")?.addEventListener("click", () => {
+  const active = grokProfiles.find((p) => p.isActive);
+  if (active) handleGrokSwitch(active.id);
+});
+$("grokPageAddBtn")?.addEventListener("click", () => openGrokModal(null));
+$("grokRefreshBtn")?.addEventListener("click", async () => {
+  await Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]);
+  showToast(currentLang === "zh" ? "Grok 状态已刷新" : "Grok status refreshed", "success");
+});
+$("grokOpenFolderBtn")?.addEventListener("click", handleOpenGrokFolder);
+$("grokBackupRuntimeBtn")?.addEventListener("click", handleGrokRuntimeBackup);
+$("grokPageImportBtn")?.addEventListener("click", handleGrokImport);
+$("quickGrokAdd")?.addEventListener("click", () => {
+  switchPage("grok");
+  openGrokModal(null);
 });
 $("codexToolboxBtn")?.addEventListener("click", openCodexToolbox);
-$("codexToolboxClose").addEventListener("click", closeCodexToolbox);
-$("codexToolboxOverlay").addEventListener("click", (event) => {
+on("codexToolboxClose", "click", closeCodexToolbox);
+on("codexToolboxOverlay", "click", (event) => {
   if (event.target === $("codexToolboxOverlay")) closeCodexToolbox();
 });
-$("toolboxTabMarket").addEventListener("click", () => switchToolboxTab("market"));
-$("toolboxTabSession").addEventListener("click", () => switchToolboxTab("session"));
-$("toolboxTabRemote").addEventListener("click", () => switchToolboxTab("remote"));
-$("toolboxSessionSearchInput").addEventListener("input", (event) => {
+on("toolboxTabMarket", "click", () => switchToolboxTab("market"));
+on("toolboxTabSession", "click", () => switchToolboxTab("session"));
+on("toolboxTabRemote", "click", () => switchToolboxTab("remote"));
+on("toolboxSessionSearchInput", "input", (event) => {
   toolboxSessionSearchQuery = event.target.value || "";
   renderToolboxSyncedThreads();
 });
-$("toolboxSessionSyncBtn").addEventListener("click", async () => {
+async function handleToolboxSessionSync() {
   if (toolboxSessionSyncBusy) return;
   startToolboxSessionProgress();
   try {
@@ -4521,14 +6358,15 @@ $("toolboxSessionSyncBtn").addEventListener("click", async () => {
     finishToolboxSessionProgress(true);
     showToast(t("toolboxSessionsSynced"), "success");
     renderCodexToolbox();
+    renderOverviewDashboard();
   } catch (error) {
     finishToolboxSessionProgress(false);
     showToast(String(error), "error");
   }
-});
+}
 $("builtinPluginRepairBtn")?.addEventListener("click", handleRepairOpenAiBundledPlugins);
 $("builtinPluginEnableImportantBtn")?.addEventListener("click", handleEnableImportantBuiltinPlugins);
-$("toolboxMarketApplyBtn").addEventListener("click", async () => {
+on("toolboxMarketApplyBtn", "click", async () => {
   if (marketplaceInstallBusy) return;
   setMarketplaceInstallBusy(true);
   showMarketplaceProgress();
@@ -4556,14 +6394,14 @@ $("toolboxMarketApplyBtn").addEventListener("click", async () => {
     setMarketplaceInstallBusy(false);
   }
 });
-$("toolboxMarketplaceInput").addEventListener("change", () => {
+on("toolboxMarketplaceInput", "change", () => {
   const option =
     helpers.getCodexPluginMarketplaceOption?.($("toolboxMarketplaceInput").value) ||
     {};
   $("toolboxMarketplaceDesc").textContent =
     currentLang === "zh" ? option.zh || "" : option.en || option.zh || "";
 });
-$("toolboxRemoteStartBtn").addEventListener("click", async () => {
+on("toolboxRemoteStartBtn", "click", async () => {
   if (toolboxRemoteBusy) return;
   mobileDebug("remote start button clicked");
   toolboxRemoteBusy = true;
@@ -4597,7 +6435,7 @@ $("toolboxRemoteStartBtn").addEventListener("click", async () => {
     renderCodexToolbox();
   }
 });
-$("toolboxRemoteStopBtn").addEventListener("click", async () => {
+on("toolboxRemoteStopBtn", "click", async () => {
   if (toolboxRemoteBusy) return;
   mobileDebug("remote stop button clicked");
   toolboxRemoteBusy = true;
@@ -4632,67 +6470,67 @@ $("toolboxRemoteStopBtn").addEventListener("click", async () => {
 
 // ── Management Panel Event Listeners ────────────────
 
-$("skillsBtn").addEventListener("click", openSkillsPanel);
-$("skillsClose").addEventListener("click", closeSkillsPanel);
-$("addSkillBtn").addEventListener("click", () => showSkillsEdit(null, "command"));
-$("skillCancelBtn").addEventListener("click", hideSkillsEdit);
-$("skillSaveBtn").addEventListener("click", handleSaveSkill);
-$("skillsOverlay").addEventListener("click", (event) => {
+on("skillsBtn", "click", openSkillsPanel);
+on("skillsClose", "click", closeSkillsPanel);
+on("addSkillBtn", "click", () => showSkillsEdit(null, "command"));
+on("skillCancelBtn", "click", hideSkillsEdit);
+on("skillSaveBtn", "click", handleSaveSkill);
+on("skillsOverlay", "click", (event) => {
   if (event.target === $("skillsOverlay")) closeSkillsPanel();
 });
 
 // Skills tabs
-$("skillsTabInstalled").addEventListener("click", () => switchSkillsTab("installed"));
-$("skillsTabDiscover").addEventListener("click", () => switchSkillsTab("discover"));
+on("skillsTabInstalled", "click", () => switchSkillsTab("installed"));
+on("skillsTabDiscover", "click", () => switchSkillsTab("discover"));
 
 // Skills discover search
 
 // Discover search and filters
-$("discoverSearch").addEventListener("input", (e) => {
+on("discoverSearch", "input", (e) => {
   discoverSearchQuery = e.target.value;
   // Local filter for catalog mode
   renderDiscoverGrid();
 });
-$("discoverSearch").addEventListener("keydown", (e) => {
+on("discoverSearch", "keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
     searchGitHubSkills();
   }
 });
-$("searchGithubSkillsBtn").addEventListener("click", searchGitHubSkills);
-$("backToCatalogBtn").addEventListener("click", backToCatalog);
-$("discoverRepoFilter").addEventListener("change", (e) => {
+on("searchGithubSkillsBtn", "click", searchGitHubSkills);
+on("backToCatalogBtn", "click", backToCatalog);
+on("discoverRepoFilter", "change", (e) => {
   discoverRepoFilter = e.target.value;
   renderDiscoverGrid();
 });
-$("discoverStatusFilter").addEventListener("change", (e) => {
+on("discoverStatusFilter", "change", (e) => {
   discoverStatusFilter = e.target.value;
   renderDiscoverGrid();
 });
 
 // Repo manager
-$("manageReposBtn").addEventListener("click", openRepoManager);
-$("refreshDiscoverBtn").addEventListener("click", () => {
+on("manageReposBtn", "click", openRepoManager);
+on("refreshDiscoverBtn", "click", () => {
   backToCatalog();
 });
-$("repoManagerClose").addEventListener("click", closeRepoManager);
-$("repoManagerOverlay").addEventListener("click", (event) => {
+on("repoManagerClose", "click", closeRepoManager);
+on("repoManagerOverlay", "click", (event) => {
   if (event.target === $("repoManagerOverlay")) closeRepoManager();
 });
-$("addRepoBtn").addEventListener("click", handleAddRepo);
-$("repoUrlInput").addEventListener("keydown", (e) => {
+on("addRepoBtn", "click", handleAddRepo);
+on("repoUrlInput", "keydown", (e) => {
   if (e.key === "Enter") handleAddRepo();
 });
 
-$("promptsBtn").addEventListener("click", openPromptsPanel);
-$("promptsClose").addEventListener("click", closePromptsPanel);
-$("promptSaveBtn").addEventListener("click", handleSavePrompt);
-$("promptsOverlay").addEventListener("click", (event) => {
+on("promptsBtn", "click", openPromptsPanel);
+on("promptsClose", "click", closePromptsPanel);
+on("promptSaveBtn", "click", handleSavePrompt);
+on("promptsOverlay", "click", (event) => {
   if (event.target === $("promptsOverlay")) closePromptsPanel();
 });
-$("promptTabEditor").addEventListener("click", () => switchPromptTab("editor"));
-$("promptTabTemplates").addEventListener("click", () => switchPromptTab("templates"));
-$("promptInsertSelect").addEventListener("change", (e) => {
+on("promptTabEditor", "click", () => switchPromptTab("editor"));
+on("promptTabTemplates", "click", () => switchPromptTab("templates"));
+on("promptInsertSelect", "change", (e) => {
   const id = e.target.value;
   if (!id) return;
   const tpl = promptTemplates.find((t) => t.id === id);
@@ -4706,28 +6544,28 @@ $("promptInsertSelect").addEventListener("change", (e) => {
   e.target.value = "";
 });
 
-$("mcpBtn").addEventListener("click", openMcpPanel);
-$("mcpClose").addEventListener("click", closeMcpPanel);
-$("addMcpBtn").addEventListener("click", () => showMcpEdit(null));
-$("mcpCancelBtn").addEventListener("click", hideMcpEdit);
-$("mcpSaveBtn").addEventListener("click", handleSaveMcp);
-$("mcpOverlay").addEventListener("click", (event) => {
+on("mcpBtn", "click", openMcpPanel);
+on("mcpClose", "click", closeMcpPanel);
+on("addMcpBtn", "click", () => showMcpEdit(null));
+on("mcpCancelBtn", "click", hideMcpEdit);
+on("mcpSaveBtn", "click", handleSaveMcp);
+on("mcpOverlay", "click", (event) => {
   if (event.target === $("mcpOverlay")) closeMcpPanel();
 });
-$("mcpTabInstalled").addEventListener("click", () => switchMcpTab("installed"));
-$("mcpTabPresets").addEventListener("click", () => switchMcpTab("presets"));
-$("mcpPresetSearch").addEventListener("keydown", (e) => {
+on("mcpTabInstalled", "click", () => switchMcpTab("installed"));
+on("mcpTabPresets", "click", () => switchMcpTab("presets"));
+on("mcpPresetSearch", "keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
     searchGitHubMcp();
   }
 });
 
-$("usageGuideBtn").addEventListener("click", openUsageGuide);
-$("updateBtn").addEventListener("click", handleUpdateButton);
+on("usageGuideBtn", "click", openUsageGuide);
+on("updateBtn", "click", handleUpdateButton);
 const downloadSiteBtn = $("downloadSiteBtn");
 if (downloadSiteBtn) downloadSiteBtn.addEventListener("click", openUpdateReleasePage);
-$("updatePillBtn").addEventListener("click", async () => {
+on("updatePillBtn", "click", async () => {
   if (updateBusy) return;
   if (updateInfo?.hasUpdate) {
     await installAppUpdate();
@@ -4735,11 +6573,11 @@ $("updatePillBtn").addEventListener("click", async () => {
     await openUpdateReleasePage();
   }
 });
-$("githubRepoBtn").addEventListener("click", openGitHubRepo);
-$("usageGuideCloseBtn").addEventListener("click", closeUsageGuide);
-$("usageGuideCloseIcon").addEventListener("click", closeUsageGuide);
-$("usageGuideNeverBtn").addEventListener("click", handleNeverShowUsageGuide);
-$("usageGuideOverlay").addEventListener("click", (event) => {
+on("githubRepoBtn", "click", openGitHubRepo);
+on("usageGuideCloseBtn", "click", closeUsageGuide);
+on("usageGuideCloseIcon", "click", closeUsageGuide);
+on("usageGuideNeverBtn", "click", handleNeverShowUsageGuide);
+on("usageGuideOverlay", "click", (event) => {
   if (event.target === $("usageGuideOverlay")) closeUsageGuide();
 });
 
@@ -4997,9 +6835,13 @@ function handleOpenEditorPath(editorId) {
 }
 
 async function openSettingsPanel() {
-  $("settingsOverlay").classList.add("open");
+  // 设置统一进入左侧 Settings 页面，不再使用遮罩弹层作为主入口
+  switchConsolePage("settings");
   try {
-    await refreshSettingsPanelData();
+    await openSettingsInline();
+    if (typeof refreshSettingsPanelData === "function") {
+      await refreshSettingsPanelData();
+    }
   } catch (e) {
     console.error("加载设置失败:", e);
     showToast("设置面板加载失败：" + String(e), "error");
@@ -5060,37 +6902,36 @@ async function handleImportProfiles() {
 }
 
 // Settings event listeners
-$("settingsBtn").addEventListener("click", openSettingsPanel);
-$("settingsClose").addEventListener("click", closeSettingsPanel);
-$("settingsOverlay").addEventListener("click", (event) => {
+on("settingsClose", "click", closeSettingsPanel);
+on("settingsOverlay", "click", (event) => {
   if (event.target === $("settingsOverlay")) closeSettingsPanel();
 });
-$("settingsAutoStart").addEventListener("change", handleSettingsToggle);
-$("settingsMinTray").addEventListener("change", handleSettingsToggle);
-$("settingsSilentStart").addEventListener("change", handleSettingsToggle);
-$("settingsOpenConfigDir").addEventListener("click", () => {
+on("settingsAutoStart", "change", handleSettingsToggle);
+on("settingsMinTray", "change", handleSettingsToggle);
+on("settingsSilentStart", "change", handleSettingsToggle);
+on("settingsOpenConfigDir", "click", () => {
   if (appPaths) invoke("open_folder", { path: appPaths.configDir });
 });
-$("settingsOpenClaudeDir").addEventListener("click", () => {
+on("settingsOpenClaudeDir", "click", () => {
   if (appPaths) invoke("open_folder", { path: appPaths.claudeSettings });
 });
-$("settingsOpenCodexDir").addEventListener("click", () => {
+on("settingsOpenCodexDir", "click", () => {
   if (appPaths) invoke("open_folder", { path: appPaths.codexSettings });
 });
-$("settingsOpenLogsDir").addEventListener("click", () => {
+on("settingsOpenLogsDir", "click", () => {
   invoke("open_logs_folder").catch((error) => showToast(String(error), "error"));
 });
-$("settingsExportBtn").addEventListener("click", handleExportProfiles);
-$("settingsImportBtn").addEventListener("click", handleImportProfiles);
-$("settingsOpenBackupsBtn").addEventListener("click", () => {
+on("settingsExportBtn", "click", handleExportProfiles);
+on("settingsImportBtn", "click", handleImportProfiles);
+on("settingsOpenBackupsBtn", "click", () => {
   invoke("open_backups_folder").catch((error) => showToast(String(error), "error"));
 });
-$("settingsViewBackupsBtn").addEventListener("click", toggleBackupList);
-$("settingsBackupList").addEventListener("click", async (event) => {
+on("settingsViewBackupsBtn", "click", toggleBackupList);
+on("settingsBackupList", "click", async (event) => {
   const btn = event.target.closest("[data-restore-backup]");
   if (!btn) return;
   const name = btn.getAttribute("data-restore-backup");
-  if (!window.confirm("确定用这个备份覆盖当前配置吗？当前配置会先自动备份。")) return;
+  if (!(await appConfirm(currentLang === "zh" ? "确定用这个备份覆盖当前配置吗？当前配置会先自动备份。" : "Overwrite current profiles with this backup? A safety backup will be created first.", { title: currentLang === "zh" ? "恢复备份" : "Restore backup", danger: true, confirmText: currentLang === "zh" ? "覆盖恢复" : "Restore" }))) return;
   try {
     await invoke("restore_config_backup", { name });
     showToast("已从备份恢复配置", "success");
@@ -5124,7 +6965,7 @@ async function toggleBackupList() {
       box.innerHTML = backups
         .map((b) => {
           const label = formatBackupStamp(b.stamp);
-          const kindLabel = b.kind === "codex" ? "Codex" : "Claude";
+          const kindLabel = b.kind === "codex" ? "Codex" : b.kind === "grok" ? "Grok" : "Claude";
           return `<div class="settings-row">
             <div class="settings-row-info">
               <div class="settings-row-label">${kindLabel} · ${esc(label)}</div>
@@ -5142,51 +6983,107 @@ async function toggleBackupList() {
   }
 }
 
-(async function init() {
-  applyTheme();
-  applyLanguage();
+function withTimeout(promise, ms, label) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label || "task"} timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
 
-  // 隐藏主内容，等启动动画结束后再显示
-  const toolbar = document.querySelector('.toolbar');
-  const appEl = document.querySelector('.app');
-  if (toolbar) toolbar.classList.add('app-hidden');
-  if (appEl) appEl.classList.add('app-hidden');
-
-  await Promise.all([
-    loadStatus(),
-    loadProfiles(),
-    loadCodexProfiles(),
-    loadCodexStatus(),
-    loadCodexDiagnostics(),
-    loadCodexToolbox(),
-    loadAppSettings(),
-  ]);
-  renderUpdateButton();
-  checkForUpdatesOnStartup();
-
-  // 启动动画：等加载条填满后淡出
-  const splash = $('splashScreen');
-  if (splash) {
-    // 等待加载条动画完成（0.5s 延迟 + 1.2s 填充）
-    await new Promise((r) => setTimeout(r, 1800));
-    splash.classList.add('fade-out');
-    // 淡出后显示主内容
-    setTimeout(() => {
-      if (toolbar) {
-        toolbar.classList.remove('app-hidden');
-        toolbar.classList.add('app-reveal');
-      }
-      if (appEl) {
-        appEl.classList.remove('app-hidden');
-        appEl.classList.add('app-reveal');
-      }
-      setTimeout(() => {
-        maybeOpenUsageGuide();
-      }, 220);
-    }, 150);
-    // 完全移除 splash DOM
-    setTimeout(() => splash.remove(), 600);
-  } else {
-    await maybeOpenUsageGuide();
+async function safeLoad(label, fn, ms = 8000) {
+  try {
+    await withTimeout(Promise.resolve().then(fn), ms, label);
+  } catch (error) {
+    console.error(`[init] ${label} failed:`, error);
   }
+}
+
+(async function init() {
+  const toolbar = document.querySelector(".toolbar");
+  const appEl = document.querySelector(".app");
+  const shell = document.querySelector("#workspaceShell");
+  let revealed = false;
+
+  function revealUi() {
+    if (revealed) return;
+    revealed = true;
+    [toolbar, appEl, shell].forEach((el) => {
+      if (!el) return;
+      el.classList.remove("app-hidden");
+      el.classList.add("app-reveal");
+      el.style.pointerEvents = "auto";
+      el.style.opacity = "1";
+    });
+    // 顶栏/主工作区始终可点
+    if (toolbar) toolbar.style.pointerEvents = "auto";
+    if (shell) shell.style.pointerEvents = "auto";
+    const splash = $("splashScreen");
+    if (splash) {
+      splash.classList.add("fade-out");
+      splash.style.pointerEvents = "none";
+      setTimeout(() => splash.remove(), 400);
+    }
+  }
+
+  // 1) 主题/文案：失败也不阻断
+  try { applyTheme(); } catch (e) { console.error("applyTheme failed", e); }
+  try { applyLanguage(); } catch (e) { console.error("applyLanguage failed", e); }
+
+  // 2) 先绑定交互，保证侧边栏/按钮立刻可点
+  try {
+    bindAppDialogOnce();
+    bindConfigTypeDialogOnce();
+    bindConsoleUiOnce();
+    mountToolboxPages();
+    switchConsolePage("overview");
+    // 先渲染一次“空状态”，避免一直停在 HTML 初始的“检查中”
+    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+  } catch (e) {
+    console.error("console bind failed", e);
+  }
+
+  // 3) 启动动画：短隐藏 + 强制超时显示
+  if (toolbar) toolbar.classList.add("app-hidden");
+  if (appEl) appEl.classList.add("app-hidden");
+  if (shell) shell.classList.add("app-hidden");
+  const forceRevealTimer = setTimeout(revealUi, 1200);
+
+  // 4) 数据加载互不阻塞，单项超时
+  await Promise.allSettled([
+    safeLoad("loadStatus", () => loadStatus()),
+    safeLoad("loadProfiles", () => loadProfiles()),
+    safeLoad("loadCodexProfiles", () => loadCodexProfiles()),
+    safeLoad("loadCodexStatus", () => loadCodexStatus()),
+    safeLoad("loadCodexDiagnostics", () => loadCodexDiagnostics()),
+    safeLoad("loadGrokProfiles", () => loadGrokProfiles()),
+    safeLoad("loadGrokStatus", () => loadGrokStatus()),
+    safeLoad("loadGrokDiagnostics", () => loadGrokDiagnostics()),
+    safeLoad("loadCodexToolbox", () => loadCodexToolbox(), 10000),
+    safeLoad("loadAppSettings", () => loadAppSettings()),
+  ]);
+
+  try {
+    renderGrokPresetOptions();
+    renderUpdateButton();
+    enhanceAfterDataLoad();
+    switchConsolePage("overview");
+  } catch (e) {
+    console.error("post-load render failed", e);
+  }
+
+  clearTimeout(forceRevealTimer);
+  revealUi();
+
+  try {
+    checkForUpdatesOnStartup();
+  } catch (e) {
+    console.error("update check failed", e);
+  }
+
+  setTimeout(() => {
+    maybeOpenUsageGuide().catch(() => {});
+  }, 250);
 })();

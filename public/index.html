@@ -44,6 +44,16 @@
           <button class="seg-btn" id="themeDarkBtn" type="button">Dark</button>
         </div>
         <div class="toolbar-divider"></div>
+        <div class="global-status-cluster" id="globalStatusCluster">
+          <div class="global-status-pill" id="globalConfigPill" title="当前配置">
+            <span class="global-status-label" id="globalConfigLabel">配置</span>
+            <strong id="globalConfigName">--</strong>
+          </div>
+          <div class="global-status" id="globalStatus" aria-live="polite">
+            <span class="global-status-dot" id="globalStatusDot"></span>
+            <span id="globalStatusText">正在检查环境</span>
+          </div>
+        </div>
         <button class="toolbar-btn-icon" id="skillsBtn" type="button" title="Skills">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
         </button>
@@ -53,14 +63,6 @@
         <button class="toolbar-btn-icon" id="mcpBtn" type="button" title="MCP">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
         </button>
-        <button class="toolbar-btn-icon" id="settingsBtn" type="button" title="Settings">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </button>
-        <button class="toolbar-btn toolbar-btn-secondary" id="importBtn" type="button">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          <span id="importBtnText">Import Current</span>
-        </button>
-        <button class="toolbar-btn toolbar-btn-accent" id="addBtn" type="button">+ Add Config</button>
       </div>
     </div>
   </header>
@@ -76,7 +78,286 @@
     </div>
   </div>
 
-  <div class="control-shell" id="controlShell">
+  <div class="workspace-shell" id="workspaceShell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="sidebar-section-label">工作台</div>
+      <nav class="sidebar-nav" id="sidebarNav">
+        <button class="sidebar-item active" data-console-page="overview" type="button">
+          <img src="app-icon.png" alt=""><span>概览</span><span class="nav-state-dot healthy"></span>
+        </button>
+        <button class="sidebar-item" data-console-page="claude" type="button">
+          <img src="anthropic-color.svg" alt=""><span>Claude Code</span><span class="nav-state-dot" id="claudeNavState"></span>
+        </button>
+        <button class="sidebar-item" data-console-page="codex" type="button">
+          <img src="OpenAI-black-monoblossom.svg" alt=""><span>Codex CLI</span><span class="nav-state-dot" id="codexNavState"></span>
+        </button>
+        <button class="sidebar-item" data-console-page="grok" type="button">
+          <img src="grok-color.svg" alt=""><span>Grok / xAI</span><span class="nav-state-dot" id="grokNavState"></span>
+        </button>
+        <button class="sidebar-item" data-console-page="configurations" type="button">
+          <img src="icon-toolbox.svg" alt=""><span>配置管理</span><span class="nav-count" id="configNavCount">0</span>
+        </button>
+        <div class="sidebar-section-label sidebar-section-label-spaced">扩展与连接</div>
+        <button class="sidebar-item" data-console-page="plugins" type="button">
+          <img src="toolbox.svg" alt=""><span>插件市场</span><span class="nav-state-dot" id="pluginNavState"></span>
+        </button>
+        <button class="sidebar-item" data-console-page="sessions" type="button">
+          <img src="icon-update.svg" alt=""><span>会话同步</span><span class="nav-count" id="sessionNavCount">0</span>
+        </button>
+        <button class="sidebar-item" data-console-page="mobile" type="button">
+          <img src="icon-guide.svg" alt=""><span>手机控制</span><span class="nav-state-dot" id="mobileNavState"></span>
+        </button>
+      </nav>
+      <button class="sidebar-item sidebar-settings" data-console-page="settings" type="button">
+        <img src="icon-guide.svg" alt=""><span>设置</span>
+      </button>
+      <div class="sidebar-version">VarSwitch <span>v2.3.8</span></div>
+    </aside>
+
+    <main class="workspace-main" id="workspaceMain">
+      <section class="console-page active" id="pageOverview" data-console-page-panel="overview">
+        <header class="page-header">
+          <div><h1>概览</h1><p>查看 AI 开发环境状态并处理需要关注的问题。</p></div>
+          <div class="page-header-actions">
+            <button class="btn btn-secondary" id="overviewImportBtn" type="button">导入配置</button>
+            <button class="btn btn-primary" id="overviewAddBtn" type="button">添加配置</button>
+          </div>
+        </header>
+        <section class="overview-hero">
+          <div class="overview-hero-copy">
+            <span class="status-badge-console healthy" id="overviewHealthBadge">环境健康</span>
+            <h2 id="overviewActiveName">尚未启用配置</h2>
+            <p id="overviewHealthSummary">正在读取 Claude Code、Codex CLI 与本地服务状态。</p>
+          </div>
+          <button class="btn btn-primary overview-sync-btn" id="overviewSyncBtn" type="button">立即同步</button>
+        </section>
+        <section class="overview-metrics" id="overviewMetrics">
+          <button class="metric-card" data-console-page="claude" type="button"><span class="metric-icon anthropic"><img src="anthropic-color.svg" alt=""></span><span><small>Claude Code</small><strong id="overviewClaudeStatus">检查中</strong></span><span class="status-badge-console" id="overviewClaudeBadge">--</span></button>
+          <button class="metric-card" data-console-page="codex" type="button"><span class="metric-icon codex"><img src="OpenAI-black-monoblossom.svg" alt=""></span><span><small>Codex CLI</small><strong id="overviewCodexStatus">检查中</strong></span><span class="status-badge-console" id="overviewCodexBadge">--</span></button>
+          <button class="metric-card" data-console-page="grok" type="button"><span class="metric-icon"><img src="grok-color.svg" alt=""></span><span><small>Grok / xAI</small><strong id="overviewGrokStatus">检查中</strong></span><span class="status-badge-console" id="overviewGrokBadge">--</span></button>
+          <button class="metric-card" data-console-page="plugins" type="button"><span class="metric-icon"><img src="toolbox.svg" alt=""></span><span><small>插件能力</small><strong id="overviewPluginStatus">检查中</strong></span><span class="status-badge-console" id="overviewPluginBadge">--</span></button>
+          <button class="metric-card" data-console-page="sessions" type="button"><span class="metric-icon"><img src="icon-update.svg" alt=""></span><span><small>会话同步</small><strong id="overviewSessionStatus">检查中</strong></span><span class="status-badge-console" id="overviewSessionBadge">--</span></button>
+        </section>
+        <section class="console-card overview-recent-configs" style="margin-bottom:16px;">
+          <div class="console-card-header"><div><h2>最近配置</h2><p>当前使用与可快速切换的配置</p></div></div>
+          <div class="configuration-list" id="overviewRecentConfigs"></div>
+        </section>
+        <div class="overview-columns">
+          <section class="console-card">
+            <div class="console-card-header"><div><h2>快捷操作</h2><p>常用环境管理入口</p></div></div>
+            <div class="quick-action-grid">
+              <button class="quick-action" id="quickClaudeAdd" type="button"><img src="anthropic-color.svg" alt=""><span><strong>添加 Claude 配置</strong><small>Token、Base URL 与模型</small></span></button>
+              <button class="quick-action" id="quickCodexAdd" type="button"><img src="OpenAI-black-monoblossom.svg" alt=""><span><strong>添加 Codex 配置</strong><small>分步配置 Provider 与认证</small></span></button>
+              <button class="quick-action" id="quickGrokAdd" type="button"><img src="grok-color.svg" alt=""><span><strong>添加 Grok 配置</strong><small>~/.grok/config.toml 与 API</small></span></button>
+              <button class="quick-action" data-console-page="plugins" type="button"><img src="toolbox.svg" alt=""><span><strong>打开插件市场</strong><small>安装、启用或修复插件</small></span></button>
+              <button class="quick-action" data-console-page="settings" type="button"><img src="icon-guide.svg" alt=""><span><strong>诊断与设置</strong><small>路径、备份与帮助</small></span></button>
+            </div>
+          </section>
+          <section class="console-card">
+            <div class="console-card-header"><div><h2>最近事件</h2><p>本次运行中的关键状态</p></div></div>
+            <div class="event-list" id="overviewEventList"></div>
+          </section>
+        </div>
+      </section>
+
+
+<div class="page-content console-page" id="pageClaudeCode" data-console-page-panel="claude">
+  <div class="app">
+    <header class="page-header"><div><h1>Claude Code</h1><p>管理环境变量、编辑器配置与 Claude 设置同步状态。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="claudeRefreshBtn" type="button">刷新诊断</button><button class="btn btn-secondary" id="claudeSyncBtn" type="button">立即同步</button><button class="btn btn-secondary" id="claudePageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="claudePageAddBtn" type="button">添加 Claude 配置</button></div></header>
+    <section class="env-matrix" id="claudeEnvMatrix" aria-label="环境状态矩阵"></section>
+    <section class="support-section control-panel-section console-hint-section">
+      <p class="support-hint" id="supportHint">Open the usage guide, check GitHub Releases for updates, or jump to the repository.</p>
+    </section>
+
+    <section class="status-section">
+      <h2 class="section-title" id="statusSectionTitle">Current Status</h2>
+      <div class="status-grid" id="statusGrid"></div>
+      <p class="hint" id="statusHint">Restart terminal and VSCode after switching to apply env variables.</p>
+    </section>
+
+    <section class="active-config-section" id="activeConfigSection" style="display:none;">
+      <div class="active-config-bar">
+        <div class="active-config-info">
+          <span class="active-config-label" id="activeConfigLabel">Active Config</span>
+          <span class="active-config-name" id="activeConfigName">--</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="profiles-section">
+      <h2 class="section-title" id="profilesSectionTitle">Config List</h2>
+      <div class="profiles-grid" id="profilesGrid"></div>
+    </section>
+  </div>
+  </div><!-- end pageClaudeCode -->
+
+  <div class="page-content console-page" id="pageCodex" data-console-page-panel="codex">
+  <div class="app">
+    <header class="page-header"><div><h1>Codex CLI</h1><p>管理 Provider、模型、认证方式与本地运行文件。</p></div>
+      <div class="page-header-actions">
+        <button class="btn btn-secondary" id="codexRefreshDiagnosticsBtn" type="button">刷新诊断</button>
+        <button class="btn btn-secondary" id="codexBackupRuntimeBtn" type="button">备份 Codex 文件</button>
+        <button class="btn btn-secondary" id="codexPageImportBtn" type="button">导入当前配置</button>
+        <button class="btn btn-primary" id="codexPageAddBtn" type="button">添加 Codex 配置</button>
+      </div>
+    </header>
+    <section class="console-card codex-current-card" id="codexCurrentStatusCard">
+      <div class="console-card-header">
+        <div>
+          <h2 id="codexCurrentCardTitle">Codex CLI 当前状态</h2>
+          <p id="codexCurrentCardDesc">当前生效配置与健康摘要</p>
+        </div>
+        <span class="status-badge-console" id="codexCurrentHealthBadge">--</span>
+      </div>
+      <div class="codex-current-grid" id="codexCurrentGrid"></div>
+      <div class="page-header-actions" style="margin-top:14px;justify-content:flex-start;">
+        <button class="btn btn-primary btn-sm" id="codexCardSyncBtn" type="button">立即同步</button>
+        <button class="btn btn-secondary btn-sm" id="codexOpenDirBtn" type="button">打开配置目录</button>
+        <button class="btn btn-ghost btn-sm" id="codexToggleDiagBtn" type="button">查看诊断详情</button>
+      </div>
+    </section>
+    <section class="status-section">
+      <div class="section-header-row">
+        <h2 class="section-title" id="codexStatusSectionTitle">Current Status</h2>
+        <div class="section-header-actions">
+          <button class="btn btn-secondary btn-sm" id="codexToolboxOpenBtn" type="button">打开 Codex Toolbox</button>
+        </div>
+      </div>
+      <div class="status-grid" id="codexStatusGrid"></div>
+      <div class="diagnostics-panel" id="codexDiagnosticsPanel"></div>
+    </section>
+
+    <section class="active-config-section" id="codexActiveConfigSection" style="display:none;">
+      <div class="active-config-bar">
+        <div class="active-config-info">
+          <span class="active-config-label" id="codexActiveConfigLabel">Active Config</span>
+          <span class="active-config-name" id="codexActiveConfigName">--</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="profiles-section">
+      <h2 class="section-title" id="codexProfilesSectionTitle">Config List</h2>
+      <div class="profiles-grid" id="codexProfilesGrid"></div>
+    </section>
+  </div>
+  </div><!-- end pageCodex -->
+
+  <div class="page-content console-page" id="pageGrok" data-console-page-panel="grok">
+  <div class="app">
+    <header class="page-header"><div><h1>Grok / xAI</h1><p>管理 ~/.grok/config.toml 中的 API Key、Base URL 与默认模型，一键切换 Grok CLI 配置。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="grokRefreshBtn" type="button">刷新状态</button><button class="btn btn-secondary" id="grokPageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="grokPageAddBtn" type="button">添加 Grok 配置</button></div></header>
+    <section class="status-section">
+      <div class="section-header-row">
+        <h2 class="section-title" id="grokStatusSectionTitle">Current Status</h2>
+        <div class="section-header-actions">
+          <button class="btn btn-secondary btn-sm" id="grokOpenFolderBtn" type="button">打开 .grok 目录</button>
+          <button class="btn btn-secondary btn-sm" id="grokBackupRuntimeBtn" type="button">备份 config.toml</button>
+        </div>
+      </div>
+      <div class="status-grid" id="grokStatusGrid"></div>
+      <div class="diagnostics-panel" id="grokDiagnosticsPanel"></div>
+      <p class="hint" id="grokStatusHint">切换后会写入 ~/.grok/config.toml（默认模型与 API），并同步 XAI_API_KEY / XAI_BASE_URL。请重启 Grok CLI 使配置生效。</p>
+    </section>
+
+    <section class="active-config-section" id="grokActiveConfigSection" style="display:none;">
+      <div class="active-config-bar">
+        <div class="active-config-info">
+          <span class="active-config-label" id="grokActiveConfigLabel">Active Config</span>
+          <span class="active-config-name" id="grokActiveConfigName">--</span>
+        </div>
+        <div class="active-config-actions">
+          <button class="btn btn-primary btn-sm" id="grokSyncNowBtn" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <span id="grokSyncNowBtnText">Sync Now</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="profiles-section">
+      <h2 class="section-title" id="grokProfilesSectionTitle">Config List</h2>
+      <div class="profiles-grid" id="grokProfilesGrid"></div>
+    </section>
+  </div>
+  </div><!-- end pageGrok -->
+
+      <section class="console-page" id="pageConfigurations" data-console-page-panel="configurations">
+        <header class="page-header"><div><h1>配置管理</h1><p>统一查看、搜索和维护 Claude、Codex 与 Grok 配置。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="configImportBtn" type="button">导入配置</button><button class="btn btn-primary" id="configAddBtn" type="button">添加配置</button></div></header>
+        <div class="filter-toolbar"><label class="search-field"><span>搜索</span><input id="configurationSearch" type="search" placeholder="搜索名称、Provider 或 Base URL"></label><div class="segmented-filter" id="configurationFilter"><button class="active" data-config-filter="all" type="button">全部</button><button data-config-filter="claude" type="button">Claude</button><button data-config-filter="codex" type="button">Codex</button><button data-config-filter="grok" type="button">Grok</button><button data-config-filter="active" type="button">使用中</button></div></div>
+        <div class="configuration-list" id="configurationList"></div>
+      </section>
+
+      <section class="console-page" id="pagePlugins" data-console-page-panel="plugins">
+        <header class="page-header">
+          <div><h1>插件市场</h1><p>安装、启用和修复 Codex 扩展能力。</p></div>
+          <div class="page-header-actions">
+            <button class="btn btn-primary" id="toolboxMarketApplyBtn" type="button">安装到 Codex</button>
+          </div>
+        </header>
+        <div class="filter-toolbar plugin-filter-toolbar">
+          <label class="search-field"><span>搜索</span><input id="pluginSearchInput" type="search" placeholder="搜索插件名称"></label>
+          <div class="segmented-filter" id="pluginFilter">
+            <button class="active" data-plugin-filter="all" type="button">全部</button>
+            <button data-plugin-filter="installed" type="button">已安装</button>
+            <button data-plugin-filter="enabled" type="button">已启用</button>
+            <button data-plugin-filter="repair" type="button">需要修复</button>
+          </div>
+        </div>
+        <div class="tool-page-host plugin-market-host" id="pluginPageHost"></div>
+      </section>
+
+      <section class="console-page" id="pageSessions" data-console-page-panel="sessions">
+        <header class="page-header"><div><h1>会话同步</h1><p>同步、搜索和管理本地 Codex 会话。</p></div>
+          <div class="page-header-actions">
+            <button class="btn btn-primary" id="sessionPageSyncBtn" type="button">立即同步</button>
+          </div>
+        </header>
+        <section class="console-card" id="sessionStatusCard">
+          <div class="console-card-header"><div><h2>同步状态</h2><p id="sessionStatusSummary">尚未同步</p></div></div>
+          <div class="session-status-metrics" id="sessionStatusMetrics"></div>
+        </section>
+        <div class="tool-page-host" id="sessionPageHost"></div>
+      </section>
+
+      <section class="console-page" id="pageMobile" data-console-page-panel="mobile">
+        <header class="page-header"><div><h1>手机控制</h1><p>绑定消息平台、选择会话并开启远程监听。</p></div></header>
+        <section class="console-card mobile-flow-card">
+          <div class="console-card-header"><div><h2>工作流程</h2><p>绑定应用 → 选择会话 → 开启监听 → 等待消息</p></div></div>
+          <ol class="mobile-timeline" id="mobileTimeline">
+            <li data-step="bind"><strong>绑定应用</strong><small>微信 / 飞书 / QQ</small></li>
+            <li data-step="session"><strong>选择控制会话</strong><small>指定 Codex 会话</small></li>
+            <li data-step="listen"><strong>开启平台连接</strong><small>开始监听手机消息</small></li>
+            <li data-step="wait"><strong>等待手机消息</strong><small>消息将转发到 Codex</small></li>
+          </ol>
+        </section>
+        <div class="tool-page-host" id="mobilePageHost"></div>
+      </section>
+
+      <section class="console-page" id="pageSettings" data-console-page-panel="settings">
+        <header class="page-header"><div><h1>设置</h1><p>管理应用偏好、路径、备份与帮助入口。</p></div></header>
+        <div class="settings-preferences console-card">
+          <div class="settings-inline-group"><div><strong>语言</strong><small>选择界面显示语言</small></div><div class="seg-control"><button id="settingsLangZh" type="button">中文</button><button id="settingsLangEn" type="button">English</button></div></div>
+          <div class="settings-inline-group"><div><strong>外观</strong><small>选择浅色或深色主题</small></div><div class="seg-control"><button id="settingsThemeLight" type="button">浅色</button><button id="settingsThemeDark" type="button">深色</button></div></div>
+        </div>
+        <div class="settings-help-grid">
+          <button class="quick-action" id="settingsGuideBtn" type="button"><img src="icon-guide.svg" alt=""><span><strong>使用说明</strong><small>查看安全切换与配置指南</small></span></button>
+          <button class="quick-action" id="settingsUpdateBtn" type="button"><img src="icon-update.svg" alt=""><span><strong>检查更新</strong><small>检查 VarSwitch 最新版本</small></span></button>
+          <button class="quick-action" id="settingsDownloadBtn" type="button"><img src="icon-download.svg" alt=""><span><strong>下载网站</strong><small>打开版本下载页面</small></span></button>
+          <button class="quick-action" id="settingsGithubBtn" type="button"><img src="icon-github.svg" alt=""><span><strong>GitHub 仓库</strong><small>查看源码与问题反馈</small></span></button>
+        </div>
+        <section class="console-card settings-tools-card">
+          <div class="console-card-header"><div><h2>开发工具</h2><p>管理 Claude Code 的扩展能力与本地配置。</p></div></div>
+          <div class="settings-help-grid settings-tools-grid">
+            <button class="quick-action" id="settingsSkillsBtn" type="button"><img src="icon-toolbox.svg" alt=""><span><strong>Skills</strong><small>管理命令、技能与技能仓库</small></span></button>
+            <button class="quick-action" id="settingsPromptsBtn" type="button"><img src="icon-guide.svg" alt=""><span><strong>Prompts</strong><small>编辑 CLAUDE.md 与提示词模板</small></span></button>
+            <button class="quick-action" id="settingsMcpBtn" type="button"><img src="icon-update.svg" alt=""><span><strong>MCP Servers</strong><small>管理 Claude MCP 服务配置</small></span></button>
+          </div>
+        </section>
+        <div class="tool-page-host settings-page-host" id="settingsPageHost"></div>
+      </section>
+</main>
+
+  <div class="control-shell legacy-control-shell" id="controlShell">
     <div class="control-hero">
       <div class="control-hero-main">
         <div class="control-kicker">Unified Control Center</div>
@@ -120,79 +401,16 @@
         </span>
         <span>Codex CLI</span>
       </button>
+      <button class="page-tab" data-page="grok" type="button">
+        <span class="page-tab-icon page-tab-icon-grok" aria-hidden="true">
+          <img src="grok-color.svg" width="15" height="15" alt="">
+        </span>
+        <span>Grok / xAI</span>
+      </button>
     </div>
   </div>
 
-  <div class="page-content active" id="pageClaudeCode">
-  <div class="app">
-    <section class="support-section control-panel-section console-hint-section">
-      <p class="support-hint" id="supportHint">Open the usage guide, check GitHub Releases for updates, or jump to the repository.</p>
-    </section>
-
-    <section class="status-section">
-      <h2 class="section-title" id="statusSectionTitle">Current Status</h2>
-      <div class="status-grid" id="statusGrid"></div>
-      <p class="hint" id="statusHint">Restart terminal and VSCode after switching to apply env variables.</p>
-    </section>
-
-    <section class="active-config-section" id="activeConfigSection" style="display:none;">
-      <div class="active-config-bar">
-        <div class="active-config-info">
-          <span class="active-config-label" id="activeConfigLabel">Active Config</span>
-          <span class="active-config-name" id="activeConfigName">--</span>
-        </div>
-        <div class="active-config-actions">
-          <button class="btn btn-primary btn-sm" id="syncNowBtn" type="button">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            <span id="syncNowBtnText">Sync Now</span>
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <section class="profiles-section">
-      <h2 class="section-title" id="profilesSectionTitle">Config List</h2>
-      <div class="profiles-grid" id="profilesGrid"></div>
-    </section>
   </div>
-  </div><!-- end pageClaudeCode -->
-
-  <div class="page-content" id="pageCodex">
-  <div class="app">
-    <section class="status-section">
-      <div class="section-header-row">
-        <h2 class="section-title" id="codexStatusSectionTitle">Current Status</h2>
-        <div class="section-header-actions">
-          <button class="btn btn-secondary btn-sm" id="codexRefreshDiagnosticsBtn" type="button">刷新诊断</button>
-          <button class="btn btn-secondary btn-sm" id="codexBackupRuntimeBtn" type="button">备份 Codex 文件</button>
-          <button class="btn btn-primary btn-sm" id="codexToolboxOpenBtn" type="button">打开 Codex Toolbox</button>
-        </div>
-      </div>
-      <div class="status-grid" id="codexStatusGrid"></div>
-      <div class="diagnostics-panel" id="codexDiagnosticsPanel"></div>
-    </section>
-
-    <section class="active-config-section" id="codexActiveConfigSection" style="display:none;">
-      <div class="active-config-bar">
-        <div class="active-config-info">
-          <span class="active-config-label" id="codexActiveConfigLabel">Active Config</span>
-          <span class="active-config-name" id="codexActiveConfigName">--</span>
-        </div>
-        <div class="active-config-actions">
-          <button class="btn btn-primary btn-sm" id="codexSyncNowBtn" type="button">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            <span id="codexSyncNowBtnText">Sync Now</span>
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <section class="profiles-section">
-      <h2 class="section-title" id="codexProfilesSectionTitle">Config List</h2>
-      <div class="profiles-grid" id="codexProfilesGrid"></div>
-    </section>
-  </div>
-  </div><!-- end pageCodex -->
 
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal">
@@ -213,7 +431,10 @@
         <div class="form-group">
           <div class="form-label-row">
             <label id="profileBaseUrlLabel" for="profileBaseUrl">Base URL</label>
-            <button class="link-button" id="profileEndpointTestBtn" type="button">Test Speed</button>
+            <div class="form-label-actions">
+              <button class="link-button" id="profileModelFetchBtn" type="button">Fetch Models</button>
+              <button class="link-button" id="profileEndpointTestBtn" type="button">Test Speed</button>
+            </div>
           </div>
           <input type="text" id="profileBaseUrl" required placeholder="https://api.example.com">
           <div class="endpoint-results" id="profileEndpointResults"></div>
@@ -222,6 +443,7 @@
           <label id="profileModelIdLabel" for="profileModelId">Model ID</label>
           <input type="text" id="profileModelId" placeholder="e.g. opus, sonnet">
           <small id="profileModelIdHint" class="form-hint" style="color:#888;font-size:12px;margin-top:2px;">Optional. Sets claudeCode.selectedModel in editor settings.</small>
+          <div class="model-results" id="profileModelResults"></div>
         </div>
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
@@ -232,73 +454,212 @@
   </div>
 
   <div class="modal-overlay" id="codexModalOverlay">
-    <div class="modal">
+    <div class="modal codex-wizard-modal">
       <div class="modal-header">
         <h2 id="codexModalTitle">Add Codex Config</h2>
         <button class="modal-close" id="codexModalClose" type="button">&times;</button>
       </div>
       <form id="codexProfileForm">
         <input type="hidden" id="codexProfileId">
+        <div class="wizard-stepper" id="codexWizardStepper" aria-label="配置步骤">
+          <button type="button" class="wizard-step-indicator active" data-wizard-step="1">1 预设</button>
+          <button type="button" class="wizard-step-indicator" data-wizard-step="2">2 写入方式</button>
+          <button type="button" class="wizard-step-indicator" data-wizard-step="3">3 连接信息</button>
+          <button type="button" class="wizard-step-indicator" data-wizard-step="4">4 测试</button>
+          <button type="button" class="wizard-step-indicator" data-wizard-step="5">5 保存</button>
+        </div>
+
+        <div class="wizard-step-panel active" data-wizard-panel="1">
+          <div class="wizard-step-heading">
+            <h3 id="codexWizardStep1Title">选择配置预设</h3>
+            <p id="codexWizardStep1Desc">预设会自动填充 Base URL、Provider 与默认模型，之后仍可修改。</p>
+          </div>
+          <div class="form-group">
+            <label id="codexPresetLabel" for="codexPresetSelect">Preset</label>
+            <select class="form-select" id="codexPresetSelect">
+              <option value="">Custom</option>
+            </select>
+            <small id="codexPresetHint" class="form-hint"></small>
+          </div>
+        </div>
+
+        <div class="wizard-step-panel" data-wizard-panel="2">
+          <div class="wizard-step-heading">
+            <h3 id="codexWizardStep2Title">选择写入方式</h3>
+            <p id="codexWizardStep2Desc">决定配置如何落到本机 Codex 文件中。</p>
+          </div>
+          <div class="form-group">
+            <label id="codexAuthModeLabel">Write Mode</label>
+            <div class="radio-card-grid">
+              <label class="radio-card">
+                <input type="radio" name="codexAuthMode" id="codexAuthModeDefault" value="auth_json" checked>
+                <span>
+                  <strong id="codexAuthModeDefaultTitle">Default write</strong>
+                  <small id="codexAuthModeDefaultHint">~/.codex/auth.json + ~/.codex/config.toml</small>
+                </span>
+              </label>
+              <label class="radio-card">
+                <input type="radio" name="codexAuthMode" id="codexAuthModeOfficial" value="official_account_api_quota">
+                <span>
+                  <strong id="codexAuthModeOfficialTitle">Official account login, API quota</strong>
+                  <small id="codexAuthModeOfficialHint">Only write ~/.codex/config.toml</small>
+                </span>
+              </label>
+              <label class="radio-card">
+                <input type="radio" name="codexAuthMode" id="codexAuthModeSaveOnly" value="save_only">
+                <span>
+                  <strong id="codexAuthModeSaveOnlyTitle">仅保存到 VarSwitch</strong>
+                  <small id="codexAuthModeSaveOnlyHint">只保存配置，不立即写入本机环境</small>
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-step-panel" data-wizard-panel="3">
+          <div class="wizard-step-heading">
+            <h3 id="codexWizardStep3Title">填写连接信息</h3>
+            <p id="codexWizardStep3Desc">配置名称与 Base URL 必填；API Key 根据写入方式校验。</p>
+          </div>
+          <div class="form-group">
+            <label id="codexNameLabel" for="codexProfileName">Config Name</label>
+            <input type="text" id="codexProfileName" required placeholder="e.g. Production">
+          </div>
+          <div class="form-group">
+            <label id="codexApiKeyLabel" for="codexApiKey">API Key</label>
+            <input type="password" id="codexApiKey" required placeholder="sk-..." autocomplete="off">
+            <button class="link-button" id="codexApiKeyToggle" type="button">显示</button>
+          </div>
+          <div class="form-group">
+            <div class="form-label-row">
+              <label id="codexBaseUrlLabel" for="codexBaseUrl">Base URL</label>
+              <div class="form-label-actions">
+                <button class="link-button" id="codexModelFetchBtn" type="button">Fetch Models</button>
+                <button class="link-button" id="codexEndpointTestBtn" type="button">Test Speed</button>
+              </div>
+            </div>
+            <input type="text" id="codexBaseUrl" required placeholder="https://api.example.com">
+            <div class="endpoint-results" id="codexEndpointResults"></div>
+          </div>
+          <div class="form-group">
+            <label id="codexModelLabel" for="codexModel">Model</label>
+            <input type="text" id="codexModel" placeholder="e.g. gpt-4o">
+            <div class="model-results" id="codexModelResults"></div>
+          </div>
+          <div class="form-group">
+            <label id="codexProviderLabel" for="codexProvider">Provider</label>
+            <input type="text" id="codexProvider" placeholder="e.g. custom">
+          </div>
+          <div class="form-section compact">
+            <div class="form-section-title" id="codexImageSectionTitle">GPT Image 2</div>
+            <small class="form-hint" id="codexImageSectionHint">Optional image-only API written to ~/.codex/config.toml.</small>
+            <div class="form-group">
+              <label id="codexImageApiKeyLabel" for="codexImageApiKey">Image API Key</label>
+              <input type="password" id="codexImageApiKey" placeholder="sk-..." autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label id="codexImageBaseUrlLabel" for="codexImageBaseUrl">Image Base URL</label>
+              <input type="text" id="codexImageBaseUrl" placeholder="https://hk.getelucid.com/v1">
+            </div>
+          </div>
+          <div class="form-group" id="codexOfficialConfigGroup" style="display:none;">
+            <div class="form-label-row">
+              <label id="codexOfficialConfigLabel" for="codexOfficialConfig">Official account API quota config</label>
+              <button class="link-button" id="codexCopyOfficialConfigBtn" type="button">Copy</button>
+            </div>
+            <textarea class="config-preview" id="codexOfficialConfig" rows="8" readonly></textarea>
+          </div>
+        </div>
+
+        <div class="wizard-step-panel" data-wizard-panel="4">
+          <div class="wizard-step-heading">
+            <h3 id="codexWizardStep4Title">测试连接</h3>
+            <p id="codexWizardStep4Desc">检查 API Key 格式、Base URL 可访问性与模型可用性。</p>
+          </div>
+          <div class="wizard-test-list" id="codexWizardTestList">
+            <div class="wizard-test-row"><span>API Key 格式</span><span class="status-badge-console" id="codexTestKey">待检测</span></div>
+            <div class="wizard-test-row"><span>Base URL 连接</span><span class="status-badge-console" id="codexTestUrl">待检测</span></div>
+            <div class="wizard-test-row"><span>模型可用性</span><span class="status-badge-console" id="codexTestModel">待检测</span></div>
+            <div class="wizard-test-row"><span>配置文件权限</span><span class="status-badge-console" id="codexTestPerm">待检测</span></div>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start;margin-top:14px;">
+            <button class="btn btn-secondary" id="codexWizardRunTestBtn" type="button">运行检测</button>
+          </div>
+        </div>
+
+        <div class="wizard-step-panel" data-wizard-panel="5">
+          <div class="wizard-step-heading">
+            <h3 id="codexWizardStep5Title">确认并保存</h3>
+            <p id="codexWizardStep5Desc">确认信息无误后保存，或保存并立即启用。</p>
+          </div>
+          <div class="wizard-review" id="codexWizardReview"></div>
+        </div>
+
+        <div class="wizard-form-actions">
+          <button type="button" class="btn btn-ghost" id="codexWizardBackBtn">上一步</button>
+          <div class="wizard-form-actions-right">
+            <button type="button" class="btn btn-secondary" id="codexCancelBtn">取消</button>
+            <button type="button" class="btn btn-primary" id="codexWizardNextBtn">下一步</button>
+            <button type="submit" class="btn btn-primary" id="codexSubmitBtn" style="display:none;">保存</button>
+            <button type="button" class="btn btn-primary" id="codexSaveEnableBtn" style="display:none;">保存并启用</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="grokModalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="grokModalTitle">Add Grok Config</h2>
+        <button class="modal-close" id="grokModalClose" type="button">&times;</button>
+      </div>
+      <form id="grokProfileForm">
+        <input type="hidden" id="grokProfileId">
         <div class="form-group">
-          <label id="codexPresetLabel" for="codexPresetSelect">Preset</label>
-          <select class="form-select" id="codexPresetSelect">
+          <label id="grokPresetLabel" for="grokPresetSelect">Preset</label>
+          <select class="form-select" id="grokPresetSelect">
             <option value="">Custom</option>
           </select>
-          <small id="codexPresetHint" class="form-hint"></small>
+          <small id="grokPresetHint" class="form-hint"></small>
         </div>
         <div class="form-group">
-          <label id="codexNameLabel" for="codexProfileName">Config Name</label>
-          <input type="text" id="codexProfileName" required placeholder="e.g. Production">
+          <label id="grokNameLabel" for="grokProfileName">Config Name</label>
+          <input type="text" id="grokProfileName" required placeholder="e.g. xAI Official">
         </div>
         <div class="form-group">
-          <label id="codexAuthModeLabel">Write Mode</label>
-          <div class="radio-card-grid">
-            <label class="radio-card">
-              <input type="radio" name="codexAuthMode" id="codexAuthModeDefault" value="auth_json" checked>
-              <span>
-                <strong id="codexAuthModeDefaultTitle">Default write</strong>
-                <small id="codexAuthModeDefaultHint">~/.codex/auth.json + ~/.codex/config.toml</small>
-              </span>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="codexAuthMode" id="codexAuthModeOfficial" value="official_account_api_quota">
-              <span>
-                <strong id="codexAuthModeOfficialTitle">Official account login, API quota</strong>
-                <small id="codexAuthModeOfficialHint">Only write ~/.codex/config.toml</small>
-              </span>
-            </label>
-          </div>
-        </div>
-        <div class="form-group">
-          <label id="codexApiKeyLabel" for="codexApiKey">API Key</label>
-          <input type="text" id="codexApiKey" required placeholder="sk-...">
+          <label id="grokApiKeyLabel" for="grokApiKey">API Key</label>
+          <input type="text" id="grokApiKey" required placeholder="xai-...">
         </div>
         <div class="form-group">
           <div class="form-label-row">
-            <label id="codexBaseUrlLabel" for="codexBaseUrl">Base URL</label>
-            <button class="link-button" id="codexEndpointTestBtn" type="button">Test Speed</button>
+            <label id="grokBaseUrlLabel" for="grokBaseUrl">Base URL</label>
+            <div class="form-label-actions">
+              <button class="link-button" id="grokModelFetchBtn" type="button">Fetch Models</button>
+              <button class="link-button" id="grokEndpointTestBtn" type="button">Test Speed</button>
+            </div>
           </div>
-          <input type="text" id="codexBaseUrl" required placeholder="https://api.example.com">
-          <div class="endpoint-results" id="codexEndpointResults"></div>
+          <input type="text" id="grokBaseUrl" required placeholder="https://api.x.ai/v1">
+          <div class="endpoint-results" id="grokEndpointResults"></div>
         </div>
         <div class="form-group">
-          <label id="codexModelLabel" for="codexModel">Model</label>
-          <input type="text" id="codexModel" placeholder="e.g. gpt-4o">
+          <label id="grokModelLabel" for="grokModel">Model</label>
+          <input type="text" id="grokModel" placeholder="e.g. grok-4">
+          <small id="grokModelHint" class="form-hint">可选。写入 [model.varswitch].model，并同步 XAI_MODEL。</small>
+          <div class="model-results" id="grokModelResults"></div>
         </div>
         <div class="form-group">
-          <label id="codexProviderLabel" for="codexProvider">Provider</label>
-          <input type="text" id="codexProvider" placeholder="e.g. custom">
-        </div>
-        <div class="form-group" id="codexOfficialConfigGroup" style="display:none;">
-          <div class="form-label-row">
-            <label id="codexOfficialConfigLabel" for="codexOfficialConfig">Official account API quota config</label>
-            <button class="link-button" id="codexCopyOfficialConfigBtn" type="button">Copy</button>
-          </div>
-          <textarea class="config-preview" id="codexOfficialConfig" rows="12" readonly></textarea>
+          <label id="grokApiBackendLabel" for="grokApiBackend">API Backend</label>
+          <select class="form-select" id="grokApiBackend">
+            <option value="chat_completions">chat_completions（默认）</option>
+            <option value="responses">responses</option>
+            <option value="messages">messages（Anthropic）</option>
+          </select>
+          <small id="grokApiBackendHint" class="form-hint">对应 ~/.grok/config.toml 的 api_backend 字段。</small>
         </div>
         <div class="form-actions">
-          <button type="button" class="btn btn-secondary" id="codexCancelBtn">Cancel</button>
-          <button type="submit" class="btn btn-primary" id="codexSubmitBtn">Save</button>
+          <button type="button" class="btn btn-secondary" id="grokCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="grokSubmitBtn">Save</button>
         </div>
       </form>
     </div>
@@ -333,9 +694,6 @@
             <div class="switch-progress-percent" id="toolboxMarketProgressPercent">0%</div>
           </div>
         </div>
-        <div class="form-actions">
-          <button class="btn btn-primary" id="toolboxMarketApplyBtn" type="button">Apply to Codex</button>
-        </div>
         <div class="builtin-plugin-panel" id="builtinPluginPanel">
           <div class="builtin-plugin-header">
             <div>
@@ -357,7 +715,6 @@
         <div class="mgmt-hint" id="toolboxSessionHint">Sync local Codex history records into VarSwitch.</div>
         <div class="toolbox-sync-bar">
           <div class="settings-row-value" id="toolboxSessionSummary">--</div>
-          <button class="btn btn-primary btn-sm" id="toolboxSessionSyncBtn" type="button">Sync Now</button>
         </div>
         <div class="toolbox-session-progress" id="toolboxSessionProgress" hidden>
           <div class="switch-progress-track">
@@ -426,7 +783,7 @@
   </div>
 
   <div class="switch-overlay" id="switchOverlay">
-    <div class="switch-panel">
+    <div class="switch-panel" role="status" aria-live="polite" aria-busy="true">
       <div class="switch-panel-title" id="switchPanelTitle">Switching to</div>
       <div class="switch-panel-name" id="switchProfileName"></div>
       <div class="switch-progress-track">
@@ -436,7 +793,7 @@
         <div class="switch-step-label" id="switchStepLabel">Preparing...</div>
         <div class="switch-progress-percent" id="switchProgressPercent">0%</div>
       </div>
-      <div class="switch-steps">
+      <div class="switch-steps" id="switchSteps">
         <div class="switch-step" id="switchStep1">
           <span class="step-dot"></span>
           <span class="step-text" id="switchStep1Text">System Env</span>
@@ -806,6 +1163,43 @@
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" id="usageGuideCloseBtn">Close</button>
         <button type="button" class="btn btn-primary" id="usageGuideNeverBtn">Never remind again</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="appDialogOverlay" role="presentation">
+    <div class="app-dialog" role="dialog" aria-modal="true" aria-labelledby="appDialogTitle">
+      <div class="modal-header">
+        <div><div class="dialog-kicker" id="appDialogKicker">VarSwitch</div><h2 id="appDialogTitle">确认操作</h2></div>
+        <button class="modal-close" id="appDialogClose" type="button" aria-label="关闭">&times;</button>
+      </div>
+      <p class="app-dialog-message" id="appDialogMessage"></p>
+      <div class="form-group" id="appDialogInputGroup" hidden>
+        <label for="appDialogInput" id="appDialogInputLabel">配置名称</label>
+        <input type="text" id="appDialogInput" autocomplete="off">
+        <small class="form-hint" id="appDialogInputHint"></small>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" id="appDialogCancel" type="button">取消</button>
+        <button class="btn btn-primary" id="appDialogConfirm" type="button">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="configTypeOverlay" role="presentation">
+    <div class="app-dialog config-type-dialog" role="dialog" aria-modal="true" aria-labelledby="configTypeTitle">
+      <div class="modal-header">
+        <div><div class="dialog-kicker">Configurations</div><h2 id="configTypeTitle">选择配置类型</h2></div>
+        <button class="modal-close" id="configTypeClose" type="button" aria-label="关闭">&times;</button>
+      </div>
+      <p class="app-dialog-message" id="configTypeMessage">选择要添加的配置类型。</p>
+      <div class="config-type-grid">
+        <button class="config-type-option" data-config-kind="claude" type="button"><img src="anthropic-color.svg" alt=""><span><strong>Claude Code</strong><small>环境变量、编辑器与 Claude 设置</small></span></button>
+        <button class="config-type-option" data-config-kind="codex" type="button"><img src="OpenAI-black-monoblossom.svg" alt=""><span><strong>Codex CLI</strong><small>Provider、模型与认证文件</small></span></button>
+        <button class="config-type-option" data-config-kind="grok" type="button"><img src="grok-color.svg" alt=""><span><strong>Grok / xAI</strong><small>API、Base URL 与默认模型</small></span></button>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" id="configTypeCancel" type="button">取消</button>
       </div>
     </div>
   </div>
