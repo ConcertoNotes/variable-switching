@@ -66,18 +66,11 @@ desktop.ini
 tmp/
 temp/
 .cache/
-.playwright-mcp/
-.playwright-cli
 .tmp_xdis*/
-.superpowers
 
 # Local test / extracted scratch outputs
 hi-codex-src/
 hi-codex-src-test/
-
-# Claude local settings (root and nested)
-.claude/settings.local.json
-**/.claude/settings.local.json
 
 # Edge preview browser profile (cookies / login data / session — never commit)
 .edge-preview-profile/
@@ -92,13 +85,25 @@ PLAN.md
 deploy-download-site.bat
 src-tauri/varswitch-profiles.json
 src-tauri/updater.key
-codex-plugins/ 
+codex-plugins/
 
+# 本地开发日志与设计文档，不随仓库分发
+dev-log.txt
+docs/
 
-#.config
+# 下载站分发的安装包与签名都是构建产物。
+# Tauri 更新器从 latest.json 内联的 signature 校验，不会去请求 .sig 文件。
+varswitch-download-site/releases/
+
+# 各类 AI / 编辑器本地配置
+# 注意：.github 不能加进来，CI 工作流必须随仓库上传
 .claude
-.github
+.codex
+.cursor
 .vscode
 .agents
+.superpowers
+.playwright-cli
+.playwright-mcp
 %USERPROFILE%
 
