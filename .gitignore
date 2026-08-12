@@ -97,6 +97,7 @@ varswitch-download-site/releases/
 
 # 各类 AI / 编辑器本地配置
 # 注意：.github 不能加进来，CI 工作流必须随仓库上传
+AGENTS.md
 .claude
 .codex
 .cursor
