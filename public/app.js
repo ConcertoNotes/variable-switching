@@ -151,6 +151,48 @@ const CLAUDE_PRESETS = [
     baseUrl: "https://api.minimaxi.com/anthropic",
     model: "MiniMax-M2.7",
   },
+  // 文档来源：https://help.aliyun.com/zh/model-studio/claude-code （华北2北京 Anthropic 兼容端点与推荐模型）
+  {
+    id: "aliyun_bailian",
+    name: "阿里云百炼 (Qwen)",
+    baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic",
+    model: "qwen3.7-max",
+  },
+  // 文档来源：https://www.volcengine.com/article/38136 （方舟 Coding Plan Anthropic 协议端点，模型 ark-code-latest 由控制台调度）
+  {
+    id: "volcengine_ark",
+    name: "火山方舟 Coding Plan",
+    baseUrl: "https://ark.cn-beijing.volces.com/api/coding",
+    model: "ark-code-latest",
+  },
+  // 文档来源：https://cloud.baidu.com/doc/qianfan-docs/s/6mh3e6gjp （千帆 Anthropic Claude API 兼容，推荐模型 deepseek-v3.2）
+  {
+    id: "baidu_qianfan",
+    name: "百度千帆",
+    baseUrl: "https://qianfan.baidubce.com/anthropic",
+    model: "deepseek-v3.2",
+  },
+  // 文档来源：https://longcat.chat/platform/docs/zh/claude-code （LongCat 开放平台 Anthropic 兼容端点）
+  {
+    id: "longcat",
+    name: "美团 LongCat",
+    baseUrl: "https://api.longcat.chat/anthropic",
+    model: "LongCat-2.0",
+  },
+  // 文档来源：https://docs.siliconflow.cn/cn/usercases/use-siliconcloud-in-ClaudeCode （ANTHROPIC_BASE_URL 填根地址）
+  {
+    id: "siliconflow",
+    name: "SiliconFlow",
+    baseUrl: "https://api.siliconflow.cn",
+    model: "moonshotai/Kimi-K2-Instruct-0905",
+  },
+  // 文档来源：https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration （Anthropic Skin，地址不带 /v1；模型留空由网关映射）
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api",
+    model: "",
+  },
 ];
 
 const CODEX_PRESETS = [
@@ -210,6 +252,60 @@ const CODEX_PRESETS = [
     providerName: "openrouter",
     wire: "chat",
   },
+  // 文档来源：https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions （华北2北京 DashScope 公共域名 OpenAI 兼容端点）
+  {
+    id: "aliyun_bailian",
+    name: "阿里云百炼 (Qwen)",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model: "qwen3.7-max",
+    providerName: "aliyun_bailian",
+    wire: "chat",
+  },
+  // 文档来源：https://www.volcengine.com/article/38136 （方舟 Coding Plan OpenAI 协议端点 /api/coding/v3）
+  {
+    id: "volcengine_ark",
+    name: "火山方舟 Coding Plan",
+    baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
+    model: "ark-code-latest",
+    providerName: "volcengine_ark",
+    wire: "chat",
+  },
+  // 文档来源：https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26 （千帆 OpenAI SDK 兼容 base_url /v2；模型推荐见 https://cloud.baidu.com/doc/qianfan-docs/s/6mh3e6gjp）
+  {
+    id: "baidu_qianfan",
+    name: "百度千帆",
+    baseUrl: "https://qianfan.baidubce.com/v2",
+    model: "deepseek-v3.2",
+    providerName: "baidu_qianfan",
+    wire: "chat",
+  },
+  // 文档来源：https://longcat.chat/platform/docs/zh/APIDocs.html （OpenAI 兼容 POST /openai/v1/chat/completions）
+  {
+    id: "longcat",
+    name: "美团 LongCat",
+    baseUrl: "https://api.longcat.chat/openai/v1",
+    model: "LongCat-2.0",
+    providerName: "longcat",
+    wire: "chat",
+  },
+  // 文档来源：https://console.groq.com/docs/openai （OpenAI 兼容端点；gpt-oss-120b 为 Groq 托管主推开源模型）
+  {
+    id: "groq",
+    name: "Groq",
+    baseUrl: "https://api.groq.com/openai/v1",
+    model: "openai/gpt-oss-120b",
+    providerName: "groq",
+    wire: "chat",
+  },
+  // 文档来源：https://platform.iflow.cn/cli/configuration/settings （心流开放平台 OpenAI 兼容端点与示例模型）
+  {
+    id: "iflow",
+    name: "心流 iFlow",
+    baseUrl: "https://apis.iflow.cn/v1",
+    model: "Qwen3-Coder",
+    providerName: "iflow",
+    wire: "chat",
+  },
 ];
 
 // Base URL 留空时前端验证 / 后端保存都会回退到官方地址
@@ -232,6 +328,66 @@ const GROK_PRESETS = [
     name: "xAI Grok Fast",
     baseUrl: "https://api.x.ai/v1",
     model: "grok-3-mini",
+  },
+  // 文档来源：https://docs.x.ai/developers/models （grok-4.5 为 xAI 当前旗舰模型，500k 上下文）
+  {
+    id: "xai_grok_45",
+    name: "xAI Grok 4.5",
+    baseUrl: "https://api.x.ai/v1",
+    model: "grok-4.5",
+  },
+  // 文档来源：https://docs.x.ai/developers/models （grok-build-0.1 为 xAI 编码专用模型，256k 上下文）
+  {
+    id: "xai_grok_build",
+    name: "xAI Grok Build (Coding)",
+    baseUrl: "https://api.x.ai/v1",
+    model: "grok-build-0.1",
+  },
+];
+
+// OpenCode 预设。providerId 用 models.dev 命名（OpenCode 的 provider 目录直接取自 models.dev）；
+// baseUrl 留空表示用该 provider 的官方地址，切换时不会往 opencode.json 写 baseURL 覆盖。
+// provider 列表文档：https://opencode.ai/docs/providers/
+const OPENCODE_PRESETS = [
+  // 文档来源：https://opencode.ai/docs/providers/#anthropic ；模型 id 取自 https://models.dev/ (anthropic)
+  {
+    id: "anthropic_official",
+    name: "Anthropic 官方",
+    providerId: "anthropic",
+    baseUrl: "",
+    model: "claude-sonnet-5",
+  },
+  // 文档来源：https://opencode.ai/docs/providers/#openai ；模型 id 取自 https://models.dev/ (openai)
+  {
+    id: "openai_official",
+    name: "OpenAI 官方",
+    providerId: "openai",
+    baseUrl: "",
+    model: "gpt-5.6-sol",
+  },
+  // 文档来源：https://opencode.ai/docs/providers/#deepseek ；官方端点 https://api.deepseek.com
+  {
+    id: "deepseek_official",
+    name: "DeepSeek 官方",
+    providerId: "deepseek",
+    baseUrl: "",
+    model: "deepseek-v4-pro",
+  },
+  // 文档来源：https://opencode.ai/docs/providers/#moonshot-ai ；官方端点 https://api.moonshot.ai/v1
+  {
+    id: "moonshot_official",
+    name: "Kimi (Moonshot AI)",
+    providerId: "moonshotai",
+    baseUrl: "",
+    model: "kimi-k3",
+  },
+  // 文档来源：https://opencode.ai/docs/providers/#opencode-zen （OpenCode 官方精选模型网关）
+  {
+    id: "opencode_zen",
+    name: "OpenCode Zen",
+    providerId: "opencode",
+    baseUrl: "",
+    model: "claude-sonnet-4-6",
   },
 ];
 
@@ -354,6 +510,42 @@ const I18N = {
     geminiNoConfigsTitle: "No Gemini configs yet",
     geminiNoConfigsDesc: "Create a config to switch the Gemini CLI gateway and model in one click.",
     grokAddFirstConfig: "Add your first Grok config",
+    opencodePageTab: "OpenCode",
+    opencodePageSubtitle: "Manage OpenCode providers, API keys and the default model.",
+    opencodeStatusTitle: "OpenCode Status",
+    opencodeProfilesTitle: "OpenCode Config List",
+    opencodeAddConfig: "Add OpenCode Config",
+    opencodeEditConfig: "Edit OpenCode Config",
+    opencodeNameLabel: "Config Name",
+    opencodePresetLabel: "Preset",
+    opencodePresetCustom: "Custom",
+    opencodePresetHintDefault: "Pick a preset to fill the models.dev provider id and its flagship model.",
+    opencodeProviderLabel: "Provider ID",
+    opencodeProviderHint: "models.dev provider id, e.g. anthropic / openai / deepseek / moonshotai.",
+    opencodeApiKeyLabel: "API Key",
+    opencodeBaseUrlLabel: "Base URL",
+    opencodeBaseUrlPlaceholder: "Leave empty to use the provider's official endpoint",
+    opencodeOfficialBaseUrl: "Official endpoint",
+    opencodeModelLabel: "Model",
+    opencodeModelHint: "Written to the top-level model in opencode.json as provider/model.",
+    opencodeCliLabel: "CLI",
+    opencodeInstalled: "Installed",
+    opencodeNotInstalled: "Not detected",
+    opencodeConfigPathLabel: "Config Path",
+    opencodeSourceLabel: "Source",
+    opencodeConfigMissing: "config not created yet",
+    opencodeStatusLoadFailed: "Failed to load OpenCode status",
+    opencodeSwitchedTo: "OpenCode switched to {name}",
+    opencodeToastAdded: "OpenCode config added",
+    opencodeToastUpdated: "OpenCode config updated",
+    opencodeToastDeleted: "OpenCode config deleted",
+    opencodeNoConfigsTitle: "No OpenCode configs yet",
+    opencodeNoConfigsDesc: "Create a config to switch the provider, API key and model in opencode.json in one click.",
+    opencodeImportCurrent: "Import current",
+    opencodeImportDefaultName: "Current OpenCode Config",
+    opencodeImportEmpty: "No OpenCode provider found in the current config",
+    opencodeImportPrefilled: "Prefilled from the current config. Enter the API key and save.",
+    opencodeNoActiveProfile: "No active OpenCode profile",
     codexToolbox: "Toolbox",
     codexToolboxTitle: "Codex Toolbox",
     toolboxTabSession: "Session Sync",
@@ -482,6 +674,13 @@ const I18N = {
     modelIdLabel: "Model ID",
     placeholderModelId: "e.g. opus, sonnet",
     modelIdHint: "Optional. Sets model in editor and Claude settings.",
+    modelMappingTitle: "Advanced Model Mapping",
+    modelMappingHint: "Optional. Written to ANTHROPIC_DEFAULT_SONNET_MODEL / ANTHROPIC_DEFAULT_OPUS_MODEL / ANTHROPIC_DEFAULT_HAIKU_MODEL. Leave empty to skip.",
+    sonnetModelLabel: "Sonnet Model",
+    opusModelLabel: "Opus Model",
+    haikuModelLabel: "Haiku Model",
+    dragToReorder: "Drag to reorder",
+    reorderFailed: "Failed to save order: {error}",
     endpointTest: "Verify",
     endpointTesting: "Verifying...",
     endpointUse: "Use",
@@ -497,6 +696,28 @@ const I18N = {
     claudeApiFormatOptionOpenAiChat: "OpenAI Chat Completions (via local proxy)",
     claudeApiFormatNeedsBaseUrl: "OpenAI format requires an upstream Base URL.",
     claudeApiFormatNeedsModel: "OpenAI format needs a Model ID (upstream model name, e.g. deepseek-chat).",
+    proxyFailoverLabel: "Join proxy failover pool",
+    proxyFailoverHint: "When the active config fails, the local proxy automatically switches to pool configs in list order. Requires a Base URL.",
+    proxyFailoverBadge: "Failover",
+    proxyTakeoverLabel: "Route through local proxy",
+    proxyTakeoverHint: "Passes requests through 127.0.0.1:25789 to gain failover and circuit breaking. VarSwitch must keep running, otherwise Claude Code cannot connect.",
+    proxyTakeoverBadge: "Proxied",
+    proxyHealthTitle: "Proxy Health",
+    proxyHealthRunning: "Running (127.0.0.1:{port})",
+    proxyHealthStopped: "Not running",
+    proxyHealthStatusLabel: "Proxy Status",
+    proxyHealthPrimaryLabel: "Primary",
+    proxyHealthFailoverLabel: "Failover",
+    proxyHealthPoolEmpty: "No failover upstreams. Check \"Join proxy failover pool\" on other configs that have a Base URL.",
+    proxyHealthFailoverCountLabel: "Auto Failovers",
+    proxyHealthLastErrorLabel: "Last Error",
+    proxyHealthNoError: "None",
+    proxyHealthResetBreaker: "Reset Breaker",
+    proxyHealthResetDone: "Circuit breaker and health stats reset",
+    proxyHealthStatsTitle: "failures / total requests",
+    proxyBreakerClosed: "Healthy",
+    proxyBreakerOpen: "Tripped",
+    proxyBreakerHalfOpen: "Probing",
     codexWireApiLabel: "Upstream Protocol",
     codexWireApiHint: "Written to wire_api in ~/.codex/config.toml. Presets set this automatically.",
     codexAdvancedTitle: "Advanced options",
@@ -523,20 +744,51 @@ const I18N = {
     toastPromptSaved: "Prompt saved",
     mcpManage: "MCP Servers",
     mcpTitle: "MCP Server Management",
-    mcpPathLabel: "~/.claude.json",
+    mcpPathLabel: "~/.claude.json · ~/.codex/config.toml · ~/.gemini/settings.json",
     addMcp: "+ Add Server",
     mcpName: "Server Name",
     mcpConfig: "Config (JSON)",
-    mcpNamePlaceholder: "server-name",
+    mcpNamePlaceholder: "context7",
+    mcpIntro: "MCP servers give AI CLIs extra abilities (docs lookup, file access, database queries, and so on). Register one here and it syncs to each app's config file below.",
+    mcpNameHint: "Unique identifier used by the CLI, e.g. context7, filesystem.",
+    mcpModeForm: "Form",
+    mcpModeJson: "JSON",
+    mcpTransportLabel: "Transport",
+    mcpTransportStdio: "Local command (stdio)",
+    mcpTransportHttp: "Remote HTTP",
+    mcpTransportSse: "Remote SSE",
+    mcpTransportHint: "Most MCP servers are local commands: the CLI spawns a process and talks to it over stdio.",
+    mcpCommandLabel: "Command",
+    mcpArgsLabel: "Arguments (one per line)",
+    mcpEnvLabel: "Environment variables (KEY=VALUE per line, optional)",
+    mcpUrlLabel: "Server URL",
+    mcpHeadersLabel: "Headers (Key: Value per line, optional)",
+    mcpNeedName: "Server name is required.",
+    mcpNeedCommand: "A launch command is required, e.g. npx.",
+    mcpNeedUrl: "A server URL is required.",
+    mcpJsonTooComplex: "This config has fields the form cannot represent. Keep editing it as JSON.",
     toastMcpSaved: "MCP server saved",
     toastMcpDeleted: "MCP server deleted",
-    confirmDeleteMcp: "Delete MCP server \"{name}\"?",
+    confirmDeleteMcp: "Delete MCP server \"{name}\"? It will be removed from all apps (Claude / Codex / Gemini / Claude Desktop).",
     invalidJson: "Invalid JSON format",
     noMcpServers: "No MCP servers configured.",
+    mcpAppsLabel: "Enable for Apps",
+    mcpNoAppSelected: "Select at least one app",
+    toastMcpAppEnabled: "{name} enabled for {app}",
+    toastMcpAppDisabled: "{name} disabled for {app}",
+    mcpDesktopNotInstalled: "Claude Desktop not detected",
+    mcpDesktopPathLabel: "Claude Desktop: {path}",
+    confirmDisableLastMcpApp: "\"{name}\" is only enabled for {app}. Disabling it will remove the server from all apps. Continue?",
     // Skills Discovery
     skillsTabInstalled: "Installed",
     skillsTabDiscover: "Discover",
     installFromZip: "Install from ZIP",
+    zipInstallTitle: "Install Skill from ZIP",
+    zipInstallTargets: "Install to",
+    zipInstallConfirmBtn: "Install",
+    zipNoAppSelected: "Select at least one app",
+    zipOverwriteConfirm: "Skill \"{name}\" already exists. Overwrite?",
+    toastZipInstalledTo: "Skill \"{name}\" installed to {apps}",
     discoverSearchPlaceholder: "Search skills...",
     allRepos: "All Repos",
     filterAll: "All",
@@ -569,6 +821,28 @@ const I18N = {
     insertSnippet: "-- Insert snippet --",
     appendToPrompt: "Append",
     replacePrompt: "Replace",
+    // Prompt Presets（预设库 + 跨应用同步 + 回填保护）
+    promptTabPresets: "Presets",
+    presetNew: "+ New Preset",
+    presetName: "Preset Name",
+    presetNamePlaceholder: "e.g. Chinese Dev",
+    presetApps: "Sync to apps",
+    presetContent: "Content",
+    presetContentPlaceholder: "System prompt content...",
+    presetActive: "Active",
+    presetActivate: "Activate",
+    presetEdit: "Edit",
+    presetDelete: "Delete",
+    presetEmpty: "No presets yet. Create one to sync prompts across apps.",
+    presetSaved: "Preset saved",
+    presetDeleted: "Preset deleted",
+    presetActivated: "Preset activated",
+    presetBackfilled: "Manual edits detected in live file; backfilled into the previous preset",
+    confirmDeletePreset: "Delete preset \"{name}\"?",
+    confirmActivatePreset: "Activate preset \"{name}\"? Content will be written to:",
+    presetNeedName: "Preset name is required",
+    presetNeedApp: "Select at least one target app",
+    templateSaveAsPreset: "Save as preset",
     snippetLanguagePref: "Language: Chinese",
     snippetCodeQuality: "Code Quality Rules",
     snippetSecurity: "Security Guidelines",
@@ -676,7 +950,48 @@ const I18N = {
     toastUpdateDownloaded: "Update installer started. VarSwitch will restart automatically if needed.",
     toastAlreadyLatest: "You're already on the latest version",
     toastReleaseOpened: "Download page opened",
-    toastRepoOpened: "Repository opened"
+    toastRepoOpened: "Repository opened",
+    cliSessionsNavLabel: "Sessions",
+    cliSessionsPageTitle: "Sessions",
+    cliSessionsPageSubtitle: "Browse local Claude Code and Codex session history, and resume any of them in one click.",
+    cliSessionsRefresh: "Refresh",
+    cliSessionsSearchPlaceholder: "Search title, directory or session ID",
+    cliSessionsFilterAll: "All",
+    cliSessionsLoading: "Scanning local sessions…",
+    cliSessionsCount: "{count} sessions",
+    cliSessionsEmptyTitle: "No sessions yet",
+    cliSessionsEmptyText: "Sessions from Claude Code and Codex will show up here once you use them.",
+    cliSessionsEmptyFilteredTitle: "No matching sessions",
+    cliSessionsEmptyFilteredText: "Try a different keyword or source filter.",
+    cliSessionsResume: "Resume",
+    cliSessionsResumeOpened: "Session opened in terminal / app",
+    cliSessionsResumeFailed: "Failed to resume session: {error}",
+    cliSessionsLoadFailed: "Failed to load sessions: {error}",
+    cliSessionsNoCwd: "Unknown directory",
+    settingsGroupDataDir: "Data Directory (Multi-device Sync)",
+    settingsDataDirLabel: "Data directory",
+    settingsDataDirDesc: "Point it to a OneDrive / Dropbox / Nutstore / NAS synced folder to share configs across devices. Note: configs contain plaintext API keys, make sure the sync folder is trusted.",
+    settingsDataDirDefault: "Default",
+    settingsDataDirCustom: "Custom",
+    settingsDataDirPick: "Choose Folder…",
+    settingsDataDirReset: "Use Default",
+    dataDirSwitchTitle: "Data directory switched",
+    dataDirSwitchSummary: "Copied {copied} item(s), skipped {skipped} existing item(s).",
+    dataDirRestartHint: "Please restart VarSwitch for all features to take effect.",
+    dataDirResetDone: "Default data directory restored.",
+    dataDirConfirmReset: "Restore the default data directory? Files in the custom folder will not be deleted.",
+    dataDirAlreadyDefault: "Already using the default data directory",
+    dataDirGotIt: "OK",
+    deeplinkTitle: "Import via Link",
+    deeplinkWarning: "This configuration comes from an external link. Make sure you trust the source before importing.",
+    deeplinkTargetApp: "Target app",
+    deeplinkFieldName: "Name",
+    deeplinkFieldBaseUrl: "Base URL",
+    deeplinkFieldApiKey: "API Key",
+    deeplinkConfigPreview: "MCP config preview",
+    deeplinkConfirm: "Confirm Import",
+    deeplinkImporting: "Importing...",
+    deeplinkInvalid: "Deep link parse failed: {message}"
   },
   zh: {
     appTitle: "VarSwitch",
@@ -779,6 +1094,42 @@ const I18N = {
     geminiNoConfigsTitle: "暂无 Gemini 配置",
     geminiNoConfigsDesc: "创建一个配置，一键切换 Gemini CLI 的网关与模型。",
     grokAddFirstConfig: "添加第一个 Grok 配置",
+    opencodePageTab: "OpenCode",
+    opencodePageSubtitle: "管理 OpenCode 的 provider、API Key 与默认模型。",
+    opencodeStatusTitle: "OpenCode 状态",
+    opencodeProfilesTitle: "OpenCode 配置列表",
+    opencodeAddConfig: "添加 OpenCode 配置",
+    opencodeEditConfig: "编辑 OpenCode 配置",
+    opencodeNameLabel: "配置名称",
+    opencodePresetLabel: "预设",
+    opencodePresetCustom: "自定义",
+    opencodePresetHintDefault: "选择预设可自动填入 models.dev 的 provider id 与官方主推模型。",
+    opencodeProviderLabel: "Provider ID",
+    opencodeProviderHint: "models.dev 的 provider id，例如 anthropic / openai / deepseek / moonshotai。",
+    opencodeApiKeyLabel: "API Key",
+    opencodeBaseUrlLabel: "Base URL",
+    opencodeBaseUrlPlaceholder: "留空使用该 provider 的官方地址",
+    opencodeOfficialBaseUrl: "官方地址",
+    opencodeModelLabel: "模型",
+    opencodeModelHint: "写入 opencode.json 顶层 model，格式为 provider/model。",
+    opencodeCliLabel: "命令行",
+    opencodeInstalled: "已安装",
+    opencodeNotInstalled: "未检测到",
+    opencodeConfigPathLabel: "配置文件",
+    opencodeSourceLabel: "配置来源",
+    opencodeConfigMissing: "配置文件尚未创建",
+    opencodeStatusLoadFailed: "OpenCode 状态加载失败",
+    opencodeSwitchedTo: "OpenCode 已切换到 {name}",
+    opencodeToastAdded: "OpenCode 配置已添加",
+    opencodeToastUpdated: "OpenCode 配置已更新",
+    opencodeToastDeleted: "OpenCode 配置已删除",
+    opencodeNoConfigsTitle: "暂无 OpenCode 配置",
+    opencodeNoConfigsDesc: "创建一个配置，一键切换 opencode.json 里的 provider、API Key 与模型。",
+    opencodeImportCurrent: "导入当前配置",
+    opencodeImportDefaultName: "当前 OpenCode 配置",
+    opencodeImportEmpty: "当前配置里没有检测到 OpenCode provider",
+    opencodeImportPrefilled: "已按当前配置预填，请补全 API Key 后保存。",
+    opencodeNoActiveProfile: "暂无启用的 OpenCode 配置",
     codexToolbox: "工具箱",
     codexToolboxTitle: "Codex 工具箱",
     toolboxTabSession: "会话同步",
@@ -907,6 +1258,13 @@ const I18N = {
     modelIdLabel: "模型 ID",
     placeholderModelId: "如 opus, sonnet",
     modelIdHint: "可选。设置编辑器和 Claude 系统设置中的模型。",
+    modelMappingTitle: "高级模型映射",
+    modelMappingHint: "可选。分别写入 ANTHROPIC_DEFAULT_SONNET_MODEL / ANTHROPIC_DEFAULT_OPUS_MODEL / ANTHROPIC_DEFAULT_HAIKU_MODEL，留空则不设置。",
+    sonnetModelLabel: "Sonnet 模型",
+    opusModelLabel: "Opus 模型",
+    haikuModelLabel: "Haiku 模型",
+    dragToReorder: "拖拽排序",
+    reorderFailed: "排序保存失败: {error}",
     endpointTest: "验证连接",
     endpointTesting: "验证中...",
     endpointUse: "使用",
@@ -922,6 +1280,28 @@ const I18N = {
     claudeApiFormatOptionOpenAiChat: "OpenAI Chat Completions（经本地代理转换）",
     claudeApiFormatNeedsBaseUrl: "OpenAI 格式必须填写上游 Base URL。",
     claudeApiFormatNeedsModel: "OpenAI 格式需要填写 Model ID（上游真实模型名，例如 deepseek-chat）。",
+    proxyFailoverLabel: "加入代理故障转移池",
+    proxyFailoverHint: "当前激活配置故障时，本地代理按列表顺序自动切到池内配置。需填写 Base URL。",
+    proxyFailoverBadge: "备用",
+    proxyTakeoverLabel: "由本地代理接管",
+    proxyTakeoverHint: "开启后请求经 127.0.0.1:25789 透传，可享受故障转移与熔断；需保持 VarSwitch 运行，否则 Claude Code 连不上。",
+    proxyTakeoverBadge: "代理",
+    proxyHealthTitle: "代理健康",
+    proxyHealthRunning: "运行中（127.0.0.1:{port}）",
+    proxyHealthStopped: "未运行",
+    proxyHealthStatusLabel: "代理状态",
+    proxyHealthPrimaryLabel: "主上游",
+    proxyHealthFailoverLabel: "备用",
+    proxyHealthPoolEmpty: "暂无备用上游，可在其他填写了 Base URL 的配置中勾选「加入代理故障转移池」。",
+    proxyHealthFailoverCountLabel: "自动转移次数",
+    proxyHealthLastErrorLabel: "最近错误",
+    proxyHealthNoError: "无",
+    proxyHealthResetBreaker: "重置熔断",
+    proxyHealthResetDone: "熔断器与健康统计已重置",
+    proxyHealthStatsTitle: "失败 / 总请求",
+    proxyBreakerClosed: "正常",
+    proxyBreakerOpen: "熔断",
+    proxyBreakerHalfOpen: "探测中",
     codexWireApiLabel: "上游协议",
     codexWireApiHint: "写入 ~/.codex/config.toml 的 wire_api 字段；选择预设时自动匹配。",
     codexAdvancedTitle: "高级选项",
@@ -948,20 +1328,51 @@ const I18N = {
     toastPromptSaved: "提示词已保存",
     mcpManage: "MCP 服务器",
     mcpTitle: "MCP 服务器管理",
-    mcpPathLabel: "~/.claude.json",
+    mcpPathLabel: "~/.claude.json · ~/.codex/config.toml · ~/.gemini/settings.json",
     addMcp: "+ 添加服务器",
     mcpName: "服务器名称",
     mcpConfig: "配置 (JSON)",
-    mcpNamePlaceholder: "server-name",
+    mcpNamePlaceholder: "context7",
+    mcpIntro: "MCP Server 为 AI CLI 提供额外能力（查文档、读写文件、连数据库等）。在这里登记一次，即可同步到下面各个应用的配置文件。",
+    mcpNameHint: "供 CLI 引用的唯一标识，例如 context7、filesystem。",
+    mcpModeForm: "表单填写",
+    mcpModeJson: "JSON",
+    mcpTransportLabel: "连接方式",
+    mcpTransportStdio: "本地命令（stdio）",
+    mcpTransportHttp: "远程 HTTP",
+    mcpTransportSse: "远程 SSE",
+    mcpTransportHint: "大多数 MCP Server 是本地命令：由 CLI 启动一个进程并通过标准输入输出通信。",
+    mcpCommandLabel: "启动命令",
+    mcpArgsLabel: "参数（一行一个）",
+    mcpEnvLabel: "环境变量（一行一个 KEY=VALUE，可留空）",
+    mcpUrlLabel: "服务地址",
+    mcpHeadersLabel: "请求头（一行一个 Key: Value，可留空）",
+    mcpNeedName: "请填写服务器名称。",
+    mcpNeedCommand: "请填写启动命令，例如 npx。",
+    mcpNeedUrl: "请填写服务地址。",
+    mcpJsonTooComplex: "该配置包含表单无法表达的字段，请继续用 JSON 模式编辑。",
     toastMcpSaved: "MCP 服务器已保存",
     toastMcpDeleted: "MCP 服务器已删除",
-    confirmDeleteMcp: "确认删除 MCP 服务器 \"{name}\"？",
+    confirmDeleteMcp: "确认删除 MCP 服务器 \"{name}\"？将从所有应用（Claude / Codex / Gemini / Claude Desktop）中移除。",
     invalidJson: "JSON 格式无效",
     noMcpServers: "暂无 MCP 服务器配置。",
+    mcpAppsLabel: "启用到应用",
+    mcpNoAppSelected: "请至少选择一个应用",
+    toastMcpAppEnabled: "{name} 已在 {app} 启用",
+    toastMcpAppDisabled: "{name} 已在 {app} 停用",
+    mcpDesktopNotInstalled: "未检测到 Claude Desktop",
+    mcpDesktopPathLabel: "Claude Desktop：{path}",
+    confirmDisableLastMcpApp: "\"{name}\" 目前仅在 {app} 启用，停用后该服务器将从所有应用中移除。是否继续？",
     // Skills Discovery
     skillsTabInstalled: "已安装",
     skillsTabDiscover: "发现",
     installFromZip: "从 ZIP 安装",
+    zipInstallTitle: "从 ZIP 安装技能",
+    zipInstallTargets: "安装到",
+    zipInstallConfirmBtn: "安装",
+    zipNoAppSelected: "请至少选择一个应用",
+    zipOverwriteConfirm: "技能 \"{name}\" 已存在，是否覆盖？",
+    toastZipInstalledTo: "技能 \"{name}\" 已安装到 {apps}",
     discoverSearchPlaceholder: "搜索技能...",
     allRepos: "全部仓库",
     filterAll: "全部",
@@ -994,6 +1405,28 @@ const I18N = {
     insertSnippet: "-- 插入片段 --",
     appendToPrompt: "追加",
     replacePrompt: "替换",
+    // Prompt Presets（预设库 + 跨应用同步 + 回填保护）
+    promptTabPresets: "预设",
+    presetNew: "+ 新建预设",
+    presetName: "预设名称",
+    presetNamePlaceholder: "例如：中文开发",
+    presetApps: "同步到应用",
+    presetContent: "内容",
+    presetContentPlaceholder: "系统提示词内容...",
+    presetActive: "激活中",
+    presetActivate: "激活",
+    presetEdit: "编辑",
+    presetDelete: "删除",
+    presetEmpty: "暂无预设。创建预设可在多个应用间同步提示词。",
+    presetSaved: "预设已保存",
+    presetDeleted: "预设已删除",
+    presetActivated: "预设已激活",
+    presetBackfilled: "检测到 live 文件有手工修改，已回填到原预设",
+    confirmDeletePreset: "确认删除预设 \"{name}\"？",
+    confirmActivatePreset: "激活预设 \"{name}\"？内容将写入：",
+    presetNeedName: "请填写预设名称",
+    presetNeedApp: "请至少勾选一个目标应用",
+    templateSaveAsPreset: "存为预设",
     snippetLanguagePref: "语言：中文",
     snippetCodeQuality: "代码质量规则",
     snippetSecurity: "安全指南",
@@ -1099,7 +1532,48 @@ const I18N = {
     toastUpdateDownloaded: "更新安装程序已启动，必要时 VarSwitch 会自动重启。",
     toastAlreadyLatest: "当前已经是最新版本",
     toastReleaseOpened: "已打开下载页",
-    toastRepoOpened: "已打开仓库地址"
+    toastRepoOpened: "已打开仓库地址",
+    cliSessionsNavLabel: "会话",
+    cliSessionsPageTitle: "会话",
+    cliSessionsPageSubtitle: "浏览 Claude Code 与 Codex 的本机历史会话，一键在终端或应用中恢复。",
+    cliSessionsRefresh: "刷新",
+    cliSessionsSearchPlaceholder: "搜索标题、目录或会话 ID",
+    cliSessionsFilterAll: "全部",
+    cliSessionsLoading: "正在扫描本机会话…",
+    cliSessionsCount: "共 {count} 个会话",
+    cliSessionsEmptyTitle: "暂无历史会话",
+    cliSessionsEmptyText: "使用 Claude Code 或 Codex 后，这里会列出可恢复的本机会话。",
+    cliSessionsEmptyFilteredTitle: "没有匹配的会话",
+    cliSessionsEmptyFilteredText: "换个关键词或来源筛选试试。",
+    cliSessionsResume: "恢复会话",
+    cliSessionsResumeOpened: "已在终端 / 应用中打开",
+    cliSessionsResumeFailed: "恢复会话失败：{error}",
+    cliSessionsLoadFailed: "会话加载失败：{error}",
+    cliSessionsNoCwd: "未知目录",
+    settingsGroupDataDir: "数据目录（多设备同步）",
+    settingsDataDirLabel: "数据目录",
+    settingsDataDirDesc: "可指向 OneDrive / Dropbox / 坚果云 / NAS 同步目录，在多台设备间共享配置。注意：配置含明文密钥，请确保同步目录可信。",
+    settingsDataDirDefault: "默认",
+    settingsDataDirCustom: "自定义",
+    settingsDataDirPick: "选择目录…",
+    settingsDataDirReset: "恢复默认",
+    dataDirSwitchTitle: "数据目录已切换",
+    dataDirSwitchSummary: "已复制 {copied} 项，跳过 {skipped} 项已存在文件。",
+    dataDirRestartHint: "请重启应用使所有功能生效。",
+    dataDirResetDone: "已恢复默认数据目录。",
+    dataDirConfirmReset: "恢复默认数据目录？自定义目录中的文件不会被删除。",
+    dataDirAlreadyDefault: "当前已是默认数据目录",
+    dataDirGotIt: "知道了",
+    deeplinkTitle: "通过链接导入",
+    deeplinkWarning: "此配置来自外部链接，请确认链接来源可信后再导入。",
+    deeplinkTargetApp: "目标应用",
+    deeplinkFieldName: "名称",
+    deeplinkFieldBaseUrl: "Base URL",
+    deeplinkFieldApiKey: "API Key",
+    deeplinkConfigPreview: "MCP 配置预览",
+    deeplinkConfirm: "确认导入",
+    deeplinkImporting: "导入中...",
+    deeplinkInvalid: "链接解析失败：{message}"
   }
 };
 
@@ -1122,6 +1596,7 @@ let profiles = [];
 let codexProfiles = [];
 let grokProfiles = [];
 let geminiProfiles = [];
+let opencodeProfiles = [];
 let grokDiagnostics = null;
 let codexToolbox = null;
 let codexDiagnostics = null;
@@ -1136,13 +1611,16 @@ let lastClaudeStatus = null;
 let lastCodexStatus = null;
 let lastGrokStatus = null;
 let lastGeminiStatus = null;
+let lastOpenCodeStatus = null;
 let editingGrokId = null;
 let editingGeminiId = null;
+let editingOpenCodeId = null;
 let detectedEditors = {}; // { id: displayName }
 let editingId = null;
 let profileSaving = false;
 let grokProfileSaving = false;
 let geminiProfileSaving = false;
+let opencodeProfileSaving = false;
 let switchingSnapshot = null;
 let progressUnlisten = null;
 let mobileChannelStatusUnlisten = null;
@@ -1151,8 +1629,12 @@ let skillsData = [];
 let editingSkillName = null;
 let skillSaving = false;
 let mcpServers = {};
+let mcpServerApps = {}; // name -> { claude, codex, gemini, claudeDesktop }（统一 MCP 面板各应用的启用状态）
 let editingMcpName = null;
 let mcpSaving = false;
+let mcpAppToggling = false; // 应用徽标切换防并发
+// Claude Desktop 的 MCP 状态（installed=false 时第 4 个 chip 置灰禁用）
+let mcpDesktopInfo = { installed: false, configPath: "", servers: {} };
 let discoverSkills = [];
 let skillRepos = [];
 let repoAdding = false;
@@ -1162,7 +1644,11 @@ let discoverRepoFilter = "all";
 let discoverStatusFilter = "all";
 let isDiscovering = false;
 let promptTemplates = [];
-let activePromptTab = "editor";
+let activePromptTab = "presets";
+// 预设库数据（get_prompt_presets 返回的 { presets, activeId, live }）
+let promptPresetsData = { presets: [], activeId: null, live: {} };
+// 右侧编辑区正在编辑的预设 id；null 表示新建
+let editingPromptPresetId = null;
 let isShowingGithubSkills = false;
 let updateInfo = null;
 let updateBusy = false;
@@ -1251,10 +1737,160 @@ function bindProfileGridActions(grid, flag, type) {
     const id = target.getAttribute("data-id");
     if (!id) return;
     // data-action 允许带 provider 前缀（如 codex-switch），统一去前缀后分派
-    const kind = action.replace(/^(?:claude|codex|grok|gemini)-/, "");
+    const kind = action.replace(/^(?:claude|codex|grok|gemini|opencode)-/, "");
     if (kind === "switch") switchAnyProviderProfile(type, id);
     else if (kind === "edit") editProviderProfile(type, id);
     else if (kind === "delete") deleteProviderProfile(type, id);
+  });
+}
+
+// ── 配置卡片拖拽排序 ──────────────────────────────
+// 四个列表共用一套实现；后端命令为跨智能体契约，名称不可改。
+const PROFILE_SORT_KINDS = {
+  claude: {
+    command: "reorder_profiles",
+    getList: () => profiles,
+    setList: (list) => { profiles = list; },
+    render: () => renderProfiles(),
+    reload: () => loadProfiles(),
+  },
+  codex: {
+    command: "reorder_codex_profiles",
+    getList: () => codexProfiles,
+    setList: (list) => { codexProfiles = list; },
+    render: () => renderCodexProfiles(),
+    reload: () => loadCodexProfiles(),
+  },
+  grok: {
+    command: "reorder_grok_profiles",
+    getList: () => grokProfiles,
+    setList: (list) => { grokProfiles = list; },
+    render: () => renderGrokProfiles(),
+    reload: () => loadGrokProfiles(),
+  },
+  gemini: {
+    command: "reorder_gemini_profiles",
+    getList: () => geminiProfiles,
+    setList: (list) => { geminiProfiles = list; },
+    render: () => renderGeminiProfiles(),
+    reload: () => loadGeminiProfiles(),
+  },
+  opencode: {
+    command: "reorder_opencode_profiles",
+    getList: () => opencodeProfiles,
+    setList: (list) => { opencodeProfiles = list; },
+    render: () => renderOpenCodeProfiles(),
+    reload: () => loadOpenCodeProfiles(),
+  },
+};
+
+// 当前拖拽会话状态（同一时刻只可能有一个拖拽）
+let profileDragState = null;
+
+const DROP_INDICATOR_CLASSES = ["drop-target-top", "drop-target-bottom", "drop-target-left", "drop-target-right"];
+
+// 这些元素上按下时不发起拖拽，保证按钮可点、输入框可编辑
+const NON_DRAGGABLE_SELECTOR = "button, a, input, select, textarea, [contenteditable='true']";
+
+function profileDragHandleHtml() {
+  return `<span class="profile-drag-handle" title="${esc(t("dragToReorder"))}" aria-label="${esc(t("dragToReorder"))}">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/>
+      <circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/>
+      <circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/>
+    </svg>
+  </span>`;
+}
+
+function clearDropIndicators(grid) {
+  grid.querySelectorAll(".profile-card").forEach((card) => card.classList.remove(...DROP_INDICATOR_CLASSES));
+}
+
+// 网格可能多列：按指针偏离卡片中心的主导轴判断插入方向，并返回对应的指示线位置
+function computeDropPosition(event, card) {
+  const rect = card.getBoundingClientRect();
+  const dx = (event.clientX - rect.left) / Math.max(rect.width, 1) - 0.5;
+  const dy = (event.clientY - rect.top) / Math.max(rect.height, 1) - 0.5;
+  if (Math.abs(dy) >= Math.abs(dx)) {
+    return { before: dy < 0, indicator: dy < 0 ? "drop-target-top" : "drop-target-bottom" };
+  }
+  return { before: dx < 0, indicator: dx < 0 ? "drop-target-left" : "drop-target-right" };
+}
+
+async function persistProfileOrder(kind, ids) {
+  const config = PROFILE_SORT_KINDS[kind];
+  try {
+    await invoke(config.command, { ids });
+  } catch (error) {
+    showToast(t("reorderFailed", { error: String(error) }), "error");
+    await config.reload();
+  }
+}
+
+function bindProfileGridDragSort(grid, kind) {
+  if (!grid || grid.dataset.boundDragSort === "1") return;
+  grid.dataset.boundDragSort = "1";
+
+  grid.addEventListener("dragstart", (event) => {
+    const card = event.target.closest?.(".profile-card");
+    // 整张卡片都可发起拖拽，但从按钮/输入控件按下时放弃，避免误拖点击操作
+    if (!card || !card.dataset.id || event.target.closest?.(NON_DRAGGABLE_SELECTOR)) {
+      event.preventDefault();
+      return;
+    }
+    profileDragState = { kind, id: card.dataset.id };
+    event.dataTransfer.effectAllowed = "move";
+    try { event.dataTransfer.setData("text/plain", card.dataset.id); } catch (_) { /* 某些 WebView 不支持 */ }
+    // 延迟到拖拽快照生成后再降透明度，避免快照本身变淡
+    requestAnimationFrame(() => card.classList.add("dragging"));
+  });
+
+  grid.addEventListener("dragover", (event) => {
+    if (!profileDragState || profileDragState.kind !== kind) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    clearDropIndicators(grid);
+    const card = event.target.closest?.(".profile-card");
+    if (!card || card.classList.contains("dragging") || card.dataset.id === profileDragState.id) return;
+    card.classList.add(computeDropPosition(event, card).indicator);
+  });
+
+  grid.addEventListener("dragleave", (event) => {
+    if (!event.relatedTarget || !grid.contains(event.relatedTarget)) clearDropIndicators(grid);
+  });
+
+  grid.addEventListener("drop", (event) => {
+    const state = profileDragState;
+    // drop 即本次拖拽会话结束；成功重排后 render() 会重建卡片，
+    // dragend 不再从已脱离 DOM 的源卡片冒泡到 grid，因此在此处消费状态
+    profileDragState = null;
+    clearDropIndicators(grid);
+    if (!state || state.kind !== kind) return;
+    event.preventDefault();
+    const targetCard = event.target.closest?.(".profile-card");
+    if (!targetCard || !targetCard.dataset.id || targetCard.dataset.id === state.id) return;
+
+    const config = PROFILE_SORT_KINDS[kind];
+    const list = config.getList().slice();
+    const fromIndex = list.findIndex((item) => String(item.id) === state.id);
+    if (fromIndex < 0) return;
+    const { before } = computeDropPosition(event, targetCard);
+    const [moved] = list.splice(fromIndex, 1);
+    let toIndex = list.findIndex((item) => String(item.id) === targetCard.dataset.id);
+    if (toIndex < 0) return;
+    if (!before) toIndex += 1;
+    list.splice(toIndex, 0, moved);
+
+    const changed = list.some((item, index) => item !== config.getList()[index]);
+    config.setList(list);
+    config.render();
+    if (changed) persistProfileOrder(kind, list.map((item) => item.id));
+  });
+
+  grid.addEventListener("dragend", () => {
+    profileDragState = null;
+    clearDropIndicators(grid);
+    grid.querySelectorAll(".profile-card.dragging").forEach((card) => card.classList.remove("dragging"));
   });
 }
 
@@ -1316,6 +1952,11 @@ function productIcon(kind) {
   if (kind === "gemini") {
     return `<span class="product-icon product-icon-gemini" aria-hidden="true">
       <img src="gemini-color.svg" width="16" height="16" alt="">
+    </span>`;
+  }
+  if (kind === "opencode") {
+    return `<span class="product-icon product-icon-opencode" aria-hidden="true">
+      <img src="icon-opencode.svg" width="16" height="16" alt="">
     </span>`;
   }
   return "";
@@ -1752,6 +2393,7 @@ function applyLanguage() {
   setText("usageGuideNeverBtn", t("usageGuideNever"));
 
   applyUsagePanelLanguage();
+  applyCliSessionsPanelLanguage();
 
   setPlaceholder("profileName", t("placeholderName"));
   setPlaceholder("profileApiKey", t("placeholderApiKey"));
@@ -1759,6 +2401,11 @@ function applyLanguage() {
   setText("profileModelIdLabel", t("modelIdLabel"));
   setPlaceholder("profileModelId", t("placeholderModelId"));
   setText("profileModelIdHint", t("modelIdHint"));
+  setText("profileModelMappingSummary", t("modelMappingTitle"));
+  setText("profileModelMappingHint", t("modelMappingHint"));
+  setText("profileSonnetModelLabel", t("sonnetModelLabel"));
+  setText("profileOpusModelLabel", t("opusModelLabel"));
+  setText("profileHaikuModelLabel", t("haikuModelLabel"));
   setText("profilePresetLabel", t("providerPresetLabel"));
   setText("profilePresetHint", t("claudePresetHintDefault"));
   setText("profileApiFormatLabel", t("claudeApiFormatLabel"));
@@ -1768,6 +2415,12 @@ function applyLanguage() {
     claudeApiFormatSelect.options[0].textContent = t("claudeApiFormatOptionAnthropic");
     claudeApiFormatSelect.options[1].textContent = t("claudeApiFormatOptionOpenAiChat");
   }
+  setText("profileProxyFailoverText", t("proxyFailoverLabel"));
+  setText("profileProxyFailoverHint", t("proxyFailoverHint"));
+  setText("profileProxyTakeoverText", t("proxyTakeoverLabel"));
+  setText("profileProxyTakeoverHint", t("proxyTakeoverHint"));
+  setText("proxyHealthSectionTitle", t("proxyHealthTitle"));
+  setText("proxyHealthResetBtn", t("proxyHealthResetBreaker"));
   renderClaudePresetOptions();
 
   // Codex page labels
@@ -1832,6 +2485,30 @@ function applyLanguage() {
   if ($("grokBaseUrl")) setPlaceholder("grokBaseUrl", currentLang === "zh" ? "留空使用官方地址 https://api.x.ai/v1" : "Leave empty for official https://api.x.ai/v1");
   if ($("grokModel")) setPlaceholder("grokModel", "e.g. grok-4");
   renderGrokPresetOptions();
+  // OpenCode page labels
+  updateOpenCodeStatusTitle();
+  if ($("opencodePageTitle")) setText("opencodePageTitle", t("opencodePageTab"));
+  if ($("opencodePageSubtitle")) setText("opencodePageSubtitle", t("opencodePageSubtitle"));
+  if ($("opencodeProfilesSectionTitle")) setText("opencodeProfilesSectionTitle", t("opencodeProfilesTitle"));
+  if ($("opencodePresetLabel")) setText("opencodePresetLabel", t("opencodePresetLabel"));
+  if ($("opencodeNameLabel")) setText("opencodeNameLabel", t("opencodeNameLabel"));
+  if ($("opencodeProviderLabel")) setText("opencodeProviderLabel", t("opencodeProviderLabel"));
+  if ($("opencodeProviderHint")) setText("opencodeProviderHint", t("opencodeProviderHint"));
+  if ($("opencodeApiKeyLabel")) setText("opencodeApiKeyLabel", t("opencodeApiKeyLabel"));
+  if ($("opencodeBaseUrlLabel")) setText("opencodeBaseUrlLabel", t("opencodeBaseUrlLabel"));
+  if ($("opencodeModelLabel")) setText("opencodeModelLabel", t("opencodeModelLabel"));
+  if ($("opencodeModelHint")) setText("opencodeModelHint", t("opencodeModelHint"));
+  if ($("opencodeCancelBtn")) setText("opencodeCancelBtn", t("cancel"));
+  if ($("opencodeSubmitBtn")) setText("opencodeSubmitBtn", t("save"));
+  if ($("opencodePageAddBtn")) setText("opencodePageAddBtn", t("opencodeAddConfig"));
+  if ($("opencodeRefreshBtn")) setText("opencodeRefreshBtn", currentLang === "zh" ? "立即同步" : "Sync now");
+  if ($("opencodePageImportBtn")) setText("opencodePageImportBtn", t("opencodeImportCurrent"));
+  if ($("opencodeProfileName")) setPlaceholder("opencodeProfileName", t("placeholderName"));
+  if ($("opencodeProviderId")) setPlaceholder("opencodeProviderId", "anthropic");
+  if ($("opencodeApiKey")) setPlaceholder("opencodeApiKey", "sk-...");
+  if ($("opencodeBaseUrl")) setPlaceholder("opencodeBaseUrl", t("opencodeBaseUrlPlaceholder"));
+  if ($("opencodeModel")) setPlaceholder("opencodeModel", "e.g. claude-sonnet-5");
+  renderOpenCodePresetOptions();
   const codexToolboxBtn = $("codexToolboxBtn");
   if (codexToolboxBtn) codexToolboxBtn.textContent = t("codexToolbox");
   setText("codexToolboxTitle", t("codexToolboxTitle"));
@@ -1873,17 +2550,40 @@ function applyLanguage() {
   setText("mcpTabPresets", t("mcpTabPresets"));
   setPlaceholder("mcpPresetSearch", t("mcpSearchPlaceholder"));
   setText("mcpPresetLoadingText", t("mcpSearchLoading"));
+  setText("mcpIntro", t("mcpIntro"));
   setText("mcpPath", t("mcpPathLabel"));
   setText("addMcpBtn", t("addMcp"));
   setText("mcpNameLabel2", t("mcpName"));
   setText("mcpConfigLabel", t("mcpConfig"));
+  setText("mcpAppsLabel", t("mcpAppsLabel"));
   setPlaceholder("mcpNameInput", t("mcpNamePlaceholder"));
+  setText("mcpNameHint", t("mcpNameHint"));
+  setText("mcpModeFormBtn", t("mcpModeForm"));
+  setText("mcpModeJsonBtn", t("mcpModeJson"));
+  setText("mcpTransportLabel", t("mcpTransportLabel"));
+  setText("mcpTransportHint", t("mcpTransportHint"));
+  setText("mcpCommandLabel", t("mcpCommandLabel"));
+  setText("mcpArgsLabel", t("mcpArgsLabel"));
+  setText("mcpEnvLabel", t("mcpEnvLabel"));
+  setText("mcpUrlLabel", t("mcpUrlLabel"));
+  setText("mcpHeadersLabel", t("mcpHeadersLabel"));
+  const transportSelect = $("mcpTransport");
+  if (transportSelect && transportSelect.options.length >= 3) {
+    transportSelect.options[0].textContent = t("mcpTransportStdio");
+    transportSelect.options[1].textContent = t("mcpTransportHttp");
+    transportSelect.options[2].textContent = t("mcpTransportSse");
+  }
   setText("mcpCancelBtn", t("cancel"));
   setText("mcpSaveBtn", t("save"));
 
   // Skills Discovery labels
   setText("skillsTabInstalled", t("skillsTabInstalled"));
   setText("skillsTabDiscover", t("skillsTabDiscover"));
+  setText("installZipBtn", t("installFromZip"));
+  setText("zipInstallTitle", t("zipInstallTitle"));
+  setText("zipInstallAppsLabel", t("zipInstallTargets"));
+  setText("zipInstallCancel", t("cancel"));
+  setText("zipInstallConfirm", t("zipInstallConfirmBtn"));
   setPlaceholder("discoverSearch", t("discoverSearchPlaceholder"));
   setText("discoverLoadingText", t("discoverLoading"));
   setText("manageReposBtn", t("manageRepos"));
@@ -1895,8 +2595,17 @@ function applyLanguage() {
   setText("backToCatalogBtnText", t("skillsBackToCatalog"));
 
   // Prompt tabs
+  setText("promptTabPresets", t("promptTabPresets"));
   setText("promptTabEditor", t("promptTabEditor"));
   setText("promptTabTemplates", t("promptTabTemplates"));
+  // Prompt presets（预设库）
+  setText("addPromptPresetBtn", t("presetNew"));
+  setText("promptPresetNameLabel", t("presetName"));
+  setPlaceholder("promptPresetNameInput", t("presetNamePlaceholder"));
+  setText("promptPresetAppsLabel", t("presetApps"));
+  setText("promptPresetContentLabel", t("presetContent"));
+  setPlaceholder("promptPresetContentInput", t("presetContentPlaceholder"));
+  setText("promptPresetSaveBtn", t("save"));
   const insertSelect = $("promptInsertSelect");
   if (insertSelect.options.length > 0) {
     insertSelect.options[0].textContent = t("insertSnippet");
@@ -1946,6 +2655,23 @@ function applyLanguage() {
   setText("settingsViewBackupsBtn", t("settingsViewBackups"));
   setText("settingsSilentStartLabel", t("settingsSilentStart"));
   setText("settingsSilentStartDesc", t("settingsSilentStartDesc"));
+  // 数据目录（多设备同步）区块
+  setText("settingsGroupDataDir", t("settingsGroupDataDir"));
+  setText("settingsDataDirLabel", t("settingsDataDirLabel"));
+  setText("settingsDataDirDesc", t("settingsDataDirDesc"));
+  setText("settingsDataDirPickBtn", t("settingsDataDirPick"));
+  setText("settingsDataDirResetBtn", t("settingsDataDirReset"));
+  renderDataDirInfo();
+  // 深链导入确认弹窗
+  setText("deeplinkTitle", t("deeplinkTitle"));
+  setText("deeplinkWarning", t("deeplinkWarning"));
+  setText("deeplinkAppLabel", t("deeplinkTargetApp"));
+  setText("deeplinkNameLabel", t("deeplinkFieldName"));
+  setText("deeplinkBaseUrlLabel", t("deeplinkFieldBaseUrl"));
+  setText("deeplinkApiKeyLabel", t("deeplinkFieldApiKey"));
+  setText("deeplinkConfigLabel", t("deeplinkConfigPreview"));
+  setText("deeplinkCancel", t("cancel"));
+  setText("deeplinkConfirm", t("deeplinkConfirm"));
 
   updateLangSegControl();
   updateThemeSegControl();
@@ -3234,9 +3960,12 @@ function renderProfiles() {
   }
 
   grid.innerHTML = profiles.map((profile) => `
-    <div class="profile-card ${profile.isActive ? "active" : ""}">
+    <div class="profile-card ${profile.isActive ? "active" : ""}" data-id="${esc(profile.id)}" draggable="true">
       <div class="profile-header">
+        ${profileDragHandleHtml()}
         <span class="profile-name">${esc(profile.name)}</span>
+        ${profile.proxyTakeover ? `<span class="proxy-failover-badge" title="${esc(t("proxyTakeoverHint"))}">${t("proxyTakeoverBadge")}</span>` : ""}
+        ${profile.proxyFailover ? `<span class="proxy-failover-badge" title="${esc(t("proxyFailoverHint"))}">${t("proxyFailoverBadge")}</span>` : ""}
         ${profile.isActive ? `<span class="active-badge">${t("inUse")}</span>` : ""}
       </div>
       <div class="profile-body">
@@ -3256,6 +3985,7 @@ function renderProfiles() {
           <span class="field-label">${currentLang === "zh" ? "Claude 模型" : "Claude Model"}</span>
           <span class="field-value">${esc(profile.modelId)}</span>
         </div>` : ""}
+        ${modelMappingBadgesHtml(profile)}
       </div>
       <div class="profile-actions">
         ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
@@ -3266,11 +3996,160 @@ function renderProfiles() {
   `).join("");
 
   bindProfileGridActions(grid, "ClaudeProfiles", "claude");
+  bindProfileGridDragSort(grid, "claude");
   updateActiveConfigBar();
+  updateProxyHealthPanel();
+}
+
+// Claude 角色模型映射徽标：S/O/H + 模型名缩略，title 展示完整环境变量取值
+function modelMappingBadgesHtml(profile) {
+  const entries = [
+    ["S", "ANTHROPIC_DEFAULT_SONNET_MODEL", profile.sonnetModel],
+    ["O", "ANTHROPIC_DEFAULT_OPUS_MODEL", profile.opusModel],
+    ["H", "ANTHROPIC_DEFAULT_HAIKU_MODEL", profile.haikuModel],
+  ].filter(([, , value]) => value);
+  if (entries.length === 0) return "";
+  const shorten = (value) => (value.length > 20 ? `${value.slice(0, 19)}…` : value);
+  return `<div class="model-map-badges">${entries.map(([letter, envName, value]) =>
+    `<span class="model-map-badge" title="${esc(`${envName}=${value}`)}"><b>${letter}</b>${esc(shorten(value))}</span>`,
+  ).join("")}</div>`;
 }
 
 function updateActiveConfigBar() {
   updateClaudeStatusTitle();
+}
+
+// ── Claude 本地代理健康面板 ──────────────────────────
+// 仅当激活配置走 openai_chat（经本地代理）时显示；Claude 页可见且面板显示期间
+// 每 5 秒轮询一次，页面切走或面板隐藏即停（对齐 toolboxRefreshTimer 的定时器管理模式）
+let proxyHealthTimer = null;
+let proxyHealthBusy = false;
+
+// 激活配置的请求经代理时才有健康数据：openai_chat 必经代理，
+// anthropic 则取决于是否勾选了接管
+function shouldShowProxyHealthPanel() {
+  return profiles.some((p) => p.isActive && (p.apiFormat === "openai_chat" || p.proxyTakeover));
+}
+
+function updateProxyHealthPanel() {
+  const section = $("claudeProxyHealthSection");
+  if (!section) return;
+  const show = shouldShowProxyHealthPanel();
+  section.hidden = !show;
+  if (show && activeConsolePage === "claude") {
+    startProxyHealthRefresh();
+  } else {
+    stopProxyHealthRefresh();
+  }
+}
+
+function startProxyHealthRefresh() {
+  stopProxyHealthRefresh();
+  refreshProxyHealth();
+  proxyHealthTimer = setInterval(() => {
+    // 页面切走或面板已隐藏时自停，避免常驻定时器泄漏
+    if (activeConsolePage !== "claude" || $("claudeProxyHealthSection")?.hidden) {
+      stopProxyHealthRefresh();
+      return;
+    }
+    refreshProxyHealth();
+  }, 5000);
+}
+
+function stopProxyHealthRefresh() {
+  if (proxyHealthTimer) {
+    clearInterval(proxyHealthTimer);
+    proxyHealthTimer = null;
+  }
+  proxyHealthBusy = false;
+}
+
+async function refreshProxyHealth() {
+  if (proxyHealthBusy) return;
+  proxyHealthBusy = true;
+  try {
+    const data = await invoke("claude_proxy_health");
+    renderProxyHealth(data);
+  } catch (error) {
+    console.error("claude_proxy_health failed:", error);
+  } finally {
+    proxyHealthBusy = false;
+  }
+}
+
+function proxyBreakerBadgeHtml(state) {
+  const map = {
+    closed: ["proxyBreakerClosed", "breaker-closed"],
+    open: ["proxyBreakerOpen", "breaker-open"],
+    half_open: ["proxyBreakerHalfOpen", "breaker-half-open"],
+  };
+  const [key, cls] = map[state] || map.closed;
+  return `<span class="breaker-badge ${cls}">${t(key)}</span>`;
+}
+
+// 单个上游行：角色 + 脱敏地址 + 模型 + 熔断徽标；统计与错误详情放 title
+function proxyUpstreamRowHtml(entry) {
+  const roleKey = entry.role === "primary" ? "proxyHealthPrimaryLabel" : "proxyHealthFailoverLabel";
+  const statsTitle = `${t("proxyHealthStatsTitle")}: ${entry.totalFailures || 0}/${entry.totalRequests || 0}${entry.lastError ? `\n${entry.lastError}` : ""}`;
+  return `
+    <div class="proxy-upstream-row" title="${esc(statsTitle)}">
+      <span class="proxy-upstream-role ${entry.role === "primary" ? "is-primary" : ""}">${t(roleKey)}</span>
+      <span class="proxy-upstream-url">${esc(truncUrl(entry.baseUrl || "--", 42))}</span>
+      ${entry.model ? `<span class="proxy-upstream-model">${esc(entry.model)}</span>` : ""}
+      ${proxyBreakerBadgeHtml(entry.state)}
+    </div>`;
+}
+
+function renderProxyHealth(data) {
+  const grid = $("proxyHealthGrid");
+  if (!grid || !data) return;
+  const health = Array.isArray(data.health) ? data.health : [];
+  const primaryRows = health.filter((h) => h.role === "primary");
+  const failoverRows = health.filter((h) => h.role !== "primary");
+  // 全部上游中时间戳最新的一条错误作为面板级「最近错误」
+  const lastErrorEntry = health
+    .filter((h) => h.lastError)
+    .sort((a, b) => (b.lastErrorTs || 0) - (a.lastErrorTs || 0))[0];
+  const lastErrorFull = lastErrorEntry ? String(lastErrorEntry.lastError) : "";
+  const lastErrorShort = lastErrorFull.length > 120 ? `${lastErrorFull.slice(0, 119)}…` : lastErrorFull;
+  grid.innerHTML = `
+    <div class="status-card proxy-health-card">
+      <div class="status-item">
+        <span class="status-label">${t("proxyHealthStatusLabel")}</span>
+        <div class="status-value-wrapper">
+          <span class="status-value"><span class="proxy-run-dot ${data.running ? "is-running" : "is-stopped"}"></span>${data.running ? t("proxyHealthRunning", { port: data.port }) : t("proxyHealthStopped")}</span>
+        </div>
+      </div>
+      <div class="proxy-upstream-list">
+        ${primaryRows.map(proxyUpstreamRowHtml).join("")}
+        ${failoverRows.length ? failoverRows.map(proxyUpstreamRowHtml).join("") : `<div class="proxy-pool-empty">${t("proxyHealthPoolEmpty")}</div>`}
+      </div>
+      <div class="status-item">
+        <span class="status-label">${t("proxyHealthFailoverCountLabel")}</span>
+        <div class="status-value-wrapper"><span class="status-value">${Number(data.failoverCount) || 0}</span></div>
+      </div>
+      <div class="status-item">
+        <span class="status-label">${t("proxyHealthLastErrorLabel")}</span>
+        <div class="status-value-wrapper">
+          <span class="status-value proxy-last-error" title="${esc(lastErrorFull)}">${lastErrorEntry ? esc(lastErrorShort) : t("proxyHealthNoError")}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function handleProxyHealthReset() {
+  const button = $("proxyHealthResetBtn");
+  try {
+    if (button) button.disabled = true;
+    await invoke("claude_proxy_reset_breaker");
+    // 绕过 refreshProxyHealth 的 busy 防重入，重置后立即拉一次最新状态
+    renderProxyHealth(await invoke("claude_proxy_health"));
+    showToast(t("proxyHealthResetDone"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function handleSyncNow() {
@@ -3504,6 +4383,7 @@ function applyClaudePreset(preset) {
   $("profileModelId").value = preset.model || "";
   // 内置预设均为 Anthropic 兼容端点，重置为直连
   if ($("profileApiFormat")) $("profileApiFormat").value = "anthropic";
+  updateProxyFailoverGroupVisibility();
   clearEndpointResults("claude");
   clearModelResults("claude");
 }
@@ -3518,6 +4398,19 @@ function openModal(profile) {
   $("profileBaseUrl").value = profile ? profile.baseUrl : "";
   $("profileModelId").value = profile ? (profile.modelId || "") : "";
   if ($("profileApiFormat")) $("profileApiFormat").value = profile ? (profile.apiFormat || "anthropic") : "anthropic";
+  // 代理相关勾选：编辑时回填；接管开关随 apiFormat 显示/隐藏
+  if ($("profileProxyFailover")) $("profileProxyFailover").checked = profile ? Boolean(profile.proxyFailover) : false;
+  if ($("profileProxyTakeover")) $("profileProxyTakeover").checked = profile ? Boolean(profile.proxyTakeover) : false;
+  updateProxyFailoverGroupVisibility();
+  // 高级模型映射：编辑时回填；已配置过任一角色模型时默认展开
+  const sonnetModel = profile ? (profile.sonnetModel || "") : "";
+  const opusModel = profile ? (profile.opusModel || "") : "";
+  const haikuModel = profile ? (profile.haikuModel || "") : "";
+  if ($("profileSonnetModel")) $("profileSonnetModel").value = sonnetModel;
+  if ($("profileOpusModel")) $("profileOpusModel").value = opusModel;
+  if ($("profileHaikuModel")) $("profileHaikuModel").value = haikuModel;
+  const mappingSection = $("profileModelMappingSection");
+  if (mappingSection) mappingSection.open = Boolean(sonnetModel || opusModel || haikuModel);
   clearEndpointResults("claude");
   clearModelResults("claude");
   $("modalOverlay").classList.add("open");
@@ -3529,16 +4422,57 @@ function closeModal() {
   editingId = null;
 }
 
+// 「由本地代理接管」只对 anthropic 直连配置有意义（openai_chat 本就必经代理）；
+// 「加入故障转移池」两种格式都能用，只要填了 Base URL——池成员由代理内部访问，
+// 与该配置自己被激活时是否走代理无关。
+function updateProxyFailoverGroupVisibility() {
+  const isOpenAi = ($("profileApiFormat")?.value || "anthropic") === "openai_chat";
+  const takeoverGroup = $("profileProxyTakeoverGroup");
+  if (takeoverGroup) takeoverGroup.hidden = isOpenAi;
+  const failoverGroup = $("profileProxyFailoverGroup");
+  if (failoverGroup) failoverGroup.hidden = false;
+}
+
+// 这些字段决定实际写入系统环境变量与本地代理的内容；改动当前生效的配置后
+// 必须重新应用一次，否则运行环境还停留在旧值（表现为改了没反应）
+const RUNTIME_PROFILE_FIELDS = [
+  "apiKey",
+  "baseUrl",
+  "modelId",
+  "apiFormat",
+  "proxyTakeover",
+  "sonnetModel",
+  "opusModel",
+  "haikuModel",
+];
+
+function runtimeProfileFieldsChanged(previous, next) {
+  return RUNTIME_PROFILE_FIELDS.some(
+    (field) => String(previous?.[field] ?? "") !== String(next?.[field] ?? "")
+  );
+}
+
 async function handleSubmit(event) {
   event.preventDefault();
   if (profileSaving) return;
   const isNewProfile = !editingId;
+  const savingId = editingId;
+  const previousProfile = savingId ? profiles.find((item) => item.id === savingId) : null;
 
   const name = $("profileName").value.trim();
   const apiKey = $("profileApiKey").value.trim();
   const baseUrl = $("profileBaseUrl").value.trim();
   const modelId = $("profileModelId").value.trim();
   const apiFormat = $("profileApiFormat")?.value || "anthropic";
+  // 备用池成员由代理内部访问，两种格式都可入池；没有 Base URL 则无从转发
+  const proxyFailover = Boolean($("profileProxyFailover")?.checked) && Boolean(baseUrl);
+  // 接管只对 anthropic 直连有意义：openai_chat 本就必经代理，强制落回 false
+  const proxyTakeover =
+    apiFormat !== "openai_chat" && Boolean($("profileProxyTakeover")?.checked) && Boolean(baseUrl);
+  // 角色模型映射（跨智能体契约字段名：sonnetModel / opusModel / haikuModel），留空传 null 表示不设置
+  const sonnetModel = $("profileSonnetModel")?.value.trim() || null;
+  const opusModel = $("profileOpusModel")?.value.trim() || null;
+  const haikuModel = $("profileHaikuModel")?.value.trim() || null;
   if (apiFormat === "openai_chat") {
     // OpenAI 格式没有官方地址可回退；模型名必填（Claude Code 发来的 claude-* 上游不认识）
     if (!baseUrl) {
@@ -3556,17 +4490,34 @@ async function handleSubmit(event) {
   setButtonBusy(submitButton, true, t("toastSaving") || "保存中...");
   try {
     if (editingId) {
-      await invoke("update_profile", { id: editingId, name, apiKey, baseUrl, modelId, apiFormat });
+      await invoke("update_profile", { id: editingId, name, apiKey, baseUrl, modelId, apiFormat, sonnetModel, opusModel, haikuModel, proxyFailover, proxyTakeover });
       showToast(t("toastUpdated"), "success");
     } else {
-      await invoke("add_profile", { name, apiKey, baseUrl, modelId: modelId || null, apiFormat });
+      await invoke("add_profile", { name, apiKey, baseUrl, modelId: modelId || null, apiFormat, sonnetModel, opusModel, haikuModel, proxyFailover, proxyTakeover });
       showToast(t("toastAdded"), "success");
     }
 
     closeModal();
     await loadProfiles();
     await loadStatus();
-    if (isNewProfile) switchConsolePage("claude");
+    if (isNewProfile) {
+      switchConsolePage("claude");
+    } else if (
+      previousProfile?.isActive &&
+      runtimeProfileFieldsChanged(previousProfile, {
+        apiKey,
+        baseUrl,
+        modelId,
+        apiFormat,
+        proxyTakeover,
+        sonnetModel,
+        opusModel,
+        haikuModel,
+      })
+    ) {
+      // 改的是正在生效的配置：重新走一遍切换，把新值写进环境变量与本地代理
+      await handleSwitch(savingId);
+    }
   } catch (error) {
     showToast(String(error), "error");
   } finally {
@@ -3768,8 +4719,9 @@ function renderGrokProfiles() {
   }
 
   grid.innerHTML = grokProfiles.map((profile) => `
-    <div class="profile-card ${profile.isActive ? "active" : ""}">
+    <div class="profile-card ${profile.isActive ? "active" : ""}" data-id="${esc(profile.id)}" draggable="true">
       <div class="profile-header">
+        ${profileDragHandleHtml()}
         <span class="profile-name">${esc(profile.name)}</span>
         ${profile.isActive ? `<span class="active-badge">${t("inUse")}</span>` : ""}
       </div>
@@ -3800,6 +4752,7 @@ function renderGrokProfiles() {
   `).join("");
 
   bindProfileGridActions(grid, "GrokProfiles", "grok");
+  bindProfileGridDragSort(grid, "grok");
   updateGrokActiveConfigBar();
 }
 
@@ -4086,8 +5039,9 @@ function renderGeminiProfiles() {
     return;
   }
   grid.innerHTML = geminiProfiles.map((profile) => `
-    <div class="profile-card ${profile.isActive ? "active" : ""}">
+    <div class="profile-card ${profile.isActive ? "active" : ""}" data-id="${esc(profile.id)}" draggable="true">
       <div class="profile-header">
+        ${profileDragHandleHtml()}
         <span class="profile-name">${esc(profile.name)}</span>
         ${profile.isActive ? `<span class="active-badge">${t("inUse")}</span>` : ""}
       </div>
@@ -4113,6 +5067,7 @@ function renderGeminiProfiles() {
     </div>
   `).join("");
   bindProfileGridActions(grid, "GeminiProfiles", "gemini");
+  bindProfileGridDragSort(grid, "gemini");
 }
 
 async function loadGeminiStatus({ rethrow = false } = {}) {
@@ -4232,6 +5187,290 @@ async function handleGeminiImport() {
     await invoke("import_gemini_current", { name: String(input).trim() || "当前 Gemini 配置" });
     showToast("当前 Gemini 配置已导入", "success");
     await Promise.all([loadGeminiProfiles(), loadGeminiStatus()]);
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+// ── OpenCode Profile Management ─────────────────────
+// 切换写入 ~/.config/opencode/opencode.json 的 provider.<id>.options 与顶层 model，
+// 后端只改这几个键，用户的其他配置原样保留（详见 src-tauri/src/opencode.rs 顶部调研注释）。
+
+function getSelectedOpenCodePreset() {
+  const presetId = $("opencodePresetSelect")?.value || "";
+  return OPENCODE_PRESETS.find((preset) => preset.id === presetId) || null;
+}
+
+function renderOpenCodePresetOptions() {
+  const select = $("opencodePresetSelect");
+  if (!select) return;
+  const currentValue = select.value;
+  select.innerHTML = [
+    `<option value="">${t("opencodePresetCustom")}</option>`,
+    ...OPENCODE_PRESETS.map((preset) => `<option value="${esc(preset.id)}">${esc(preset.name)}</option>`),
+  ].join("");
+  select.value = OPENCODE_PRESETS.some((preset) => preset.id === currentValue) ? currentValue : "";
+}
+
+function updateOpenCodePresetHint() {
+  const hint = $("opencodePresetHint");
+  if (!hint) return;
+  hint.textContent = t("opencodePresetHintDefault");
+}
+
+function applyOpenCodePreset(preset) {
+  if (!preset) {
+    updateOpenCodePresetHint();
+    return;
+  }
+  if (!$("opencodeProfileName").value.trim()) {
+    $("opencodeProfileName").value = preset.name;
+  }
+  $("opencodeProviderId").value = preset.providerId;
+  $("opencodeBaseUrl").value = preset.baseUrl || "";
+  $("opencodeModel").value = preset.model || "";
+  updateOpenCodePresetHint();
+}
+
+async function loadOpenCodeProfiles({ rethrow = false } = {}) {
+  try {
+    const data = await invoke("get_opencode_profiles");
+    opencodeProfiles = data.profiles || [];
+    renderOpenCodeProfiles();
+    renderNavigationStatus();
+  } catch (error) {
+    showToast(String(error), "error");
+    if (rethrow) throw error;
+  }
+}
+
+function updateOpenCodeStatusTitle() {
+  // 与其他 provider 一致:当前配置名直接显示在状态区标题中
+  if (!$("opencodeStatusSectionTitle")) return;
+  const active = opencodeProfiles.find((profile) => profile.isActive);
+  const activeContext = active
+    ? (currentLang === "zh" ? ` (当前: ${active.name})` : ` (Current: ${active.name})`)
+    : "";
+  setText("opencodeStatusSectionTitle", `${t("opencodeStatusTitle")}${activeContext}`);
+}
+
+function renderOpenCodeProfiles() {
+  const grid = $("opencodeProfilesGrid");
+  if (!grid) return;
+  updateOpenCodeStatusTitle();
+
+  if (opencodeProfiles.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="18" x2="12" y2="12"/>
+          <line x1="9" y1="15" x2="15" y2="15"/>
+        </svg>
+        <div class="empty-state-title">${t("opencodeNoConfigsTitle")}</div>
+        <p>${t("opencodeNoConfigsDesc")}</p>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = opencodeProfiles.map((profile) => `
+    <div class="profile-card ${profile.isActive ? "active" : ""}" data-id="${esc(profile.id)}" draggable="true">
+      <div class="profile-header">
+        ${profileDragHandleHtml()}
+        <span class="profile-name">${esc(profile.name)}</span>
+        ${profile.isActive ? `<span class="active-badge">${t("inUse")}</span>` : ""}
+      </div>
+      <div class="profile-body">
+        <div class="profile-field">
+          <span class="field-label">${t("opencodeProviderLabel")}</span>
+          <span class="field-value">${esc(profile.providerId || "--")}</span>
+        </div>
+        <div class="profile-field">
+          <span class="field-label">${t("opencodeApiKeyLabel")}</span>
+          <span class="field-value">${esc(maskKey(profile.apiKey))}</span>
+        </div>
+        <div class="profile-field">
+          <span class="field-label">${t("opencodeBaseUrlLabel")}</span>
+          <span class="field-value">${esc(profile.baseUrl ? truncUrl(profile.baseUrl, 50) : t("opencodeOfficialBaseUrl"))}</span>
+        </div>
+        ${profile.model ? `<div class="profile-field">
+          <span class="field-label">${t("opencodeModelLabel")}</span>
+          <span class="field-value">${esc(profile.model)}</span>
+        </div>` : ""}
+      </div>
+      <div class="profile-actions">
+        ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="opencode-switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
+        <button class="btn btn-secondary btn-sm" data-action="opencode-edit" data-id="${profile.id}" type="button">${t("edit")}</button>
+        <button class="btn btn-danger btn-sm" data-action="opencode-delete" data-id="${profile.id}" type="button">${t("delete")}</button>
+      </div>
+    </div>
+  `).join("");
+
+  bindProfileGridActions(grid, "OpenCodeProfiles", "opencode");
+  bindProfileGridDragSort(grid, "opencode");
+}
+
+async function loadOpenCodeStatus({ rethrow = false } = {}) {
+  try {
+    const status = await invoke("get_opencode_runtime_status");
+    lastOpenCodeStatus = status;
+    const grid = $("opencodeStatusGrid");
+    if (!grid) {
+      renderNavigationStatus();
+      return;
+    }
+    if (!status) {
+      grid.innerHTML = `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">OpenCode: --</div>`;
+      renderNavigationStatus();
+      return;
+    }
+    const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+    const installedLabel = status.installed ? t("opencodeInstalled") : t("opencodeNotInstalled");
+    grid.innerHTML = `
+      <div class="status-card">
+        <div class="status-card-title">
+          <span class="status-card-title-text">${productIcon("opencode")}OpenCode</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("opencodeCliLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${esc(installedLabel)}</span>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("opencodeProviderLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value" title="${esc(status.provider || "--")}">${esc(status.provider || "--")}</span>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("opencodeModelLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value" title="${esc(status.model || "--")}">${esc(status.model || "--")}</span>
+            ${status.model ? `<button class="copy-btn" type="button" data-copy="${esc(status.model)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("opencodeApiKeyLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${esc(status.apiKey || "--")}</span>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("opencodeBaseUrlLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value" title="${esc(status.baseUrl || "")}">${esc(status.baseUrl || t("opencodeOfficialBaseUrl"))}</span>
+            ${status.baseUrl ? `<button class="copy-btn" type="button" data-copy="${esc(status.baseUrl)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("opencodeConfigPathLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value" title="${esc(status.configPath || "")}">${esc(status.configPath || "--")}</span>
+            ${status.configPath ? `<button class="copy-btn" type="button" data-copy="${esc(status.configPath)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("opencodeSourceLabel")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${esc(status.source || "--")}${status.configExists ? "" : ` · ${esc(t("opencodeConfigMissing"))}`}</span>
+          </div>
+        </div>
+      </div>`;
+    bindDelegatedCopyButtons(grid, "OpenCodeStatusCopy");
+    renderNavigationStatus();
+  } catch (error) {
+    showToast(`${t("opencodeStatusLoadFailed")}: ${error}`, "error");
+    console.error("Failed to load opencode status:", error);
+    if (rethrow) throw error;
+  }
+}
+
+function openOpenCodeModal(profile) {
+  editingOpenCodeId = profile ? profile.id : null;
+  $("opencodeModalTitle").textContent = profile ? t("opencodeEditConfig") : t("opencodeAddConfig");
+  $("opencodeProfileId").value = editingOpenCodeId || "";
+  $("opencodePresetSelect").value = "";
+  $("opencodeProfileName").value = profile ? profile.name : "";
+  $("opencodeProviderId").value = profile ? (profile.providerId || "anthropic") : "anthropic";
+  $("opencodeApiKey").value = profile ? profile.apiKey : "";
+  $("opencodeBaseUrl").value = profile ? (profile.baseUrl || "") : "";
+  $("opencodeModel").value = profile ? (profile.model || "") : "";
+  updateOpenCodePresetHint();
+  $("opencodeModalOverlay").classList.add("open");
+  document.body.classList.add("modal-open");
+  $("opencodeProfileName").focus();
+}
+
+function closeOpenCodeModal() {
+  $("opencodeModalOverlay").classList.remove("open");
+  document.body.classList.remove("modal-open");
+  editingOpenCodeId = null;
+}
+
+async function handleOpenCodeSubmit(event) {
+  event.preventDefault();
+  if (opencodeProfileSaving) return;
+  const isNewProfile = !editingOpenCodeId;
+  const payload = {
+    name: $("opencodeProfileName").value.trim(),
+    apiKey: $("opencodeApiKey").value.trim(),
+    baseUrl: $("opencodeBaseUrl").value.trim(),
+    model: $("opencodeModel").value.trim() || null,
+    providerId: $("opencodeProviderId").value.trim() || null,
+  };
+
+  opencodeProfileSaving = true;
+  const submitButton = $("opencodeSubmitBtn");
+  setButtonBusy(submitButton, true, t("toastSaving"));
+  try {
+    if (editingOpenCodeId) {
+      await invoke("update_opencode_profile", { id: editingOpenCodeId, ...payload });
+      showToast(t("opencodeToastUpdated"), "success");
+    } else {
+      await invoke("add_opencode_profile", payload);
+      showToast(t("opencodeToastAdded"), "success");
+    }
+    closeOpenCodeModal();
+    await Promise.all([loadOpenCodeProfiles(), loadOpenCodeStatus()]);
+    if (isNewProfile) switchConsolePage("opencode");
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    opencodeProfileSaving = false;
+    setButtonBusy(submitButton, false);
+  }
+}
+
+// 切换/删除逻辑统一走 PROVIDER_CONFIG 驱动的公共实现
+async function handleOpenCodeSwitch(id) {
+  return switchProviderProfile("opencode", id);
+}
+
+async function handleOpenCodeDelete(id) {
+  return deleteProviderProfile("opencode", id);
+}
+
+// 「导入当前配置」：读运行时状态，预填添加弹窗。
+// 后端返回的 apiKey 是打码值，不能直接当 Key 用，所以只预填 provider / model / baseUrl，
+// 让用户补一次明文 Key。
+async function handleOpenCodeImport() {
+  try {
+    const status = await invoke("get_opencode_runtime_status");
+    lastOpenCodeStatus = status;
+    if (!status || (!status.provider && !status.model)) {
+      showToast(t("opencodeImportEmpty"), "warning");
+      return;
+    }
+    openOpenCodeModal(null);
+    $("opencodeProfileName").value = t("opencodeImportDefaultName");
+    if (status.provider) $("opencodeProviderId").value = status.provider;
+    $("opencodeBaseUrl").value = status.baseUrl || "";
+    // 顶层 model 形如 provider/model，表单只需要模型名部分
+    const modelRef = String(status.model || "");
+    $("opencodeModel").value = modelRef.includes("/") ? modelRef.slice(modelRef.indexOf("/") + 1) : modelRef;
+    showToast(t("opencodeImportPrefilled"), "success");
   } catch (error) {
     showToast(String(error), "error");
   }
@@ -4371,8 +5610,9 @@ function renderCodexProfiles() {
   }
 
   grid.innerHTML = codexProfiles.map((profile) => `
-    <div class="profile-card ${profile.isActive ? "active" : ""}">
+    <div class="profile-card ${profile.isActive ? "active" : ""}" data-id="${esc(profile.id)}" draggable="true">
       <div class="profile-header">
+        ${profileDragHandleHtml()}
         <span class="profile-name">${esc(profile.name)}</span>
         ${profile.isActive ? `<span class="active-badge">${t("inUse")}</span>` : ""}
       </div>
@@ -4415,6 +5655,7 @@ function renderCodexProfiles() {
   `).join("");
 
   bindProfileGridActions(grid, "CodexProfiles", "codex");
+  bindProfileGridDragSort(grid, "codex");
   updateCodexStatusTitle();
 }
 
@@ -4764,6 +6005,93 @@ async function handleDeleteSkill(name, sourceType) {
   }
 }
 
+// ── Skills ZIP 安装（本地 ZIP → Claude / Codex 多应用落盘）───
+
+let zipInstallPath = null;
+let zipInstalling = false;
+
+/** 点击「从 ZIP 安装」：选文件 → 弹出目标应用确认层 */
+async function handlePickSkillZip() {
+  try {
+    const path = await invoke("pick_skill_zip");
+    if (!path) return; // 用户取消选择
+    zipInstallPath = path;
+    $("zipInstallFileName").textContent = path.split(/[\\/]/).pop() || path;
+    $("zipAppClaude").checked = true;
+    $("zipAppCodex").checked = false;
+    $("zipInstallOverlay").classList.add("open");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+function closeZipInstall() {
+  $("zipInstallOverlay").classList.remove("open");
+  zipInstallPath = null;
+}
+
+async function handleZipInstallConfirm() {
+  if (zipInstalling || !zipInstallPath) return;
+  const apps = {
+    claude: $("zipAppClaude").checked,
+    codex: $("zipAppCodex").checked,
+  };
+  if (!apps.claude && !apps.codex) {
+    showToast(t("zipNoAppSelected"), "error");
+    return;
+  }
+
+  zipInstalling = true;
+  const confirmBtn = $("zipInstallConfirm");
+  setButtonBusy(confirmBtn, true, t("toastSaving"));
+  try {
+    const result = await invoke("install_skill_from_zip", {
+      path: zipInstallPath,
+      apps,
+      overwrite: false,
+    });
+    await onZipSkillInstalled(result);
+  } catch (error) {
+    const msg = String(error);
+    // 后端约定：目标已存在时返回 EXISTS:<name>，确认后带 overwrite=true 重试
+    if (msg.startsWith("EXISTS:")) {
+      const name = msg.slice("EXISTS:".length);
+      const confirmed = await appConfirm(t("zipOverwriteConfirm", { name }), {
+        title: t("zipInstallTitle"),
+        danger: true,
+      });
+      if (confirmed) {
+        try {
+          const result = await invoke("install_skill_from_zip", {
+            path: zipInstallPath,
+            apps,
+            overwrite: true,
+          });
+          await onZipSkillInstalled(result);
+        } catch (retryError) {
+          showToast(String(retryError), "error");
+        }
+      }
+    } else {
+      showToast(msg, "error");
+    }
+  } finally {
+    zipInstalling = false;
+    setButtonBusy(confirmBtn, false);
+  }
+}
+
+/** 安装成功后的收尾：提示安装到了哪些应用并刷新 Installed 列表 */
+async function onZipSkillInstalled(result) {
+  const appNames = { claude: "Claude", codex: "Codex" };
+  const apps = (result.installedTo || [])
+    .map((key) => appNames[key] || key)
+    .join(" / ");
+  showToast(t("toastZipInstalledTo", { name: result.name, apps }), "success");
+  closeZipInstall();
+  await loadSkills();
+}
+
 // ── Skills Discovery Functions ──────────────────────
 
 async function loadSkillRepos() {
@@ -5033,12 +6361,22 @@ function closePromptsPanel() {
   $("promptsOverlay").classList.remove("open");
 }
 
+// 表驱动，新增 tab 只需在这里加一行，不会漏掉按钮高亮或内容显隐
+const PROMPT_TABS = [
+  { id: "presets", button: "promptTabPresets", content: "promptPresetsContent" },
+  { id: "editor", button: "promptTabEditor", content: "promptEditorContent" },
+  { id: "templates", button: "promptTabTemplates", content: "promptTemplatesContent" },
+];
+
 function switchPromptTab(tab) {
-  activePromptTab = tab;
-  $("promptTabEditor").classList.toggle("active", tab === "editor");
-  $("promptTabTemplates").classList.toggle("active", tab === "templates");
-  $("promptEditorContent").style.display = tab === "editor" ? "" : "none";
-  $("promptTemplatesContent").style.display = tab === "templates" ? "" : "none";
+  const target = PROMPT_TABS.some((item) => item.id === tab) ? tab : PROMPT_TABS[0].id;
+  activePromptTab = target;
+  for (const item of PROMPT_TABS) {
+    const active = item.id === target;
+    $(item.button)?.classList.toggle("active", active);
+    const content = $(item.content);
+    if (content) content.style.display = active ? "" : "none";
+  }
 }
 
 async function loadClaudeMd() {
@@ -5079,6 +6417,7 @@ function renderPromptTemplates() {
       <div class="prompt-template-actions">
         <button class="btn btn-secondary btn-sm" data-action="append-template" data-id="${esc(tpl.id)}">${t("appendToPrompt")}</button>
         <button class="btn btn-primary btn-sm" data-action="replace-template" data-id="${esc(tpl.id)}">${t("replacePrompt")}</button>
+        <button class="btn btn-secondary btn-sm" data-action="preset-template" data-id="${esc(tpl.id)}">${t("templateSaveAsPreset")}</button>
       </div>
     </div>
     `;
@@ -5099,6 +6438,9 @@ function renderPromptTemplates() {
       $("promptContentInput").value = tpl.content;
       switchPromptTab("editor");
       showToast(t("toastTemplateApplied"), "success");
+    } else if (action === "preset-template") {
+      // 把模板内容直接创建为新预设
+      handleSaveTemplateAsPreset(tpl);
     }
   });
 }
@@ -5127,6 +6469,192 @@ async function handleSavePrompt() {
   }
 }
 
+// ── Prompt Presets（预设库 + 跨应用同步 + 回填保护）──────────
+
+// 预设支持的目标应用；顺序与后端回填优先级一致（claude > codex > gemini）
+const PRESET_APPS = [
+  { key: "claude", label: "Claude", badge: "C", fallbackPath: "~/.claude/CLAUDE.md" },
+  { key: "codex", label: "Codex", badge: "X", fallbackPath: "~/.codex/AGENTS.md" },
+  { key: "gemini", label: "Gemini", badge: "G", fallbackPath: "~/.gemini/GEMINI.md" },
+];
+
+async function loadPromptPresets() {
+  try {
+    promptPresetsData = await invoke("get_prompt_presets");
+    renderPromptPresets();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+/** 取某应用 live 文件的实际路径（后端返回），拿不到时退回默认展示路径。 */
+function promptPresetLivePath(appKey) {
+  const info = promptPresetsData?.live?.[appKey];
+  if (info && info.path) return info.path;
+  return PRESET_APPS.find((a) => a.key === appKey)?.fallbackPath || appKey;
+}
+
+function renderPromptPresets() {
+  const list = $("promptPresetList");
+  if (!list) return;
+  const presets = promptPresetsData?.presets || [];
+  const activeId = promptPresetsData?.activeId || null;
+  if (presets.length === 0) {
+    list.innerHTML = `<div class="discover-empty">${t("presetEmpty")}</div>`;
+    return;
+  }
+  list.innerHTML = presets.map((preset) => {
+    const isActive = preset.id === activeId;
+    const badges = PRESET_APPS
+      .filter((a) => preset.apps?.[a.key])
+      .map((a) => `<span class="preset-app-badge preset-app-${a.key}" title="${esc(a.label)}">${a.badge}</span>`)
+      .join("");
+    return `
+    <div class="prompt-preset-item${isActive ? " active" : ""}" data-id="${esc(preset.id)}">
+      <div class="prompt-preset-item-head">
+        <span class="prompt-preset-item-name">${esc(preset.name || "")}</span>
+        <span class="prompt-preset-badges">${badges}${isActive ? `<span class="preset-active-badge">${t("presetActive")}</span>` : ""}</span>
+      </div>
+      <div class="prompt-preset-item-actions">
+        <button class="btn btn-primary btn-sm" data-action="activate-preset" data-id="${esc(preset.id)}"${isActive ? " disabled" : ""}>${t("presetActivate")}</button>
+        <button class="btn btn-secondary btn-sm" data-action="edit-preset" data-id="${esc(preset.id)}">${t("presetEdit")}</button>
+        <button class="btn btn-secondary btn-sm" data-action="delete-preset" data-id="${esc(preset.id)}">${t("presetDelete")}</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  // A10: 容器级委托
+  bindDelegatedActions(list, "PromptPresets", (action, target, e) => {
+    e.stopPropagation();
+    const id = target.getAttribute("data-id");
+    if (action === "activate-preset") {
+      handleActivatePromptPreset(id);
+    } else if (action === "edit-preset") {
+      const preset = (promptPresetsData?.presets || []).find((p) => p.id === id);
+      if (preset) showPromptPresetEditor(preset);
+    } else if (action === "delete-preset") {
+      handleDeletePromptPreset(id);
+    }
+  });
+}
+
+/** 填充右侧编辑区；preset 为 null 表示新建（默认勾选 claude）。 */
+function showPromptPresetEditor(preset) {
+  editingPromptPresetId = preset?.id || null;
+  $("promptPresetNameInput").value = preset?.name || "";
+  $("presetAppClaude").checked = preset ? !!preset.apps?.claude : true;
+  $("presetAppCodex").checked = !!preset?.apps?.codex;
+  $("presetAppGemini").checked = !!preset?.apps?.gemini;
+  $("promptPresetContentInput").value = preset?.content || "";
+  $("promptPresetNameInput").focus();
+}
+
+function collectPromptPresetApps() {
+  return {
+    claude: $("presetAppClaude").checked,
+    codex: $("presetAppCodex").checked,
+    gemini: $("presetAppGemini").checked,
+  };
+}
+
+async function handleSavePromptPreset() {
+  const name = $("promptPresetNameInput").value.trim();
+  if (!name) {
+    showToast(t("presetNeedName"), "error");
+    return;
+  }
+  const apps = collectPromptPresetApps();
+  if (!apps.claude && !apps.codex && !apps.gemini) {
+    showToast(t("presetNeedApp"), "error");
+    return;
+  }
+  try {
+    promptPresetsData = await invoke("save_prompt_preset", {
+      id: editingPromptPresetId,
+      name,
+      content: $("promptPresetContentInput").value,
+      apps,
+    });
+    // 新建保存后，继续编辑同一条（按名称定位刚创建的预设）
+    if (!editingPromptPresetId) {
+      const created = (promptPresetsData?.presets || []).slice(-1)[0];
+      if (created) editingPromptPresetId = created.id;
+    }
+    renderPromptPresets();
+    showToast(t("presetSaved"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleDeletePromptPreset(id) {
+  const preset = (promptPresetsData?.presets || []).find((p) => p.id === id);
+  if (!preset) return;
+  const confirmed = await appConfirm(t("confirmDeletePreset", { name: preset.name || "" }), { danger: true });
+  if (!confirmed) return;
+  try {
+    promptPresetsData = await invoke("delete_prompt_preset", { id });
+    if (editingPromptPresetId === id) showPromptPresetEditor(null);
+    renderPromptPresets();
+    showToast(t("presetDeleted"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleActivatePromptPreset(id) {
+  const preset = (promptPresetsData?.presets || []).find((p) => p.id === id);
+  if (!preset) return;
+  // 确认弹窗列出将写入的目标 live 文件路径
+  const targets = PRESET_APPS
+    .filter((a) => preset.apps?.[a.key])
+    .map((a) => `${a.label}: ${promptPresetLivePath(a.key)}`);
+  if (targets.length === 0) {
+    showToast(t("presetNeedApp"), "error");
+    return;
+  }
+  const confirmed = await appConfirm(
+    `${t("confirmActivatePreset", { name: preset.name || "" })}\n${targets.join("\n")}`,
+    { confirmText: t("presetActivate") },
+  );
+  if (!confirmed) return;
+  try {
+    const result = await invoke("activate_prompt_preset", { id });
+    if (result?.data) promptPresetsData = result.data;
+    renderPromptPresets();
+    if (result?.backfilled) {
+      // 回填保护命中：live 文件的手工修改已写回原激活预设
+      showToast(t("presetBackfilled"), "success");
+    }
+    showToast(t("presetActivated"), "success");
+    // 激活可能改写了 ~/.claude/CLAUDE.md，同步刷新 Editor tab 内容
+    loadClaudeMd();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+/** Templates 的「存为预设」：把模板内容直接创建为新预设（默认仅勾选 claude）。 */
+async function handleSaveTemplateAsPreset(tpl) {
+  const name = currentLang === "zh" ? (tpl.nameZh || tpl.name) : tpl.name;
+  try {
+    promptPresetsData = await invoke("save_prompt_preset", {
+      id: null,
+      name,
+      content: tpl.content,
+      apps: { claude: true, codex: false, gemini: false },
+    });
+    renderPromptPresets();
+    // 切到预设 tab 并让新预设进入编辑区
+    const created = (promptPresetsData?.presets || []).slice(-1)[0];
+    if (created) showPromptPresetEditor(created);
+    switchPromptTab("presets");
+    showToast(t("presetSaved"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
 // ── MCP Server Management ───────────────────────────
 
 function openMcpPanel() {
@@ -5138,13 +6666,51 @@ function closeMcpPanel() {
   hideMcpEdit();
 }
 
+// 统一 MCP 面板的应用清单：key 与后端字段对应，label 用于 chip / toast 展示
+const MCP_APP_KEYS = ["claude", "codex", "gemini", "claudeDesktop"];
+function mcpAppLabel(app) {
+  return app === "claudeDesktop" ? "Claude Desktop" : app.charAt(0).toUpperCase() + app.slice(1);
+}
+
 async function loadMcpServers() {
   try {
-    mcpServers = await invoke("get_mcp_servers_list");
+    const unified = await invoke("get_unified_mcp_servers");
+    // Claude Desktop 读取失败按「未安装」降级，不影响其余三个应用的列表
+    try {
+      mcpDesktopInfo = await invoke("get_claude_desktop_mcp");
+    } catch (_) {
+      mcpDesktopInfo = { installed: false, configPath: "", servers: {} };
+    }
+    mcpServers = {};
+    mcpServerApps = {};
+    for (const item of (unified && unified.servers) || []) {
+      mcpServers[item.name] = item.config || {};
+      mcpServerApps[item.name] = { ...(item.apps || {}), claudeDesktop: false };
+    }
+    // 按 name 合并 Claude Desktop 的条目（Desktop 独有的也要显示）
+    for (const [name, config] of Object.entries(mcpDesktopInfo.servers || {})) {
+      if (mcpServerApps[name]) {
+        mcpServerApps[name].claudeDesktop = true;
+      } else {
+        mcpServers[name] = config || {};
+        mcpServerApps[name] = { claude: false, codex: false, gemini: false, claudeDesktop: true };
+      }
+    }
+    renderMcpDesktopPathHint();
     renderMcpServers();
   } catch (error) {
     showToast(String(error), "error");
   }
+}
+
+// 面板顶部路径说明区的 Claude Desktop 一行（显示真实路径，未检测到时附提示）
+function renderMcpDesktopPathHint() {
+  const el = $("mcpDesktopPath");
+  if (!el) return;
+  const path = mcpDesktopInfo.configPath || "claude_desktop_config.json";
+  el.textContent = mcpDesktopInfo.installed
+    ? t("mcpDesktopPathLabel", { path })
+    : `${t("mcpDesktopPathLabel", { path })} · ${t("mcpDesktopNotInstalled")}`;
 }
 
 function renderMcpServers() {
@@ -5159,11 +6725,20 @@ function renderMcpServers() {
     const desc = config.command
       ? `${config.command} ${(config.args || []).join(" ")}`
       : config.url || "";
+    const apps = mcpServerApps[name] || {};
+    const chips = MCP_APP_KEYS.map((app) => {
+      const enabled = !!apps[app];
+      // 未检测到 Claude Desktop 时该 chip 禁用并给出提示
+      const disabled = app === "claudeDesktop" && !mcpDesktopInfo.installed;
+      const title = disabled ? ` title="${esc(t("mcpDesktopNotInstalled"))}" disabled` : "";
+      return `<button class="mcp-app-chip ${enabled ? "on" : "off"}" data-action="toggle-mcp-app" data-name="${esc(name)}" data-app="${app}"${title} type="button">${esc(mcpAppLabel(app))}</button>`;
+    }).join("");
     return `
       <div class="mgmt-item">
         <div class="mgmt-item-info">
           <div class="mgmt-item-name">${esc(name)}</div>
           <div class="mgmt-item-desc">${esc(serverType)}: ${esc(desc.substring(0, 80))}</div>
+          <div class="mcp-app-chips">${chips}</div>
         </div>
         <div class="mgmt-item-actions">
           <button class="btn btn-secondary btn-sm" data-action="edit-mcp" data-name="${esc(name)}">${t("edit")}</button>
@@ -5178,17 +6753,200 @@ function renderMcpServers() {
     const name = target.getAttribute("data-name");
     if (action === "edit-mcp") showMcpEdit(name);
     else if (action === "delete-mcp") handleDeleteMcp(name);
+    else if (action === "toggle-mcp-app") handleToggleMcpApp(name, target.getAttribute("data-app"));
   });
 }
 
-function showMcpEdit(name) {
+// 单击 chip 启停某应用；停用最后一个应用等于把该服务器全删，需要确认
+async function handleToggleMcpApp(name, app) {
+  if (mcpAppToggling || !name || !MCP_APP_KEYS.includes(app)) return;
+  const apps = { claude: false, codex: false, gemini: false, claudeDesktop: false, ...(mcpServerApps[name] || {}) };
+  const next = !apps[app];
+  if (app === "claudeDesktop" && next && !mcpDesktopInfo.installed) {
+    showToast(t("mcpDesktopNotInstalled"), "error");
+    return;
+  }
+  if (!next) {
+    const enabledCount = MCP_APP_KEYS.filter((key) => apps[key]).length;
+    if (enabledCount <= 1) {
+      const confirmed = await appConfirm(
+        t("confirmDisableLastMcpApp", { name, app: mcpAppLabel(app) }),
+        { title: t("delete"), danger: true, confirmText: currentLang === "zh" ? "停用并删除" : "Disable & Delete" },
+      );
+      if (!confirmed) return;
+    }
+  }
+  mcpAppToggling = true;
+  try {
+    if (app === "claudeDesktop") {
+      if (next) {
+        await invoke("set_claude_desktop_mcp_server", { name, config: mcpServers[name] || {} });
+      } else {
+        await invoke("remove_claude_desktop_mcp_server", { name });
+      }
+    } else {
+      await invoke("save_unified_mcp_server", {
+        name,
+        config: mcpServers[name] || {},
+        apps: { claude: apps.claude, codex: apps.codex, gemini: apps.gemini, [app]: next },
+      });
+    }
+    showToast(t(next ? "toastMcpAppEnabled" : "toastMcpAppDisabled", { name, app: mcpAppLabel(app) }), "success");
+    await loadMcpServers();
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    mcpAppToggling = false;
+  }
+}
+
+// name 非空 = 编辑已有 server；prefill = 预设安装等场景的预填内容 { name, config }
+// ── MCP 配置表单 ↔ JSON 互转 ────────────────────────
+// 表单是主入口（多数人不该被迫手写 JSON），JSON 模式留给需要写
+// 非常规字段的高级用法。两种模式切换时同步一次数据，保存时以当前模式为准。
+
+let mcpEditorMode = "form";
+
+// "KEY=VALUE" / "Key: Value" 逐行解析；忽略空行与 # 注释
+function parseKeyValueLines(text, separator) {
+  const out = {};
+  for (const rawLine of String(text || "").split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const index = line.indexOf(separator);
+    if (index <= 0) continue;
+    const key = line.slice(0, index).trim();
+    if (key) out[key] = line.slice(index + separator.length).trim();
+  }
+  return out;
+}
+
+function formatKeyValueLines(obj, separator) {
+  return Object.entries(obj || {})
+    .map(([key, value]) => `${key}${separator}${value}`)
+    .join("\n");
+}
+
+function mcpTransportOf(config) {
+  if (config && typeof config.url === "string" && config.url) {
+    return config.type === "sse" ? "sse" : "http";
+  }
+  return "stdio";
+}
+
+// 表单 → config 对象。空字段一律省略，避免写出 "args": [] 这类噪声
+function mcpFormToConfig() {
+  const transport = $("mcpTransport")?.value || "stdio";
+  if (transport === "stdio") {
+    const config = { command: ($("mcpCommandInput")?.value || "").trim() };
+    const args = String($("mcpArgsInput")?.value || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (args.length) config.args = args;
+    const env = parseKeyValueLines($("mcpEnvInput")?.value, "=");
+    if (Object.keys(env).length) config.env = env;
+    return config;
+  }
+  const config = { type: transport, url: ($("mcpUrlInput")?.value || "").trim() };
+  const headers = parseKeyValueLines($("mcpHeadersInput")?.value, ":");
+  if (Object.keys(headers).length) config.headers = headers;
+  return config;
+}
+
+function mcpApplyConfigToForm(config) {
+  const source = config && typeof config === "object" ? config : {};
+  const transport = mcpTransportOf(source);
+  const select = $("mcpTransport");
+  if (select) select.value = transport;
+  if ($("mcpCommandInput")) $("mcpCommandInput").value = source.command || "";
+  if ($("mcpArgsInput")) {
+    $("mcpArgsInput").value = Array.isArray(source.args) ? source.args.join("\n") : "";
+  }
+  if ($("mcpEnvInput")) $("mcpEnvInput").value = formatKeyValueLines(source.env, "=");
+  if ($("mcpUrlInput")) $("mcpUrlInput").value = source.url || "";
+  if ($("mcpHeadersInput")) $("mcpHeadersInput").value = formatKeyValueLines(source.headers, ": ");
+  updateMcpTransportFields();
+}
+
+function updateMcpTransportFields() {
+  const isStdio = ($("mcpTransport")?.value || "stdio") === "stdio";
+  const stdio = $("mcpStdioFields");
+  const remote = $("mcpRemoteFields");
+  if (stdio) stdio.hidden = !isStdio;
+  if (remote) remote.hidden = isStdio;
+}
+
+// 表单能无损表达的配置才允许用表单编辑；出现未知字段时留在 JSON 模式，
+// 否则切过去再切回来会悄悄丢掉用户手写的内容
+function mcpConfigFitsForm(config) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return false;
+  const known = mcpTransportOf(config) === "stdio"
+    ? ["command", "args", "env"]
+    : ["type", "url", "headers"];
+  return Object.keys(config).every((key) => known.includes(key));
+}
+
+function setMcpEditorMode(mode, { sync = true } = {}) {
+  const next = mode === "json" ? "json" : "form";
+  if (sync) {
+    if (next === "json" && mcpEditorMode === "form") {
+      $("mcpConfigInput").value = JSON.stringify(mcpFormToConfig(), null, 2);
+    } else if (next === "form" && mcpEditorMode === "json") {
+      let parsed = null;
+      try {
+        parsed = JSON.parse($("mcpConfigInput").value);
+      } catch {
+        showToast(t("invalidJson"), "error");
+        return;
+      }
+      if (!mcpConfigFitsForm(parsed)) {
+        showToast(t("mcpJsonTooComplex"), "warning");
+        return;
+      }
+      mcpApplyConfigToForm(parsed);
+    }
+  }
+  mcpEditorMode = next;
+  const formMode = $("mcpFormMode");
+  const jsonMode = $("mcpJsonMode");
+  if (formMode) formMode.hidden = next !== "form";
+  if (jsonMode) jsonMode.hidden = next !== "json";
+  document.querySelectorAll("#mcpModeTabs [data-mcp-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.mcpMode === next);
+  });
+}
+
+function showMcpEdit(name, prefill) {
   editingMcpName = name || null;
-  const config = name ? mcpServers[name] : null;
-  $("mcpNameInput").value = name || "";
+  const config = name ? mcpServers[name] : (prefill && prefill.config) || null;
+  $("mcpNameInput").value = name || (prefill && prefill.name) || "";
   $("mcpConfigInput").value = config
     ? JSON.stringify(config, null, 2)
     : '{\n  "command": "",\n  "args": []\n}';
+  // 结构常规的配置默认用表单编辑，含未知字段的直接进 JSON 模式
+  if (config && !mcpConfigFitsForm(config)) {
+    setMcpEditorMode("json", { sync: false });
+  } else {
+    mcpApplyConfigToForm(config);
+    setMcpEditorMode("form", { sync: false });
+  }
   $("mcpNameInput").disabled = !!name;
+  // 应用勾选：编辑时按现状回填；新增 / 预设安装默认仅勾选 Claude
+  const apps = name
+    ? (mcpServerApps[name] || { claude: true })
+    : { claude: true };
+  $("mcpAppClaude").checked = !!apps.claude;
+  $("mcpAppCodex").checked = !!apps.codex;
+  $("mcpAppGemini").checked = !!apps.gemini;
+  // Claude Desktop：未安装时勾选框禁用并提示
+  const desktopCheck = $("mcpAppClaudeDesktop");
+  if (desktopCheck) {
+    desktopCheck.checked = !!apps.claudeDesktop;
+    desktopCheck.disabled = !mcpDesktopInfo.installed;
+    const desktopLabel = desktopCheck.closest("label");
+    if (desktopLabel) desktopLabel.title = mcpDesktopInfo.installed ? "" : t("mcpDesktopNotInstalled");
+  }
   $("mcpList").style.display = "none";
   $("mcpToolbar").style.display = "none";
   $("mcpEdit").style.display = "";
@@ -5204,14 +6962,41 @@ function hideMcpEdit() {
 async function handleSaveMcp() {
   if (mcpSaving) return;
   const name = $("mcpNameInput").value.trim();
-  const configStr = $("mcpConfigInput").value;
-  if (!name) return;
+  if (!name) {
+    showToast(t("mcpNeedName"), "error");
+    return;
+  }
 
   let config;
-  try {
-    config = JSON.parse(configStr);
-  } catch {
-    showToast(t("invalidJson"), "error");
+  if (mcpEditorMode === "form") {
+    config = mcpFormToConfig();
+    if (mcpTransportOf(config) === "stdio") {
+      if (!config.command) {
+        showToast(t("mcpNeedCommand"), "error");
+        return;
+      }
+    } else if (!config.url) {
+      showToast(t("mcpNeedUrl"), "error");
+      return;
+    }
+  } else {
+    try {
+      config = JSON.parse($("mcpConfigInput").value);
+    } catch {
+      showToast(t("invalidJson"), "error");
+      return;
+    }
+  }
+
+  const apps = {
+    claude: $("mcpAppClaude").checked,
+    codex: $("mcpAppCodex").checked,
+    gemini: $("mcpAppGemini").checked,
+  };
+  const desktopEl = $("mcpAppClaudeDesktop");
+  const desktopChecked = !!(desktopEl && desktopEl.checked && !desktopEl.disabled);
+  if (!apps.claude && !apps.codex && !apps.gemini && !desktopChecked) {
+    showToast(t("mcpNoAppSelected"), "error");
     return;
   }
 
@@ -5219,7 +7004,13 @@ async function handleSaveMcp() {
   const saveBtn = $("mcpSaveBtn");
   setButtonBusy(saveBtn, true, t("toastSaving"));
   try {
-    await invoke("save_mcp_server", { name, config });
+    await invoke("save_unified_mcp_server", { name, config, apps });
+    // Claude Desktop 独立读写：勾选则写入 / 更新，未勾选则移除（不存在时静默成功）
+    if (desktopChecked) {
+      await invoke("set_claude_desktop_mcp_server", { name, config });
+    } else {
+      await invoke("remove_claude_desktop_mcp_server", { name });
+    }
     showToast(t("toastMcpSaved"), "success");
     hideMcpEdit();
     await loadMcpServers();
@@ -5239,7 +7030,9 @@ async function handleDeleteMcp(name) {
   });
   if (!confirmed) return;
   try {
-    await invoke("delete_mcp_server_entry", { name });
+    await invoke("delete_unified_mcp_server", { name });
+    // 「从所有应用移除」包含 Claude Desktop（条目不存在时后端静默成功）
+    await invoke("remove_claude_desktop_mcp_server", { name });
     showToast(t("toastMcpDeleted"), "success");
     await loadMcpServers();
   } catch (error) {
@@ -5352,20 +7145,10 @@ function renderMcpPresets() {
     const allItems = [...mcpPresets, ...mcpGitHubResults];
     const preset = allItems.find((p) => p.id === id);
     if (!preset) return;
-    if (btn.disabled) return; // 防重复提交
 
-    btn.disabled = true;
-    btn.textContent = "...";
-    try {
-      await invoke("save_mcp_server", { name: preset.id, config: preset.config });
-      showToast(`${preset.name} ${t("mcpInstalled").toLowerCase()}`, "success");
-      await loadMcpServers();
-      renderMcpPresets();
-    } catch (error) {
-      showToast(String(error), "error");
-      btn.disabled = false;
-      btn.textContent = t("mcpInstallBtn");
-    }
+    // 预设安装沿用 Add 表单流程：预填名称与配置（默认仅勾选 Claude），由用户确认后保存
+    switchMcpTab("installed");
+    showMcpEdit(null, { name: preset.id, config: preset.config });
   });
 }
 
@@ -5822,7 +7605,8 @@ function switchDeveloperTool(tool) {
     switchSkillsTab("installed");
     loadSkills();
   } else if (nextTool === "prompts") {
-    switchPromptTab("editor");
+    switchPromptTab("presets");
+    loadPromptPresets();
     loadClaudeMd();
     loadPromptTemplates();
   } else {
@@ -6709,15 +8493,158 @@ function bindUsageUiOnce() {
   });
 }
 
+// ── 会话管理器（Sessions）────────────────────────────────
+// 浏览/搜索 Claude Code 与 Codex 的本机历史会话，一键恢复。
+// 懒加载：首次进入页面才扫描；切走后不轮询，靠刷新按钮/搜索/筛选重查。
+let cliSessionsQuery = "";
+let cliSessionsAppFilter = "all";
+let cliSessionsData = [];
+let cliSessionsLoadedOnce = false;
+// 请求序号：只渲染最新一次请求的结果，防止慢响应覆盖新筛选
+let cliSessionsRequestSeq = 0;
+let cliSessionsSearchTimer = null;
+
+function applyCliSessionsPanelLanguage() {
+  setText("cliSessionsNavLabel", t("cliSessionsNavLabel"));
+  setText("cliSessionsPageTitle", t("cliSessionsPageTitle"));
+  setText("cliSessionsPageSubtitle", t("cliSessionsPageSubtitle"));
+  setText("cliSessionsRefreshBtn", t("cliSessionsRefresh"));
+  setText("cliSessionsLoadingText", t("cliSessionsLoading"));
+  setPlaceholder("cliSessionsSearchInput", t("cliSessionsSearchPlaceholder"));
+  const allBtn = document.querySelector('#cliSessionsAppSeg [data-cli-sessions-app="all"]');
+  if (allBtn) allBtn.textContent = t("cliSessionsFilterAll");
+  // 列表行里的相对时间、按钮文案与空状态都依赖语言，已加载过就重绘
+  if (cliSessionsLoadedOnce) {
+    renderCliSessions();
+  } else {
+    setText("cliSessionsEmptyTitle", t("cliSessionsEmptyTitle"));
+    setText("cliSessionsEmptyText", t("cliSessionsEmptyText"));
+  }
+}
+
+async function loadCliSessions() {
+  const seq = ++cliSessionsRequestSeq;
+  const loading = $("cliSessionsLoading");
+  if (loading) loading.hidden = false;
+  const errorBox = $("cliSessionsError");
+  if (errorBox) errorBox.hidden = true;
+  try {
+    const result = await invoke("list_cli_sessions", {
+      query: cliSessionsQuery || null,
+      app: cliSessionsAppFilter === "all" ? null : cliSessionsAppFilter,
+      limit: 200,
+    });
+    // 慢响应回来时用户已改筛选，丢弃本次结果
+    if (seq !== cliSessionsRequestSeq) return;
+    cliSessionsData = Array.isArray(result?.sessions) ? result.sessions : [];
+    cliSessionsLoadedOnce = true;
+    renderCliSessions();
+  } catch (error) {
+    if (seq !== cliSessionsRequestSeq) return;
+    if (errorBox) {
+      errorBox.hidden = false;
+      errorBox.textContent = t("cliSessionsLoadFailed", { error: String(error) });
+    }
+  } finally {
+    if (seq === cliSessionsRequestSeq && loading) loading.hidden = true;
+  }
+}
+
+function renderCliSessions() {
+  const list = $("cliSessionsList");
+  const empty = $("cliSessionsEmpty");
+  if (!list || !empty) return;
+  setText("cliSessionsCount", t("cliSessionsCount", { count: cliSessionsData.length }));
+  if (!cliSessionsData.length) {
+    // 有筛选条件时的空状态与「从未用过」区分开
+    const filtered = Boolean(cliSessionsQuery) || cliSessionsAppFilter !== "all";
+    list.innerHTML = "";
+    empty.hidden = false;
+    setText("cliSessionsEmptyTitle", filtered ? t("cliSessionsEmptyFilteredTitle") : t("cliSessionsEmptyTitle"));
+    setText("cliSessionsEmptyText", filtered ? t("cliSessionsEmptyFilteredText") : t("cliSessionsEmptyText"));
+    return;
+  }
+  empty.hidden = true;
+  list.innerHTML = cliSessionsData
+    .map((session, index) => {
+      const app = session.app === "codex" ? "codex" : "claude";
+      const title = (session.title || "").trim() || String(session.id || "").slice(0, 8);
+      const cwd = (session.cwd || "").trim();
+      return `
+      <div class="cli-session-row">
+        <span class="usage-app-badge usage-app-${app} cli-session-badge">${app === "codex" ? "Codex" : "Claude"}</span>
+        <div class="cli-session-main">
+          <div class="cli-session-title" title="${escapeUsageHtml(session.title || session.id || "")}">${escapeUsageHtml(title)}</div>
+          <div class="cli-session-cwd" title="${escapeUsageHtml(cwd)}">${cwd ? escapeUsageHtml(cwd) : escapeUsageHtml(t("cliSessionsNoCwd"))}</div>
+        </div>
+        <span class="cli-session-time" title="${escapeUsageHtml(formatUsageTime(session.updatedAt))}">${escapeUsageHtml(formatUsageRelTime(session.updatedAt))}</span>
+        <button class="btn btn-secondary btn-sm cli-session-resume-btn" type="button" data-cli-session-index="${index}">${escapeUsageHtml(t("cliSessionsResume"))}</button>
+      </div>`;
+    })
+    .join("");
+}
+
+async function resumeCliSession(index, button) {
+  const session = cliSessionsData[index];
+  if (!session) return;
+  setButtonBusy(button, true, t("cliSessionsResume"));
+  try {
+    await invoke("resume_cli_session", {
+      app: session.app,
+      id: session.id,
+      cwd: session.cwd || null,
+    });
+    showToast(t("cliSessionsResumeOpened"));
+  } catch (error) {
+    showToast(t("cliSessionsResumeFailed", { error: String(error) }), "error");
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
+
+function bindCliSessionsUiOnce() {
+  if (window.__varswitchCliSessionsBound) return;
+  window.__varswitchCliSessionsBound = true;
+  $("cliSessionsRefreshBtn")?.addEventListener("click", () => loadCliSessions());
+  // 搜索输入防抖 300ms 后重查（子串过滤交给后端做）
+  $("cliSessionsSearchInput")?.addEventListener("input", (event) => {
+    clearTimeout(cliSessionsSearchTimer);
+    const value = event.target.value || "";
+    cliSessionsSearchTimer = setTimeout(() => {
+      cliSessionsQuery = value.trim();
+      loadCliSessions();
+    }, 300);
+  });
+  $("cliSessionsAppSeg")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-cli-sessions-app]");
+    if (!btn) return;
+    cliSessionsAppFilter = btn.getAttribute("data-cli-sessions-app") || "all";
+    document.querySelectorAll("#cliSessionsAppSeg [data-cli-sessions-app]").forEach((b) => {
+      b.classList.toggle("active", b === btn);
+    });
+    loadCliSessions();
+  });
+  // 恢复按钮走事件委托，避免每次渲染重复绑定
+  $("cliSessionsList")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-cli-session-index]");
+    if (!btn) return;
+    resumeCliSession(Number(btn.getAttribute("data-cli-session-index")), btn);
+  });
+}
+
 function switchConsolePage(page) {
   const next = page || "add-provider";
   // 离开 toolbox 页时停掉轮询，避免后台空转
   if (activeConsolePage === "toolbox" && next !== "toolbox") {
     stopToolboxRefresh();
   }
+  // 离开 Claude 页时停掉代理健康轮询（进入时由 loadProfiles → renderProfiles 重启）
+  if (activeConsolePage === "claude" && next !== "claude") {
+    stopProxyHealthRefresh();
+  }
   activeConsolePage = next;
   // 与旧 page 切换兼容
-  if (next === "claude" || next === "codex" || next === "grok" || next === "gemini") {
+  if (next === "claude" || next === "codex" || next === "grok" || next === "gemini" || next === "opencode") {
     currentPage = next;
   }
 
@@ -6751,6 +8678,9 @@ function switchConsolePage(page) {
   } else if (next === "gemini") {
     loadGeminiProfiles();
     loadGeminiStatus();
+  } else if (next === "opencode") {
+    loadOpenCodeProfiles();
+    loadOpenCodeStatus();
   } else if (next === "add-provider") {
     renderUniversalProviderForm();
   } else if (next === "toolbox") {
@@ -6762,6 +8692,10 @@ function switchConsolePage(page) {
   } else if (next === "usage") {
     bindUsageUiOnce();
     loadUsageDashboard();
+  } else if (next === "cli-sessions") {
+    bindCliSessionsUiOnce();
+    // 懒加载：只有首次进入才扫描，之后靠刷新按钮/搜索重查，切走不轮询
+    if (!cliSessionsLoadedOnce) loadCliSessions();
   } else if (next === "settings") {
     mountToolboxPages();
     openSettingsInline();
@@ -6786,6 +8720,8 @@ async function openSettingsInline() {
       if ($("settingsCodexPathValue")) $("settingsCodexPathValue").textContent = paths.codexDir || paths.codexSettings || "--";
     }
     updateSettingsSegControls();
+    // 数据目录信息独立加载，失败不影响其余设置项
+    refreshDataDirInfo();
   } catch (error) {
     showToast(String(error), "error");
   }
@@ -6849,6 +8785,17 @@ const PROVIDER_CONFIG = {
     reload: () => Promise.all([loadGeminiProfiles(), loadGeminiStatus()]),
     // gemini 原实现切换后没有额外停留，保持一致
     switchSettleMs: 0,
+  },
+  opencode: {
+    label: "OpenCode",
+    getProfiles: () => opencodeProfiles,
+    switchCommand: "switch_opencode_profile",
+    deleteCommand: "delete_opencode_profile",
+    switchedToast: (name) => t("opencodeSwitchedTo", { name }),
+    deletedToast: () => t("opencodeToastDeleted"),
+    openEditModal: (profile) => openOpenCodeModal(profile),
+    reload: () => Promise.all([loadOpenCodeProfiles(), loadOpenCodeStatus()]),
+    switchSettleMs: 250,
   },
 };
 
@@ -7023,6 +8970,7 @@ function renderNavigationStatus() {
   const activeCodex = codexProfiles.find((profile) => profile.isActive);
   const activeGrok = grokProfiles.find((profile) => profile.isActive);
   const activeGemini = geminiProfiles.find((profile) => profile.isActive);
+  const activeOpenCode = opencodeProfiles.find((profile) => profile.isActive);
   const claudeLoaded = lastClaudeStatus != null || profiles.length > 0;
   const codexLoaded = lastCodexStatus != null || codexProfiles.length > 0;
   const grokLoaded = lastGrokStatus != null || grokProfiles.length > 0;
@@ -7031,11 +8979,14 @@ function renderNavigationStatus() {
   const codexOk = !!(lastCodexStatus?.apiKey || activeCodex);
   const grokOk = !!(lastGrokStatus?.apiKey || activeGrok);
   const geminiOk = !!(lastGeminiStatus?.apiKey || activeGemini);
+  const opencodeLoaded = lastOpenCodeStatus != null || opencodeProfiles.length > 0;
+  const opencodeOk = !!(lastOpenCodeStatus?.apiKey || activeOpenCode);
 
   setNavDot("claudeNavState", !claudeLoaded ? "" : claudeOk ? "healthy" : "warning");
   setNavDot("codexNavState", !codexLoaded ? "" : codexOk ? "healthy" : "warning");
   setNavDot("grokNavState", !grokLoaded ? "" : grokOk ? "healthy" : "warning");
   setNavDot("geminiNavState", !geminiLoaded ? "" : geminiOk ? "healthy" : "warning");
+  setNavDot("opencodeNavState", !opencodeLoaded ? "" : opencodeOk ? "healthy" : "warning");
 
   const channels = codexToolbox?.mobileChannels || [];
   const mobileBound = Array.isArray(channels) && channels.some((channel) => channel.bound || channel.appId || channel.botToken);
@@ -7142,6 +9093,8 @@ function bindConsoleUiOnce() {
   $("claudePageAddBtn")?.addEventListener("click", () => openModal(null));
   $("claudePageImportBtn")?.addEventListener("click", handleImport);
   $("claudeSyncBtn")?.addEventListener("click", handleSyncNow);
+  $("profileApiFormat")?.addEventListener("change", updateProxyFailoverGroupVisibility);
+  $("proxyHealthResetBtn")?.addEventListener("click", handleProxyHealthReset);
   $("codexPageAddBtn")?.addEventListener("click", () => openCodexModal(null));
   $("codexPageImportBtn")?.addEventListener("click", handleCodexImport);
   $("codexSyncBtn")?.addEventListener("click", () => {
@@ -7335,6 +9288,24 @@ $("geminiApiKey")?.addEventListener("focus", () => tryClipboardAutoFill("key", "
 $("geminiModelFetchBtn")?.addEventListener("click", () => handleModelFetch("gemini"));
 $("geminiEndpointTestBtn")?.addEventListener("click", () => handleEndpointTest("gemini"));
 bindOverlayDismiss("geminiModalOverlay", closeGeminiModal);
+
+// ── OpenCode Modal Event Listeners ─────────────────
+
+$("opencodeCancelBtn")?.addEventListener("click", closeOpenCodeModal);
+$("opencodeModalClose")?.addEventListener("click", closeOpenCodeModal);
+$("opencodeProfileForm")?.addEventListener("submit", handleOpenCodeSubmit);
+$("opencodePresetSelect")?.addEventListener("change", () => applyOpenCodePreset(getSelectedOpenCodePreset()));
+$("opencodeBaseUrl")?.addEventListener("focus", () => tryClipboardAutoFill("url", "opencodeBaseUrl"));
+$("opencodeApiKey")?.addEventListener("focus", () => tryClipboardAutoFill("key", "opencodeApiKey"));
+bindOverlayDismiss("opencodeModalOverlay", closeOpenCodeModal);
+$("opencodePageAddBtn")?.addEventListener("click", () => openOpenCodeModal(null));
+$("opencodePageImportBtn")?.addEventListener("click", handleOpenCodeImport);
+// 与 Claude 的“立即同步”语义一致:重新应用当前启用的配置
+$("opencodeRefreshBtn")?.addEventListener("click", () => {
+  const active = opencodeProfiles.find((profile) => profile.isActive);
+  if (active) handleOpenCodeSwitch(active.id);
+  else showToast(t("opencodeNoActiveProfile"), "warning");
+});
 $("codexToolboxBtn")?.addEventListener("click", openCodexToolbox);
 on("codexToolboxClose", "click", closeCodexToolbox);
 bindOverlayDismiss("codexToolboxOverlay", closeCodexToolbox);
@@ -7434,6 +9405,13 @@ on("skillCancelBtn", "click", hideSkillsEdit);
 on("skillSaveBtn", "click", handleSaveSkill);
 bindOverlayDismiss("skillsOverlay", closeSkillsPanel);
 
+// Skills ZIP 安装
+on("installZipBtn", "click", handlePickSkillZip);
+on("zipInstallClose", "click", closeZipInstall);
+on("zipInstallCancel", "click", closeZipInstall);
+on("zipInstallConfirm", "click", handleZipInstallConfirm);
+bindOverlayDismiss("zipInstallOverlay", closeZipInstall);
+
 // Skills tabs
 on("skillsTabInstalled", "click", () => switchSkillsTab("installed"));
 on("skillsTabDiscover", "click", () => switchSkillsTab("discover"));
@@ -7479,8 +9457,11 @@ on("promptsBtn", "click", openPromptsPanel);
 on("promptsClose", "click", closePromptsPanel);
 on("promptSaveBtn", "click", handleSavePrompt);
 bindOverlayDismiss("promptsOverlay", closePromptsPanel);
+on("promptTabPresets", "click", () => switchPromptTab("presets"));
 on("promptTabEditor", "click", () => switchPromptTab("editor"));
 on("promptTabTemplates", "click", () => switchPromptTab("templates"));
+on("addPromptPresetBtn", "click", () => showPromptPresetEditor(null));
+on("promptPresetSaveBtn", "click", handleSavePromptPreset);
 on("promptInsertSelect", "change", (e) => {
   const id = e.target.value;
   if (!id) return;
@@ -7500,6 +9481,10 @@ on("mcpClose", "click", closeMcpPanel);
 on("addMcpBtn", "click", () => showMcpEdit(null));
 on("mcpCancelBtn", "click", hideMcpEdit);
 on("mcpSaveBtn", "click", handleSaveMcp);
+on("mcpTransport", "change", updateMcpTransportFields);
+document.querySelectorAll("#mcpModeTabs [data-mcp-mode]").forEach((button) => {
+  button.addEventListener("click", () => setMcpEditorMode(button.dataset.mcpMode));
+});
 bindOverlayDismiss("mcpOverlay", closeMcpPanel);
 on("mcpTabInstalled", "click", () => switchMcpTab("installed"));
 on("mcpTabPresets", "click", () => switchMcpTab("presets"));
@@ -7696,6 +9681,7 @@ async function refreshSettingsPanelData() {
   $("settingsClaudePathValue").textContent = appPaths.claudeSettings || "--";
   $("settingsCodexPathValue").textContent = appPaths.codexSettings || "--";
   renderSettingsEditorPaths(getSettingsEditorPathInfos());
+  refreshDataDirInfo();
 }
 
 async function handleBrowseEditorPath(editorId) {
@@ -7909,6 +9895,186 @@ on("settingsBackupList", "click", async (event) => {
   }
 });
 
+// ── 数据目录（多设备同步）────────────────────────────
+// 后端用指针文件把 data_dir 重定向到网盘同步文件夹，实现多设备共享配置。
+let dataDirInfo = null;
+
+function renderDataDirInfo() {
+  const valueEl = $("settingsDataDirValue");
+  const badge = $("settingsDataDirBadge");
+  if (!valueEl || !badge) return;
+  if (!dataDirInfo) {
+    valueEl.textContent = "--";
+    badge.style.display = "none";
+    return;
+  }
+  valueEl.textContent = dataDirInfo.current || "--";
+  badge.style.display = "";
+  badge.textContent = dataDirInfo.overridden
+    ? t("settingsDataDirCustom")
+    : t("settingsDataDirDefault");
+  badge.classList.toggle("custom", !!dataDirInfo.overridden);
+}
+
+async function refreshDataDirInfo() {
+  try {
+    dataDirInfo = await invoke("get_data_dir_info");
+  } catch (error) {
+    console.error("get_data_dir_info failed", error);
+    dataDirInfo = null;
+  }
+  renderDataDirInfo();
+}
+
+async function handlePickDataDir() {
+  const btn = $("settingsDataDirPickBtn");
+  try {
+    const picked = await invoke("pick_data_dir");
+    if (!picked) return;
+    setButtonBusy(btn, true);
+    const result = await invoke("set_data_dir_override", { path: picked });
+    await refreshDataDirInfo();
+    const copied = (result?.copied || []).length;
+    const skipped = (result?.skipped || []).length;
+    // 结果摘要 + 重启提示（复制/跳过详情见后端日志）
+    await openAppDialog({
+      mode: "confirm",
+      title: t("dataDirSwitchTitle"),
+      message: `${t("dataDirSwitchSummary", { copied, skipped })} ${t("dataDirRestartHint")}`,
+      confirmText: t("dataDirGotIt"),
+      cancelText: t("cancel"),
+    });
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    setButtonBusy(btn, false);
+  }
+}
+
+async function handleResetDataDir() {
+  if (!dataDirInfo?.overridden) {
+    showToast(t("dataDirAlreadyDefault"), "warning");
+    return;
+  }
+  if (!(await appConfirm(t("dataDirConfirmReset"), { title: t("settingsDataDirReset") }))) return;
+  try {
+    await invoke("set_data_dir_override", { path: null });
+    await refreshDataDirInfo();
+    showToast(`${t("dataDirResetDone")} ${t("dataDirRestartHint")}`, "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+on("settingsDataDirPickBtn", "click", handlePickDataDir);
+on("settingsDataDirResetBtn", "click", handleResetDataDir);
+
+// ── Deep Link 导入确认（varswitch:// 一键导入）────────────
+// 后端解析深链后 emit "deeplink-import"，这里弹确认框，用户点确认才真正写入。
+let pendingDeepLinkImport = null;
+
+const DEEPLINK_APP_LABELS = {
+  claude: "Claude",
+  codex: "Codex",
+  gemini: "Gemini",
+  grok: "Grok / xAI",
+};
+
+// API Key 打码显示：前 6 后 4，太短则只留前 2 位
+function maskDeepLinkSecret(value) {
+  const s = String(value || "");
+  if (!s) return "--";
+  if (s.length <= 12) return `${s.slice(0, 2)}****`;
+  return `${s.slice(0, 6)}...${s.slice(-4)}`;
+}
+
+function openDeepLinkModal(payload) {
+  const overlay = $("deeplinkOverlay");
+  if (!overlay || !payload) return;
+  pendingDeepLinkImport = payload;
+  const data = payload.data || {};
+  const isMcp = payload.kind === "mcp";
+  let appLabel;
+  if (isMcp) {
+    // 未指定 apps 时后端默认写入三个应用，这里同步显示
+    const apps = data.apps || { claude: true, codex: true, gemini: true };
+    appLabel = ["claude", "codex", "gemini"]
+      .filter((key) => apps[key])
+      .map((key) => DEEPLINK_APP_LABELS[key])
+      .join(" / ") || "MCP";
+  } else {
+    appLabel = DEEPLINK_APP_LABELS[payload.app] || payload.app || "--";
+  }
+  setText("deeplinkAppValue", isMcp ? `MCP → ${appLabel}` : appLabel);
+  setText("deeplinkNameValue", data.name || "--");
+  const baseRow = $("deeplinkBaseUrlRow");
+  const keyRow = $("deeplinkApiKeyRow");
+  const configGroup = $("deeplinkConfigGroup");
+  if (baseRow) baseRow.hidden = isMcp;
+  if (keyRow) keyRow.hidden = isMcp;
+  if (configGroup) configGroup.hidden = !isMcp;
+  if (isMcp) {
+    const pre = $("deeplinkConfigPreview");
+    if (pre) pre.textContent = JSON.stringify(data.config || {}, null, 2);
+  } else {
+    setText("deeplinkBaseUrlValue", data.baseUrl || "--");
+    setText("deeplinkApiKeyValue", maskDeepLinkSecret(data.apiKey));
+  }
+  overlay.classList.add("open");
+  document.body.classList.add("modal-open");
+}
+
+function closeDeepLinkModal() {
+  pendingDeepLinkImport = null;
+  $("deeplinkOverlay")?.classList.remove("open");
+  document.body.classList.remove("modal-open");
+}
+
+async function confirmDeepLinkImport() {
+  if (!pendingDeepLinkImport) return;
+  const { kind, app, data } = pendingDeepLinkImport;
+  const btn = $("deeplinkConfirm");
+  setButtonBusy(btn, true, t("deeplinkImporting"));
+  try {
+    const message = await invoke("apply_deep_link_import", { kind, app: app || "", data });
+    closeDeepLinkModal();
+    showToast(String(message), "success");
+    // 刷新对应列表（导入只新增、不激活，无需刷新状态）
+    if (kind === "profile") {
+      if (app === "claude") await loadProfiles();
+      else if (app === "codex") await loadCodexProfiles();
+      else if (app === "gemini") await loadGeminiProfiles();
+      else if (app === "grok") await loadGrokProfiles();
+    } else {
+      try { await loadMcpServers(); } catch (_) { /* MCP 面板未打开时忽略 */ }
+    }
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    setButtonBusy(btn, false);
+  }
+}
+
+let deepLinkListenerBound = false;
+async function bindDeepLinkListener() {
+  if (deepLinkListenerBound) return;
+  deepLinkListenerBound = true;
+  on("deeplinkClose", "click", closeDeepLinkModal);
+  on("deeplinkCancel", "click", closeDeepLinkModal);
+  on("deeplinkConfirm", "click", confirmDeepLinkImport);
+  bindOverlayDismiss("deeplinkOverlay", closeDeepLinkModal);
+  try {
+    await listen("deeplink-import", (event) => {
+      if (event?.payload) openDeepLinkModal(event.payload);
+    });
+    await listen("deeplink-import-error", (event) => {
+      showToast(t("deeplinkInvalid", { message: event?.payload?.message || "unknown" }), "error");
+    });
+  } catch (error) {
+    console.error("bindDeepLinkListener failed", error);
+  }
+}
+
 // 把紧凑时间戳 20260624-143025 格式化为 2026-06-24 14:30:25
 function formatBackupStamp(stamp) {
   const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(stamp || "");
@@ -7967,6 +10133,20 @@ async function safeLoad(label, fn, ms = 8000) {
   }
 }
 
+// 侧边栏版本号取自应用真实版本，避免与构建脚本同步的版本号脱节。
+// 纯装饰性，任何失败都只记日志，不能影响启动。
+function renderSidebarVersion() {
+  const target = document.querySelector(".sidebar-version span");
+  const appApi = window.__TAURI__?.app;
+  if (!target || typeof appApi?.getVersion !== "function") return;
+  // 保留 appApi 作为 this，Tauri 的 API 对象方法不能脱离宿主调用
+  Promise.resolve(appApi.getVersion())
+    .then((version) => {
+      if (version) target.textContent = `v${version}`;
+    })
+    .catch((error) => console.error("getVersion failed", error));
+}
+
 (async function init() {
   const toolbar = document.querySelector(".toolbar");
   const appEl = document.querySelector(".app");
@@ -7997,6 +10177,7 @@ async function safeLoad(label, fn, ms = 8000) {
   // 1) 主题/文案：失败也不阻断
   try { applyTheme(); } catch (e) { console.error("applyTheme failed", e); }
   try { applyLanguage(); } catch (e) { console.error("applyLanguage failed", e); }
+  try { renderSidebarVersion(); } catch (e) { console.error("renderSidebarVersion failed", e); }
 
   // 2) 先绑定交互，保证侧边栏/按钮立刻可点
   try {
@@ -8006,6 +10187,8 @@ async function safeLoad(label, fn, ms = 8000) {
     switchConsolePage("add-provider");
     // B15: 尽早订阅后端通道状态推送，绑定流程中的状态变化不会漏收
     bindMobileChannelStatusListener();
+    // 深链导入事件要尽早订阅：冷启动深链由后端延迟 2.5 秒转发，必须赶在其之前完成绑定
+    bindDeepLinkListener();
   } catch (e) {
     console.error("console bind failed", e);
   }
@@ -8027,12 +10210,15 @@ async function safeLoad(label, fn, ms = 8000) {
     safeLoad("loadGrokDiagnostics", () => loadGrokDiagnostics()),
     safeLoad("loadGeminiProfiles", () => loadGeminiProfiles()),
     safeLoad("loadGeminiStatus", () => loadGeminiStatus()),
+    safeLoad("loadOpenCodeProfiles", () => loadOpenCodeProfiles()),
+    safeLoad("loadOpenCodeStatus", () => loadOpenCodeStatus()),
     safeLoad("loadCodexToolbox", () => loadCodexToolbox(), 10000),
     safeLoad("loadAppSettings", () => loadAppSettings()),
   ]);
 
   try {
     renderGrokPresetOptions();
+    renderOpenCodePresetOptions();
     renderUpdateButton();
     enhanceAfterDataLoad();
     switchConsolePage("add-provider");

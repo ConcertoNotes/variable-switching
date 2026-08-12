@@ -9,6 +9,7 @@
     "core:tray:default",
     "dialog:default",
     "dialog:allow-open",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    "deep-link:default"
   ]
 }

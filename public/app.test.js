@@ -1,6 +1,40 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const path = require("node:path");
+
+// 后端按领域拆成了多个模块文件，断言「某段 Rust 代码存在」时要看整个 src 目录，
+// 否则每次搬移函数都会误报失败。
+function readRustSources() {
+  const dir = path.join(__dirname, "..", "src-tauri", "src");
+  return fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(".rs"))
+    .map((name) => fs.readFileSync(path.join(dir, name), "utf8"))
+    .join("\n");
+}
+
+// 命令注册行在拆分后带模块前缀（如 `gemini::get_gemini_profiles,`）
+function commandRegistrationPattern(command) {
+  return new RegExp(`\\n\\s*(?:\\w+::)?${command},`);
+}
+
+// 各应用的运行时状态网格共用同一套横向布局规则。新增应用时只改这个数组，
+// 断言集中在 assertStatusGridsShareRule，不必逐个测试改选择器串。
+const STATUS_GRID_IDS = [
+  "#statusGrid",
+  "#codexStatusGrid",
+  "#grokStatusGrid",
+  "#geminiStatusGrid",
+  "#opencodeStatusGrid",
+];
+
+function assertStatusGridsShareRule(css, suffix, declaration, { ids = STATUS_GRID_IDS } = {}) {
+  const selectors = ids
+    .map((id) => `${id}${suffix}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join(",\\s*");
+  assert.match(css, new RegExp(`${selectors}\\s*\\{[^}]*${declaration}`, "s"));
+}
 
 const {
   shouldAutoOpenUsageGuide,
@@ -53,10 +87,12 @@ test("all console pages are direct children of workspaceMain", () => {
     "codex",
     "grok",
     "gemini",
+    "opencode",
     "add-provider",
     "toolbox",
     "developer-tools",
     "usage",
+    "cli-sessions",
     "settings",
   ]);
 });
@@ -105,7 +141,8 @@ test("settings groups stay independent and keep path actions compact", () => {
   const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
 
-  assert.equal((html.match(/class="settings-group-items"/g) || []).length, 3);
+  // 4 组：通用 / 目录 / 备份 / 数据目录（多设备同步）
+  assert.equal((html.match(/class="settings-group-items"/g) || []).length, 4);
   assert.equal((html.match(/data-settings-copy-path=/g) || []).length, 3);
   assert.match(html, /id="settingsManualBackupLabel"[\s\S]*id="settingsExportBtn"[\s\S]*id="settingsImportBtn"/);
   assert.doesNotMatch(html.slice(html.indexOf("<!-- Settings Panel -->"), html.indexOf('id="usageGuideOverlay"')), />Open</);
@@ -161,24 +198,15 @@ test("Codex wizard keeps long forms scrollable inside the viewport", () => {
 
 test("Codex runtime status uses a full-width horizontal layout", () => {
   const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
-  assert.match(css, /#codexStatusGrid,\s*#grokStatusGrid,\s*#geminiStatusGrid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
-  assert.match(
-    css,
-    /#codexStatusGrid\s+\.status-card,\s*#grokStatusGrid\s+\.status-card,\s*#geminiStatusGrid\s+\.status-card\s*\{[^}]*repeat\(auto-fit,\s*minmax\(/s
-  );
-  assert.match(
-    css,
-    /#codexStatusGrid\s+\.status-value,\s*#grokStatusGrid\s+\.status-value,\s*#geminiStatusGrid\s+\.status-value\s*\{[^}]*text-overflow:\s*ellipsis;/s
-  );
+  assertStatusGridsShareRule(css, "", "grid-template-columns:\\s*1fr;");
+  assertStatusGridsShareRule(css, " .status-card", "repeat\\(auto-fit,\\s*minmax\\(");
+  assertStatusGridsShareRule(css, " .status-value", "text-overflow:\\s*ellipsis;");
 });
 
 test("Grok and Codex runtime status share the same responsive layout", () => {
   const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
-  assert.match(css, /#codexStatusGrid,\s*#grokStatusGrid,\s*#geminiStatusGrid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
-  assert.match(
-    css,
-    /#codexStatusGrid\s+\.status-card,\s*#grokStatusGrid\s+\.status-card,\s*#geminiStatusGrid\s+\.status-card\s*\{[^}]*repeat\(auto-fit,\s*minmax\(/s
-  );
+  assertStatusGridsShareRule(css, "", "grid-template-columns:\\s*1fr;");
+  assertStatusGridsShareRule(css, " .status-card", "repeat\\(auto-fit,\\s*minmax\\(");
 });
 
 test("Codex image generation is presented as a Skill instead of an unknown config table", () => {
@@ -265,7 +293,7 @@ test("universal provider form exposes per-app protocol and connectivity checks",
 test("Claude supports OpenAI-format upstreams via the local conversion proxy", () => {
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
-  const rust = fs.readFileSync(require.resolve("../src-tauri/src/lib.rs"), "utf8");
+  const rust = readRustSources();
   const proxy = fs.readFileSync(require.resolve("../src-tauri/src/claude_proxy.rs"), "utf8");
   const cargo = fs.readFileSync(require.resolve("../src-tauri/Cargo.toml"), "utf8");
 
@@ -276,8 +304,8 @@ test("Claude supports OpenAI-format upstreams via the local conversion proxy", (
 
   // 前端把格式传给后端，并按格式选择验证协议
   assert.match(app, /apiFormat:\s*claudeApiFormat/);
-  assert.match(app, /invoke\("update_profile", \{ id: editingId, name, apiKey, baseUrl, modelId, apiFormat \}\)/);
-  assert.match(app, /invoke\("add_profile", \{ name, apiKey, baseUrl, modelId: modelId \|\| null, apiFormat \}\)/);
+  assert.match(app, /invoke\("update_profile", \{ id: editingId, name, apiKey, baseUrl, modelId, apiFormat, sonnetModel, opusModel, haikuModel, proxyFailover, proxyTakeover \}\)/);
+  assert.match(app, /invoke\("add_profile", \{ name, apiKey, baseUrl, modelId: modelId \|\| null, apiFormat, sonnetModel, opusModel, haikuModel, proxyFailover, proxyTakeover \}\)/);
   assert.match(app, /function productProtocol\(kind\)/);
 
   // Rust：Profile 结构、代理模块、切换链路、状态命令
@@ -288,8 +316,8 @@ test("Claude supports OpenAI-format upstreams via the local conversion proxy", (
   assert.match(rust, /claude_proxy::ensure_server\(\)\?/);
   assert.match(rust, /apply_auth_to_system_env\(&profile\.api_key, &effective_base_url\)/);
   assert.match(rust, /get_claude_proxy_status,/);
-  // 启动恢复：激活的 openai_chat 配置在重启后重建代理
-  assert.match(rust, /p\.is_active && p\.api_format == "openai_chat"/);
+  // 启动恢复：激活的、经代理的配置在重启后重建代理
+  assert.match(rust, /p\.is_active && profile_uses_proxy\(p\)/);
 
   // 代理模块：双向转换 + 流式状态机
   assert.match(proxy, /pub const CLAUDE_PROXY_PORT: u16 = 25789;/);
@@ -300,6 +328,50 @@ test("Claude supports OpenAI-format upstreams via the local conversion proxy", (
   assert.match(proxy, /message_start/);
   assert.match(proxy, /input_json_delta/);
   assert.match(proxy, /#\[cfg\(test\)\]/);
+});
+
+test("every Prompts tab is wired to a button and a content panel", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+
+  // 表驱动的 tab 定义：漏掉任一 tab 会导致面板内容叠加显示
+  const table = app.match(/const PROMPT_TABS = \[([\s\S]*?)\];/);
+  assert.ok(table, "PROMPT_TABS table should exist");
+  const entries = [...table[1].matchAll(/\{\s*id:\s*"(\w+)",\s*button:\s*"(\w+)",\s*content:\s*"(\w+)"\s*\}/g)];
+  assert.equal(entries.length, 3);
+
+  for (const [, id, button, content] of entries) {
+    assert.match(html, new RegExp(`id="${button}"`), `${id} tab button missing in HTML`);
+    assert.match(html, new RegExp(`id="${content}"`), `${id} tab content missing in HTML`);
+    assert.match(app, new RegExp(`switchPromptTab\\("${id}"\\)`), `${id} tab never activated`);
+  }
+});
+
+test("Anthropic upstreams can be taken over by the proxy for failover", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  const rust = readRustSources();
+  const proxy = fs.readFileSync(require.resolve("../src-tauri/src/claude_proxy.rs"), "utf8");
+
+  // 表单提供接管开关，仅对 anthropic 直连显示（openai_chat 本就必经代理）
+  assert.match(html, /id="profileProxyTakeover"/);
+  assert.match(app, /takeoverGroup\.hidden = isOpenAi/);
+  assert.match(app, /apiFormat !== "openai_chat" && Boolean\(\$\("profileProxyTakeover"\)\?\.checked\)/);
+
+  // 后端：接管字段 + 统一的「是否经代理」判定驱动切换与启动恢复
+  assert.match(rust, /pub\(crate\) proxy_takeover: bool,/);
+  assert.match(rust, /fn profile_uses_proxy\(profile: &Profile\) -> bool/);
+  assert.match(rust, /profile\.api_format == "openai_chat" \|\| profile\.proxy_takeover/);
+  assert.match(rust, /if profile_uses_proxy\(&profile\)/);
+  assert.match(rust, /set_upstream_with_mode/);
+
+  // 代理引擎：透传模式直发 Anthropic 端点，流式按字节搬运不做翻译
+  assert.match(proxy, /pub enum UpstreamMode/);
+  assert.match(proxy, /UpstreamMode::Anthropic =>[\s\S]{0,200}x-api-key/);
+  assert.match(proxy, /fn passthrough_stream/);
+  // 备用池每项自带协议，两种协议可混用
+  assert.match(proxy, /pub fn set_failover_targets/);
+  assert.match(proxy, /pub struct ProxyTarget/);
 });
 
 test("resolveUniversalAppBaseUrl adapts one gateway URL per app", () => {
@@ -337,7 +409,7 @@ test("provider navigation follows saved configuration availability", () => {
 test("Gemini is a complete configurable provider", () => {
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
-  const rust = fs.readFileSync(require.resolve("../src-tauri/src/lib.rs"), "utf8");
+  const rust = readRustSources();
 
   assert.match(html, /data-provider-nav="gemini"[\s\S]*gemini-color\.svg/);
   assert.match(html, /id="pageGemini"[^>]*data-console-page-panel="gemini"/);
@@ -358,7 +430,7 @@ test("Gemini is a complete configurable provider", () => {
     "get_gemini_status",
   ]) {
     assert.match(rust, new RegExp(`fn ${command}\\b`));
-    assert.match(rust, new RegExp(`\\n\\s*${command},`));
+    assert.match(rust, commandRegistrationPattern(command));
   }
   assert.match(rust, /\.join\("\.gemini"\)\.join\("settings\.json"\)/);
   assert.match(rust, /GEMINI_API_KEY/);
@@ -481,7 +553,7 @@ test("Claude status and profiles reuse the Codex page structure", () => {
   assert.doesNotMatch(loadStatus, /editor-carousel|editorLocations|status\.editors/);
 
   const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
-  assert.match(css, /#statusGrid,\s*#codexStatusGrid,\s*#grokStatusGrid,\s*#geminiStatusGrid\s*\{[^}]*grid-template-columns:\s*1fr;/s);
+  assertStatusGridsShareRule(css, "", "grid-template-columns:\\s*1fr;");
   assert.match(css, /\.product-icon svg,\s*\.product-icon img\s*\{[^}]*width:\s*16px;[^}]*height:\s*16px;/s);
 });
 

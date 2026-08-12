@@ -11,11 +11,20 @@
 //!   转发到上游 `{base_url}/chat/completions`，再把响应
 //!   （含流式 SSE、工具调用、思考内容）翻译回 Anthropic 格式
 //!
+//! 本地路由增强（对标 cc-switch）：支持备用上游池、自动故障转移与
+//! 每上游独立的熔断器。请求候选序列 = [主上游] + 备用池（按序）；
+//! 在尚未向客户端写回任何字节前，连接失败 / 5xx / 429 会自动换下一个
+//! 候选重试，4xx 视为配置问题直接翻译回客户端。SSE 一旦开始转发即
+//! 不再切换。健康统计见 claude_proxy_health / claude_proxy_reset_breaker。
+//!
 //! 限制：VarSwitch 退出后代理停止，Claude Code 将无法连接；
 //! 切回 anthropic 直连配置即可脱离代理。
 
 use serde_json::{json, Map, Value};
+use sha1::{Digest, Sha1};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -31,20 +40,70 @@ pub struct ProxyUpstream {
     pub model: String,
 }
 
-static UPSTREAM: OnceLock<Mutex<Option<ProxyUpstream>>> = OnceLock::new();
-static SERVER_RUNNING: OnceLock<Mutex<bool>> = OnceLock::new();
-
-fn upstream_cell() -> &'static Mutex<Option<ProxyUpstream>> {
-    UPSTREAM.get_or_init(|| Mutex::new(None))
+/// 上游说什么协议，决定代理是「翻译」还是「透传」。
+///
+/// - `OpenAiChat`：上游只有 OpenAI Chat Completions 接口，需双向翻译协议。
+/// - `Anthropic`：上游本身就是 Anthropic Messages 端点，原样透传即可。
+///   透传模式让直连中转站也能用上故障转移与熔断，且切换上游时终端无感
+///   （`ANTHROPIC_BASE_URL` 始终指向本地代理，换配置只改代理内部指向）。
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum UpstreamMode {
+    #[default]
+    OpenAiChat,
+    Anthropic,
 }
 
-pub fn set_upstream(upstream: Option<ProxyUpstream>) {
-    if let Ok(mut guard) = upstream_cell().lock() {
-        *guard = upstream;
+impl UpstreamMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UpstreamMode::OpenAiChat => "openai_chat",
+            UpstreamMode::Anthropic => "anthropic",
+        }
+    }
+
+    /// 与 Profile.api_format 的取值对应；未知值按翻译模式处理（与旧行为一致）
+    pub fn from_api_format(raw: &str) -> Self {
+        match raw.trim() {
+            "anthropic" => UpstreamMode::Anthropic,
+            _ => UpstreamMode::OpenAiChat,
+        }
     }
 }
 
+/// 一个候选转发目标：上游地址 + 它说的协议
+#[derive(Clone, Default)]
+pub struct ProxyTarget {
+    pub upstream: ProxyUpstream,
+    pub mode: UpstreamMode,
+}
+
+static UPSTREAM: OnceLock<Mutex<Option<ProxyTarget>>> = OnceLock::new();
+static SERVER_RUNNING: OnceLock<Mutex<bool>> = OnceLock::new();
+
+fn upstream_cell() -> &'static Mutex<Option<ProxyTarget>> {
+    UPSTREAM.get_or_init(|| Mutex::new(None))
+}
+
+/// 设置主上游（协议翻译模式）。保留此签名供既有调用点使用。
+pub fn set_upstream(upstream: Option<ProxyUpstream>) {
+    set_upstream_with_mode(upstream, UpstreamMode::OpenAiChat);
+}
+
+/// 设置主上游并指定协议模式
+pub fn set_upstream_with_mode(upstream: Option<ProxyUpstream>, mode: UpstreamMode) {
+    if let Ok(mut guard) = upstream_cell().lock() {
+        *guard = upstream.map(|upstream| ProxyTarget { upstream, mode });
+    }
+    // 配置切换（热更新）：全量重置熔断与统计，避免旧上游的熔断状态
+    // 误伤新配置。按「简单可靠优先」不做增量清理。
+    reset_health_state();
+}
+
 pub fn current_upstream() -> Option<ProxyUpstream> {
+    current_target().map(|target| target.upstream)
+}
+
+pub fn current_target() -> Option<ProxyTarget> {
     upstream_cell().lock().ok().and_then(|guard| guard.clone())
 }
 
@@ -83,6 +142,314 @@ pub fn ensure_server() -> Result<(), String> {
         &format!("[claude-proxy] 本地协议转换代理已启动 127.0.0.1:{CLAUDE_PROXY_PORT}"),
     );
     Ok(())
+}
+
+// ── 备用上游池 / 熔断器 / 健康统计 ────────────────────
+
+/// 连续失败达到该次数后熔断该上游（open）
+const BREAKER_FAILURE_THRESHOLD: u32 = 3;
+/// 熔断开启时长（秒）；到期进入 half-open，放行一个探测请求
+const BREAKER_OPEN_SECS: u64 = 60;
+/// last_error 保留的最大字符数
+const LAST_ERROR_MAX_CHARS: usize = 200;
+
+/// 熔断器状态机：closed（正常）→ 连续失败 ≥ 3 次 open（60 秒内跳过该上游）
+/// → 到期 half-open（放行一个探测请求）→ 成功回 closed / 失败重回 open
+#[derive(Clone, Copy, PartialEq)]
+enum BreakerState {
+    Closed,
+    Open,
+    HalfOpen,
+}
+
+impl BreakerState {
+    // 仅被暂未注册的 claude_proxy_health 使用，集成后可移除 allow
+    #[allow(dead_code)]
+    fn as_str(self) -> &'static str {
+        match self {
+            BreakerState::Closed => "closed",
+            BreakerState::Open => "open",
+            BreakerState::HalfOpen => "half_open",
+        }
+    }
+}
+
+/// 单个上游的熔断状态与健康统计（键 = base_url + api_key 的 SHA1）
+struct UpstreamHealth {
+    state: BreakerState,
+    consecutive_failures: u32,
+    total_requests: u64,
+    total_failures: u64,
+    last_error: Option<String>,
+    last_error_ts: Option<u64>,
+    last_success_ts: Option<u64>,
+    /// 进入 open 的时刻，或 half-open 放行探测的时刻（驱动 60 秒窗口）
+    state_changed_at: u64,
+}
+
+impl UpstreamHealth {
+    fn new() -> Self {
+        UpstreamHealth {
+            state: BreakerState::Closed,
+            consecutive_failures: 0,
+            total_requests: 0,
+            total_failures: 0,
+            last_error: None,
+            last_error_ts: None,
+            last_success_ts: None,
+            state_changed_at: 0,
+        }
+    }
+}
+
+static FAILOVER_POOL: OnceLock<Mutex<Vec<ProxyTarget>>> = OnceLock::new();
+static HEALTH_MAP: OnceLock<Mutex<HashMap<String, UpstreamHealth>>> = OnceLock::new();
+/// 自动转移累计次数：请求被实际发往备用上游（非首选候选）的次数
+static FAILOVER_COUNT: AtomicU64 = AtomicU64::new(0);
+
+fn failover_pool_cell() -> &'static Mutex<Vec<ProxyTarget>> {
+    FAILOVER_POOL.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn health_map() -> &'static Mutex<HashMap<String, UpstreamHealth>> {
+    HEALTH_MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 设置备用上游池（协议翻译模式）。保留此签名供既有调用点使用。
+pub fn set_failover_upstreams(upstreams: Vec<ProxyUpstream>) {
+    set_failover_targets(
+        upstreams
+            .into_iter()
+            .map(|upstream| ProxyTarget {
+                upstream,
+                mode: UpstreamMode::OpenAiChat,
+            })
+            .collect(),
+    );
+}
+
+/// 设置备用上游池（有序，优先级从高到低），每项自带协议模式。
+/// 请求处理时的候选序列 = [主上游] + 备用池；池为空时行为与单上游一致。
+pub fn set_failover_targets(targets: Vec<ProxyTarget>) {
+    if let Ok(mut guard) = failover_pool_cell().lock() {
+        *guard = targets;
+    }
+    // 与 set_upstream 同理：配置变更即全量重置熔断/统计
+    reset_health_state();
+}
+
+/// 当前备用上游池快照（仅上游部分）
+pub fn failover_upstreams() -> Vec<ProxyUpstream> {
+    failover_targets()
+        .into_iter()
+        .map(|target| target.upstream)
+        .collect()
+}
+
+/// 当前备用上游池快照（含协议模式）
+pub fn failover_targets() -> Vec<ProxyTarget> {
+    failover_pool_cell()
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// 熔断键：base_url + api_key 的 SHA1（同地址不同 key 视为不同上游）
+fn upstream_key(upstream: &ProxyUpstream) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(upstream.base_url.trim_end_matches('/').as_bytes());
+    hasher.update(b"\n");
+    hasher.update(upstream.api_key.as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// 检查熔断器是否放行该上游，可能触发 open → half-open 转换。
+/// 锁获取失败时放行——宁可请求失败也不能让代理无路可走。
+fn breaker_allows(key: &str) -> bool {
+    let now = unix_now();
+    let Ok(mut map) = health_map().lock() else {
+        return true;
+    };
+    let entry = map
+        .entry(key.to_string())
+        .or_insert_with(UpstreamHealth::new);
+    match entry.state {
+        BreakerState::Closed => true,
+        BreakerState::Open => {
+            if now.saturating_sub(entry.state_changed_at) >= BREAKER_OPEN_SECS {
+                // 熔断到期 → half-open，放行本请求作为探测；
+                // 同步刷新时间戳，避免并发请求同时放行多个探测
+                entry.state = BreakerState::HalfOpen;
+                entry.state_changed_at = now;
+                true
+            } else {
+                false
+            }
+        }
+        BreakerState::HalfOpen => {
+            // 已有探测在途时不再放行；若探测悬挂超过一个窗口
+            //（LLM 请求可能极慢），再放行一个新探测兜底
+            if now.saturating_sub(entry.state_changed_at) >= BREAKER_OPEN_SECS {
+                entry.state_changed_at = now;
+                true
+            } else {
+                false
+            }
+        }
+    }
+}
+
+/// 记录一次成功请求（以上游返回 2xx 为判据）：闭合熔断并清零连续失败
+fn record_success(key: &str) {
+    let now = unix_now();
+    if let Ok(mut map) = health_map().lock() {
+        let entry = map
+            .entry(key.to_string())
+            .or_insert_with(UpstreamHealth::new);
+        entry.state = BreakerState::Closed;
+        entry.consecutive_failures = 0;
+        entry.total_requests += 1;
+        entry.last_success_ts = Some(now);
+    }
+}
+
+/// 记录一次可转移失败（连接失败 / 5xx / 429）并推进熔断状态机
+fn record_failure(key: &str, error: &str) {
+    let now = unix_now();
+    if let Ok(mut map) = health_map().lock() {
+        let entry = map
+            .entry(key.to_string())
+            .or_insert_with(UpstreamHealth::new);
+        entry.total_requests += 1;
+        entry.total_failures += 1;
+        entry.consecutive_failures += 1;
+        entry.last_error = Some(error.chars().take(LAST_ERROR_MAX_CHARS).collect());
+        entry.last_error_ts = Some(now);
+        // half-open 探测失败 → 立即重新熔断；连续失败达阈值 → 熔断
+        if entry.state == BreakerState::HalfOpen
+            || entry.consecutive_failures >= BREAKER_FAILURE_THRESHOLD
+        {
+            entry.state = BreakerState::Open;
+            entry.state_changed_at = now;
+        }
+    }
+}
+
+/// 记录一次 4xx 配置类错误：计入统计与 last_error，但不推进熔断
+///（上游本身可达，熔断/转移解决不了鉴权或参数问题）
+fn record_config_error(key: &str, error: &str) {
+    let now = unix_now();
+    if let Ok(mut map) = health_map().lock() {
+        let entry = map
+            .entry(key.to_string())
+            .or_insert_with(UpstreamHealth::new);
+        entry.total_requests += 1;
+        entry.total_failures += 1;
+        entry.last_error = Some(error.chars().take(LAST_ERROR_MAX_CHARS).collect());
+        entry.last_error_ts = Some(now);
+        // half-open 探测收到 4xx 说明链路已恢复，视为探测通过
+        if entry.state == BreakerState::HalfOpen {
+            entry.state = BreakerState::Closed;
+            entry.consecutive_failures = 0;
+        }
+    }
+}
+
+/// 清空全部熔断/健康统计状态（配置热更新与手动重置共用）
+fn reset_health_state() {
+    if let Ok(mut map) = health_map().lock() {
+        map.clear();
+    }
+    FAILOVER_COUNT.store(0, Ordering::Relaxed);
+}
+
+/// api_key 脱敏：只留前 6 后 4；长度不足时全部打码，避免变相泄露
+// 仅被暂未注册的 claude_proxy_health 使用，集成后可移除 allow
+#[allow(dead_code)]
+fn mask_api_key(key: &str) -> String {
+    if key.is_empty() {
+        return String::new();
+    }
+    let chars: Vec<char> = key.chars().collect();
+    if chars.len() <= 10 {
+        return "****".to_string();
+    }
+    let head: String = chars[..6].iter().collect();
+    let tail: String = chars[chars.len() - 4..].iter().collect();
+    format!("{head}****{tail}")
+}
+
+/// 上游脱敏摘要（健康面板展示用）
+fn masked_target(target: &ProxyTarget) -> Value {
+    json!({
+        "baseUrl": target.upstream.base_url,
+        "model": target.upstream.model,
+        "apiKey": mask_api_key(&target.upstream.api_key),
+        "apiFormat": target.mode.as_str(),
+    })
+}
+
+/// 单个上游的健康统计条目（尚无记录时返回全零默认值）
+fn health_entry(target: &ProxyTarget, role: &str) -> Value {
+    let key = upstream_key(&target.upstream);
+    let map = health_map().lock().ok();
+    let stats = map.as_ref().and_then(|m| m.get(&key));
+    json!({
+        "role": role,
+        "baseUrl": target.upstream.base_url,
+        "model": target.upstream.model,
+        "apiFormat": target.mode.as_str(),
+        "state": stats.map(|s| s.state.as_str()).unwrap_or("closed"),
+        "consecutiveFailures": stats.map(|s| s.consecutive_failures).unwrap_or(0),
+        "totalRequests": stats.map(|s| s.total_requests).unwrap_or(0),
+        "totalFailures": stats.map(|s| s.total_failures).unwrap_or(0),
+        "lastError": stats.and_then(|s| s.last_error.clone()),
+        "lastErrorTs": stats.and_then(|s| s.last_error_ts),
+        "lastSuccessTs": stats.and_then(|s| s.last_success_ts),
+    })
+}
+
+/// 健康监控快照：运行状态、主/备上游（脱敏）、每上游熔断统计、
+/// 自动转移次数。字段名 camelCase。命令暂未注册，由后续集成接线。
+#[allow(dead_code)]
+#[tauri::command]
+pub fn claude_proxy_health() -> serde_json::Value {
+    let primary = current_target();
+    let pool = failover_targets();
+    let mut health: Vec<Value> = Vec::new();
+    if let Some(p) = primary.as_ref() {
+        health.push(health_entry(p, "primary"));
+    }
+    for target in &pool {
+        health.push(health_entry(target, "failover"));
+    }
+    json!({
+        "running": is_running(),
+        "port": CLAUDE_PROXY_PORT,
+        "upstream": primary.as_ref().map(masked_target),
+        "failoverPool": pool.iter().map(masked_target).collect::<Vec<Value>>(),
+        "health": health,
+        "failoverCount": FAILOVER_COUNT.load(Ordering::Relaxed),
+    })
+}
+
+/// 手动清空所有熔断/统计状态（上游恢复后想立即重试时用）
+#[allow(dead_code)]
+#[tauri::command]
+pub fn claude_proxy_reset_breaker() {
+    reset_health_state();
+    crate::app_log("INFO", "[claude-proxy] 熔断器与健康统计已手动重置");
 }
 
 // ── HTTP 处理 ─────────────────────────────────────────
@@ -147,75 +514,125 @@ fn handle_request(request: tiny_http::Request) {
     }
 }
 
-/// Claude Code 用 count_tokens 做上下文估算；上游没有等价接口，
-/// 按「JSON 字符数 / 4」给一个数量级正确的估算，失败也不影响主链路。
+/// Claude Code 用 count_tokens 做上下文估算。
+/// 透传模式下上游有同名接口，直接转发拿精确值；翻译模式下上游没有等价接口，
+/// 按「JSON 字符数 / 4」给一个数量级正确的估算。两种情况都不影响主链路。
 fn handle_count_tokens(mut request: tiny_http::Request) {
     let mut body = String::new();
     let _ = request.as_reader().read_to_string(&mut body);
+
+    if let Some(target) = current_target() {
+        if target.mode == UpstreamMode::Anthropic && !target.upstream.base_url.trim().is_empty() {
+            let base = target.upstream.base_url.trim_end_matches('/');
+            let sent = proxy_client()
+                .post(format!("{base}/v1/messages/count_tokens"))
+                .header("x-api-key", target.upstream.api_key.as_str())
+                .header("anthropic-version", "2023-06-01")
+                .header("Content-Type", "application/json")
+                .body(body.clone())
+                .send();
+            if let Ok(resp) = sent {
+                let status = resp.status().as_u16();
+                if status < 400 {
+                    if let Ok(text) = resp.text() {
+                        respond_json(request, 200, text);
+                        return;
+                    }
+                }
+            }
+            // 上游不支持或临时失败：回落到本地估算，不让上下文统计阻断主链路
+        }
+    }
+
     let approx = (body.chars().count() / 4).max(1);
     respond_json(request, 200, json!({"input_tokens": approx}).to_string());
 }
 
-fn handle_messages(mut request: tiny_http::Request) {
-    let upstream = match current_upstream() {
-        Some(upstream) if !upstream.base_url.trim().is_empty() => upstream,
-        _ => {
-            respond_error(
-                request,
-                503,
-                "api_error",
-                "VarSwitch 本地代理未配置上游。请在 VarSwitch 中启用一个 OpenAI 格式的 Claude 配置。",
-            );
-            return;
-        }
-    };
-    let body = match read_body(&mut request) {
-        Ok(value) => value,
-        Err(message) => {
-            respond_error(request, 400, "invalid_request_error", &message);
-            return;
-        }
-    };
+/// 单次上游尝试的结果分类
+enum AttemptOutcome {
+    /// 2xx：拿到可转发的上游响应
+    Success(reqwest::blocking::Response),
+    /// 可转移失败（TCP 连接失败/超时、5xx、429）：记熔断并尝试下一候选
+    Retryable(u16, String),
+    /// 4xx 配置类错误（401/403/404 等）：不转移，直接翻译回客户端
+    ClientError(u16, String),
+}
 
-    let stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
-    let openai_body = anthropic_request_to_openai(&body, &upstream.model);
-    let url = format!(
-        "{}/chat/completions",
-        upstream.base_url.trim_end_matches('/')
-    );
+/// 覆写请求体里的模型名（上游不认识 Claude Code 发来的 claude-* 名字时用）
+fn rewrite_model(body: &Value, model: &str) -> Value {
+    let mut out = body.clone();
+    if !model.trim().is_empty() {
+        if let Some(map) = out.as_object_mut() {
+            map.insert("model".to_string(), json!(model));
+        }
+    }
+    out
+}
 
-    let sent = proxy_client()
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", upstream.api_key))
-        .header("Content-Type", "application/json")
-        .body(openai_body.to_string())
-        .send();
-    let upstream_resp = match sent {
+/// 向单个上游发起一次转发尝试。此阶段尚未向客户端写回任何字节，
+/// 因此失败可以安全地换下一个候选重试。
+fn try_upstream(target: &ProxyTarget, body: &Value) -> AttemptOutcome {
+    let upstream = &target.upstream;
+    let base = upstream.base_url.trim_end_matches('/');
+    // 各候选的重写模型可能不同，请求体按候选分别生成
+    let sent = match target.mode {
+        UpstreamMode::Anthropic => {
+            // 透传：上游本就是 Anthropic Messages 端点，只换地址与鉴权头
+            proxy_client()
+                .post(format!("{base}/v1/messages"))
+                .header("x-api-key", upstream.api_key.as_str())
+                .header("anthropic-version", "2023-06-01")
+                .header("Content-Type", "application/json")
+                .body(rewrite_model(body, &upstream.model).to_string())
+                .send()
+        }
+        UpstreamMode::OpenAiChat => proxy_client()
+            .post(format!("{base}/chat/completions"))
+            .header("Authorization", format!("Bearer {}", upstream.api_key))
+            .header("Content-Type", "application/json")
+            .body(anthropic_request_to_openai(body, &upstream.model).to_string())
+            .send(),
+    };
+    let resp = match sent {
         Ok(resp) => resp,
-        Err(e) => {
-            crate::app_log("WARN", &format!("[claude-proxy] 上游连接失败：{e}"));
-            respond_error(request, 502, "api_error", &format!("上游连接失败：{e}"));
-            return;
-        }
+        // 传输层错误（连接失败/超时等）→ 可转移
+        Err(e) => return AttemptOutcome::Retryable(502, format!("上游连接失败：{e}")),
     };
+    let status = resp.status().as_u16();
+    if status < 400 {
+        return AttemptOutcome::Success(resp);
+    }
+    let text = resp.text().unwrap_or_default();
+    let brief: String = text.chars().take(600).collect();
+    let message = format!("上游返回 {status}：{brief}");
+    if status >= 500 || status == 429 {
+        // 服务端故障或限流 → 可转移
+        AttemptOutcome::Retryable(status, message)
+    } else {
+        AttemptOutcome::ClientError(status, message)
+    }
+}
 
-    let status = upstream_resp.status().as_u16();
-    if status >= 400 {
-        let text = upstream_resp.text().unwrap_or_default();
-        let brief: String = text.chars().take(600).collect();
-        crate::app_log(
-            "WARN",
-            &format!("[claude-proxy] 上游返回 {status}：{brief}"),
-        );
-        respond_error(
-            request,
-            status,
-            "api_error",
-            &format!("上游返回 {status}：{brief}"),
-        );
+/// 把上游成功响应转发给客户端（流式 / 非流式两条路径）。
+/// 从这里开始向客户端写字节，之后不能再切换上游。
+fn deliver_response(
+    request: tiny_http::Request,
+    upstream_resp: reqwest::blocking::Response,
+    stream: bool,
+    mode: UpstreamMode,
+) {
+    // 透传模式：上游响应已经是 Anthropic 格式，原样回给客户端
+    if mode == UpstreamMode::Anthropic {
+        if stream {
+            passthrough_stream(request, upstream_resp);
+        } else {
+            match upstream_resp.text() {
+                Ok(text) => respond_json(request, 200, text),
+                Err(e) => respond_error(request, 502, "api_error", &format!("上游响应读取失败：{e}")),
+            }
+        }
         return;
     }
-
     if stream {
         stream_response(request, upstream_resp);
     } else {
@@ -228,6 +645,136 @@ fn handle_messages(mut request: tiny_http::Request) {
         };
         respond_json(request, 200, openai_response_to_anthropic(&value).to_string());
     }
+}
+
+fn handle_messages(mut request: tiny_http::Request) {
+    let primary = match current_target() {
+        Some(target) if !target.upstream.base_url.trim().is_empty() => target,
+        _ => {
+            respond_error(
+                request,
+                503,
+                "api_error",
+                "VarSwitch 本地代理未配置上游。请在 VarSwitch 中激活一个由代理接管的 Claude 配置。",
+            );
+            return;
+        }
+    };
+    let body = match read_body(&mut request) {
+        Ok(value) => value,
+        Err(message) => {
+            respond_error(request, 400, "invalid_request_error", &message);
+            return;
+        }
+    };
+    let stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
+
+    // 候选序列 = [主上游] + 备用池（有序），按熔断键去重。
+    // 备用池为空时序列只有主上游，行为与单上游版本一致（仅多统计记录）。
+    let mut candidates: Vec<ProxyTarget> = vec![primary];
+    for target in failover_targets() {
+        if target.upstream.base_url.trim().is_empty() {
+            continue;
+        }
+        if candidates
+            .iter()
+            .all(|c| upstream_key(&c.upstream) != upstream_key(&target.upstream))
+        {
+            candidates.push(target);
+        }
+    }
+
+    let mut last_error: Option<(u16, String)> = None;
+    // 主上游是否被实际发起过请求（熔断跳过不算），决定最后是否兜底强试
+    let mut primary_attempted = false;
+
+    for (idx, target) in candidates.iter().enumerate() {
+        let upstream = &target.upstream;
+        let key = upstream_key(upstream);
+        if !breaker_allows(&key) {
+            crate::app_log(
+                "WARN",
+                &format!(
+                    "[claude-proxy] 上游 {} 处于熔断状态，跳过",
+                    upstream.base_url
+                ),
+            );
+            continue;
+        }
+        if idx == 0 {
+            primary_attempted = true;
+        } else {
+            // 请求被实际发往备用上游 = 发生一次自动转移
+            FAILOVER_COUNT.fetch_add(1, Ordering::Relaxed);
+            crate::app_log(
+                "INFO",
+                &format!(
+                    "[claude-proxy] 自动转移：尝试备用上游 {}",
+                    upstream.base_url
+                ),
+            );
+        }
+        match try_upstream(target, &body) {
+            AttemptOutcome::Success(resp) => {
+                record_success(&key);
+                deliver_response(request, resp, stream, target.mode);
+                return;
+            }
+            AttemptOutcome::Retryable(status, message) => {
+                record_failure(&key, &message);
+                crate::app_log(
+                    "WARN",
+                    &format!(
+                        "[claude-proxy] 上游 {} 失败（{message}），尝试下一候选",
+                        upstream.base_url
+                    ),
+                );
+                last_error = Some((status, message));
+            }
+            AttemptOutcome::ClientError(status, message) => {
+                // 4xx 是配置问题，换上游解决不了：按现状直接翻译回客户端
+                record_config_error(&key, &message);
+                crate::app_log("WARN", &format!("[claude-proxy] {message}"));
+                respond_error(request, status, "api_error", &message);
+                return;
+            }
+        }
+    }
+
+    // 全部候选都被熔断跳过或失败。若主上游整轮都没被实际尝试过
+    //（被熔断跳过），忽略熔断状态强行尝试一次——宁可失败也不能无路可走；
+    // 若主上游已实际失败过，则不再重复请求，直接返回该错误。
+    if !primary_attempted {
+        let target = &candidates[0];
+        let key = upstream_key(&target.upstream);
+        crate::app_log(
+            "WARN",
+            &format!(
+                "[claude-proxy] 所有候选均不可用，忽略熔断强行尝试主上游 {}",
+                target.upstream.base_url
+            ),
+        );
+        match try_upstream(target, &body) {
+            AttemptOutcome::Success(resp) => {
+                record_success(&key);
+                deliver_response(request, resp, stream, target.mode);
+                return;
+            }
+            AttemptOutcome::Retryable(status, message) => {
+                record_failure(&key, &message);
+                last_error = Some((status, message));
+            }
+            AttemptOutcome::ClientError(status, message) => {
+                record_config_error(&key, &message);
+                respond_error(request, status, "api_error", &message);
+                return;
+            }
+        }
+    }
+
+    let (status, message) = last_error.unwrap_or((503, "所有上游均不可用".to_string()));
+    crate::app_log("WARN", &format!("[claude-proxy] 请求最终失败：{message}"));
+    respond_error(request, status, "api_error", &message);
 }
 
 // ── 流式响应管线 ──────────────────────────────────────
@@ -255,6 +802,41 @@ impl Read for ChannelReader {
         self.pos += n;
         Ok(n)
     }
+}
+
+/// 透传模式的流式转发：上游 SSE 已是 Anthropic 格式，按字节原样搬运，
+/// 不解析、不重组，避免翻译层引入的语义损失。
+fn passthrough_stream(request: tiny_http::Request, upstream_resp: reqwest::blocking::Response) {
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        let mut reader = upstream_resp;
+        let mut buf = [0u8; 8192];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        return; // 客户端已断开
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let reader = ChannelReader {
+        rx,
+        buf: Vec::new(),
+        pos: 0,
+    };
+    let headers = vec![
+        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream; charset=utf-8"[..])
+            .expect("static header"),
+        tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-cache"[..])
+            .expect("static header"),
+    ];
+    let response = tiny_http::Response::new(tiny_http::StatusCode(200), headers, reader, None, None);
+    let _ = request.respond(response);
 }
 
 fn stream_response(request: tiny_http::Request, upstream_resp: reqwest::blocking::Response) {
@@ -844,6 +1426,120 @@ impl SseState {
 mod tests {
     use super::*;
 
+    /// 下列测试读写进程级的代理上游状态，默认并行执行会互相踩踏，故串行化
+    static PROXY_STATE_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_proxy_state() -> std::sync::MutexGuard<'static, ()> {
+        PROXY_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn upstream_mode_maps_profile_api_format() {
+        assert_eq!(
+            UpstreamMode::from_api_format("anthropic"),
+            UpstreamMode::Anthropic
+        );
+        assert_eq!(
+            UpstreamMode::from_api_format(" anthropic "),
+            UpstreamMode::Anthropic
+        );
+        assert_eq!(
+            UpstreamMode::from_api_format("openai_chat"),
+            UpstreamMode::OpenAiChat
+        );
+        // 未知/空值按翻译模式处理，与加入透传前的行为一致
+        assert_eq!(UpstreamMode::from_api_format(""), UpstreamMode::OpenAiChat);
+        assert_eq!(
+            UpstreamMode::from_api_format("something-else"),
+            UpstreamMode::OpenAiChat
+        );
+    }
+
+    #[test]
+    fn legacy_setters_default_to_translation_mode() {
+        let _guard = lock_proxy_state();
+        // 旧签名的调用点不指定协议，必须继续按 OpenAI 翻译模式工作
+        set_upstream(Some(ProxyUpstream {
+            base_url: "https://legacy.example.com".into(),
+            api_key: "sk-legacy".into(),
+            model: "gpt-x".into(),
+        }));
+        let target = current_target().expect("主上游已设置");
+        assert_eq!(target.mode, UpstreamMode::OpenAiChat);
+        assert_eq!(target.upstream.base_url, "https://legacy.example.com");
+
+        set_failover_upstreams(vec![ProxyUpstream {
+            base_url: "https://backup.example.com".into(),
+            api_key: "sk-backup".into(),
+            model: String::new(),
+        }]);
+        let pool = failover_targets();
+        assert_eq!(pool.len(), 1);
+        assert_eq!(pool[0].mode, UpstreamMode::OpenAiChat);
+        // 兼容视图仍只暴露上游本身
+        assert_eq!(failover_upstreams().len(), 1);
+
+        set_upstream(None);
+        set_failover_upstreams(Vec::new());
+    }
+
+    #[test]
+    fn mixed_protocol_pool_keeps_each_target_mode() {
+        let _guard = lock_proxy_state();
+        set_upstream_with_mode(
+            Some(ProxyUpstream {
+                base_url: "https://relay.example.com".into(),
+                api_key: "sk-primary".into(),
+                model: String::new(),
+            }),
+            UpstreamMode::Anthropic,
+        );
+        set_failover_targets(vec![
+            ProxyTarget {
+                upstream: ProxyUpstream {
+                    base_url: "https://backup-anthropic.example.com".into(),
+                    api_key: "sk-a".into(),
+                    model: String::new(),
+                },
+                mode: UpstreamMode::Anthropic,
+            },
+            ProxyTarget {
+                upstream: ProxyUpstream {
+                    base_url: "https://backup-openai.example.com".into(),
+                    api_key: "sk-b".into(),
+                    model: "deepseek-chat".into(),
+                },
+                mode: UpstreamMode::OpenAiChat,
+            },
+        ]);
+
+        let target = current_target().expect("主上游已设置");
+        assert_eq!(target.mode, UpstreamMode::Anthropic);
+        let pool = failover_targets();
+        assert_eq!(pool[0].mode, UpstreamMode::Anthropic);
+        assert_eq!(pool[1].mode, UpstreamMode::OpenAiChat);
+
+        // 健康面板要能区分每个上游说的协议
+        let snapshot = claude_proxy_health();
+        assert_eq!(snapshot["upstream"]["apiFormat"], "anthropic");
+        assert_eq!(snapshot["failoverPool"][1]["apiFormat"], "openai_chat");
+
+        set_upstream(None);
+        set_failover_upstreams(Vec::new());
+    }
+
+    #[test]
+    fn rewrite_model_only_overrides_when_configured() {
+        let body = json!({"model": "claude-sonnet-5", "messages": []});
+        // 未配置模型时保留客户端原始模型名，交给上游自行解析
+        assert_eq!(rewrite_model(&body, "")["model"], "claude-sonnet-5");
+        assert_eq!(rewrite_model(&body, "   ")["model"], "claude-sonnet-5");
+        // 配置了就覆盖，其余字段原样保留
+        let rewritten = rewrite_model(&body, "claude-opus-4");
+        assert_eq!(rewritten["model"], "claude-opus-4");
+        assert!(rewritten.get("messages").is_some());
+    }
+
     #[test]
     fn request_converts_system_messages_tools_and_model() {
         let body = json!({
@@ -1067,5 +1763,105 @@ mod tests {
             tool_result_text(&json!({"content": "boom", "is_error": true})),
             "[tool error] boom"
         );
+    }
+
+    // ── 熔断器状态机测试（各测试用独立 key，避免全局状态互扰；
+    //    不调用 reset_health_state，防止清掉并行测试的状态） ──
+
+    /// 手动把状态时间拨回窗口之前，模拟熔断到期（测试不能真等 60 秒）
+    fn rewind_state_time(key: &str) {
+        if let Ok(mut map) = health_map().lock() {
+            map.get_mut(key).unwrap().state_changed_at = unix_now() - BREAKER_OPEN_SECS - 1;
+        }
+    }
+
+    #[test]
+    fn breaker_opens_after_three_failures_then_probes_and_recovers() {
+        let _guard = lock_proxy_state();
+        let key = "test_breaker_open_probe";
+        assert!(breaker_allows(key));
+        record_failure(key, "err1");
+        record_failure(key, "err2");
+        // 2 次连续失败尚未达到阈值
+        assert!(breaker_allows(key));
+        record_failure(key, "err3");
+        // 第 3 次失败 → open，跳过该上游
+        assert!(!breaker_allows(key));
+
+        rewind_state_time(key);
+        // open 到期 → half-open，放行一个探测；在途期间不再放行
+        assert!(breaker_allows(key));
+        assert!(!breaker_allows(key));
+        // 探测成功 → closed，连续失败清零
+        record_success(key);
+        assert!(breaker_allows(key));
+        if let Ok(map) = health_map().lock() {
+            let entry = map.get(key).unwrap();
+            assert_eq!(entry.consecutive_failures, 0);
+            assert_eq!(entry.total_requests, 4);
+            assert_eq!(entry.total_failures, 3);
+            assert!(entry.last_success_ts.is_some());
+        }
+    }
+
+    #[test]
+    fn breaker_reopens_when_half_open_probe_fails() {
+        let _guard = lock_proxy_state();
+        let key = "test_breaker_reopen";
+        for i in 0..3 {
+            record_failure(key, &format!("err{i}"));
+        }
+        rewind_state_time(key);
+        // half-open 探测放行后失败 → 立即重新 open
+        assert!(breaker_allows(key));
+        record_failure(key, "probe failed");
+        assert!(!breaker_allows(key));
+    }
+
+    #[test]
+    fn success_resets_consecutive_failures() {
+        let _guard = lock_proxy_state();
+        let key = "test_breaker_reset_on_success";
+        record_failure(key, "err1");
+        record_failure(key, "err2");
+        record_success(key);
+        record_failure(key, "err3");
+        record_failure(key, "err4");
+        // 成功清零后重新累计，2 < 3 不触发熔断
+        assert!(breaker_allows(key));
+    }
+
+    #[test]
+    fn config_error_records_stats_without_tripping_breaker() {
+        let _guard = lock_proxy_state();
+        let key = "test_breaker_config_error";
+        for i in 0..5 {
+            record_config_error(key, &format!("401 err{i}"));
+        }
+        // 4xx 属配置问题，不推进熔断
+        assert!(breaker_allows(key));
+        if let Ok(map) = health_map().lock() {
+            let entry = map.get(key).unwrap();
+            assert_eq!(entry.total_failures, 5);
+            assert_eq!(entry.consecutive_failures, 0);
+        }
+    }
+
+    #[test]
+    fn last_error_is_truncated_to_limit() {
+        let _guard = lock_proxy_state();
+        let key = "test_breaker_truncate";
+        record_failure(key, &"x".repeat(500));
+        if let Ok(map) = health_map().lock() {
+            let stored = map.get(key).unwrap().last_error.clone().unwrap();
+            assert_eq!(stored.chars().count(), LAST_ERROR_MAX_CHARS);
+        }
+    }
+
+    #[test]
+    fn mask_api_key_keeps_head_and_tail_only() {
+        assert_eq!(mask_api_key("sk-abcdefghijklmnop"), "sk-abc****mnop");
+        assert_eq!(mask_api_key("short"), "****");
+        assert_eq!(mask_api_key(""), "");
     }
 }

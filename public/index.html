@@ -84,6 +84,9 @@
         <button class="sidebar-item" data-console-page="gemini" data-provider-nav="gemini" type="button">
           <img src="gemini-color.svg" alt=""><span>Gemini</span><span class="nav-state-dot" id="geminiNavState"></span>
         </button>
+        <button class="sidebar-item" data-console-page="opencode" type="button">
+          <img src="icon-opencode.svg" alt=""><span>OpenCode</span><span class="nav-state-dot" id="opencodeNavState"></span>
+        </button>
         <button class="sidebar-item active" data-console-page="add-provider" type="button">
           <img src="icon-toolbox.svg" alt=""><span>添加配置</span>
         </button>
@@ -119,6 +122,14 @@
         <h2 class="section-title" id="statusSectionTitle">Claude Status</h2>
       </div>
       <div class="status-grid" id="statusGrid"></div>
+    </section>
+
+    <section class="status-section proxy-health-section" id="claudeProxyHealthSection" hidden>
+      <div class="section-header-row">
+        <h2 class="section-title" id="proxyHealthSectionTitle">代理健康</h2>
+        <button class="btn btn-secondary btn-sm" id="proxyHealthResetBtn" type="button">重置熔断</button>
+      </div>
+      <div class="status-grid" id="proxyHealthGrid"></div>
     </section>
 
     <section class="profiles-section">
@@ -181,6 +192,20 @@
     </section>
   </div>
   </div><!-- end pageGemini -->
+
+  <div class="page-content console-page" id="pageOpenCode" data-console-page-panel="opencode">
+  <div class="app">
+    <header class="page-header"><div><h1 id="opencodePageTitle">OpenCode</h1><p id="opencodePageSubtitle">管理 OpenCode 的 provider、API Key 与默认模型。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="opencodeRefreshBtn" type="button">立即同步</button><button class="btn btn-secondary" id="opencodePageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="opencodePageAddBtn" type="button">添加 OpenCode 配置</button></div></header>
+    <section class="status-section">
+      <div class="section-header-row"><h2 class="section-title" id="opencodeStatusSectionTitle">OpenCode 状态</h2></div>
+      <div class="status-grid" id="opencodeStatusGrid"></div>
+    </section>
+    <section class="profiles-section">
+      <h2 class="section-title" id="opencodeProfilesSectionTitle">OpenCode 配置列表</h2>
+      <div class="profiles-grid" id="opencodeProfilesGrid"></div>
+    </section>
+  </div>
+  </div><!-- end pageOpenCode -->
 
       <section class="console-page active" id="pageAddProvider" data-console-page-panel="add-provider">
         <div class="provider-onboarding">
@@ -439,6 +464,42 @@
         </div>
       </section>
 
+      <section class="console-page" id="pageCliSessions" data-console-page-panel="cli-sessions">
+        <header class="page-header">
+          <div><h1 id="cliSessionsPageTitle">会话</h1><p id="cliSessionsPageSubtitle">浏览 Claude Code 与 Codex 的本机历史会话，一键在终端或应用中恢复。</p></div>
+          <div class="page-header-actions">
+            <button class="btn btn-secondary" id="cliSessionsRefreshBtn" type="button">刷新</button>
+          </div>
+        </header>
+
+        <div class="cli-sessions-toolbar">
+          <input class="cli-sessions-search" id="cliSessionsSearchInput" type="search" autocomplete="off" placeholder="搜索标题、目录或会话 ID">
+          <div class="seg-control cli-sessions-app-seg" id="cliSessionsAppSeg">
+            <button type="button" data-cli-sessions-app="all" class="active">全部</button>
+            <button type="button" data-cli-sessions-app="claude">Claude</button>
+            <button type="button" data-cli-sessions-app="codex">Codex</button>
+          </div>
+        </div>
+
+        <div class="cli-sessions-context-bar">
+          <span class="cli-sessions-count" id="cliSessionsCount"></span>
+          <span class="usage-loading-chip" id="cliSessionsLoading" hidden>
+            <span class="usage-spinner"></span>
+            <span id="cliSessionsLoadingText">正在扫描本机会话…</span>
+          </span>
+        </div>
+
+        <div class="usage-error" id="cliSessionsError" hidden></div>
+
+        <div class="console-card cli-sessions-card">
+          <div class="cli-sessions-list" id="cliSessionsList"></div>
+          <div class="cli-sessions-empty" id="cliSessionsEmpty" hidden>
+            <p class="cli-sessions-empty-title" id="cliSessionsEmptyTitle">暂无历史会话</p>
+            <p class="cli-sessions-empty-text" id="cliSessionsEmptyText">使用 Claude Code 或 Codex 后，这里会列出可恢复的本机会话。</p>
+          </div>
+        </div>
+      </section>
+
       <section class="console-page" id="pageSettings" data-console-page-panel="settings">
         <header class="page-header"><div><h1>设置</h1><p>管理应用偏好、路径、备份与帮助入口。</p></div></header>
         <div class="settings-preferences console-card">
@@ -505,6 +566,12 @@
         </span>
         <span>Grok / xAI</span>
       </button>
+      <button class="page-tab" data-page="opencode" type="button">
+        <span class="page-tab-icon page-tab-icon-opencode" aria-hidden="true">
+          <img src="icon-opencode.svg" width="15" height="15" alt="">
+        </span>
+        <span>OpenCode</span>
+      </button>
     </div>
   </div>
 
@@ -533,6 +600,20 @@
           </select>
           <small id="profileApiFormatHint" class="form-hint">上游仅提供 OpenAI 接口时选第二项：请求经 127.0.0.1:25789 本地代理转换协议，需保持 VarSwitch 运行。</small>
         </div>
+        <div class="form-group proxy-failover-group" id="profileProxyTakeoverGroup" hidden>
+          <label class="proxy-failover-checkbox" for="profileProxyTakeover">
+            <input type="checkbox" id="profileProxyTakeover">
+            <span id="profileProxyTakeoverText">由本地代理接管</span>
+          </label>
+          <small id="profileProxyTakeoverHint" class="form-hint">开启后请求经 127.0.0.1:25789 透传，可享受故障转移与熔断；需保持 VarSwitch 运行，否则 Claude Code 连不上。</small>
+        </div>
+        <div class="form-group proxy-failover-group" id="profileProxyFailoverGroup" hidden>
+          <label class="proxy-failover-checkbox" for="profileProxyFailover">
+            <input type="checkbox" id="profileProxyFailover">
+            <span id="profileProxyFailoverText">加入代理故障转移池</span>
+          </label>
+          <small id="profileProxyFailoverHint" class="form-hint">当前激活配置故障时，本地代理按列表顺序自动切到池内配置。</small>
+        </div>
         <div class="form-group">
           <label id="profileNameLabel" for="profileName">Config Name</label>
           <input type="text" id="profileName" required placeholder="e.g. Production">
@@ -558,6 +639,24 @@
           <small id="profileModelIdHint" class="form-hint" style="color:#888;font-size:12px;margin-top:2px;">Optional. Sets claudeCode.selectedModel in editor settings.</small>
           <div class="model-results" id="profileModelResults"></div>
         </div>
+        <details class="model-mapping-section" id="profileModelMappingSection">
+          <summary id="profileModelMappingSummary">高级模型映射</summary>
+          <div class="model-mapping-body">
+            <small id="profileModelMappingHint" class="form-hint">可选。分别写入 ANTHROPIC_DEFAULT_SONNET_MODEL / ANTHROPIC_DEFAULT_OPUS_MODEL / ANTHROPIC_DEFAULT_HAIKU_MODEL，留空则不设置。</small>
+            <div class="form-group">
+              <label id="profileSonnetModelLabel" for="profileSonnetModel">Sonnet 模型</label>
+              <input type="text" id="profileSonnetModel" placeholder="ANTHROPIC_DEFAULT_SONNET_MODEL" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group">
+              <label id="profileOpusModelLabel" for="profileOpusModel">Opus 模型</label>
+              <input type="text" id="profileOpusModel" placeholder="ANTHROPIC_DEFAULT_OPUS_MODEL" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group">
+              <label id="profileHaikuModelLabel" for="profileHaikuModel">Haiku 模型</label>
+              <input type="text" id="profileHaikuModel" placeholder="ANTHROPIC_DEFAULT_HAIKU_MODEL" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+        </details>
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
           <button type="submit" class="btn btn-primary" id="submitBtn">Save</button>
@@ -747,6 +846,29 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="opencodeModalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="opencodeModalTitle">添加 OpenCode 配置</h2>
+        <button class="modal-close" id="opencodeModalClose" type="button">&times;</button>
+      </div>
+      <form id="opencodeProfileForm">
+        <input type="hidden" id="opencodeProfileId">
+        <div class="form-group">
+          <label id="opencodePresetLabel" for="opencodePresetSelect">预设</label>
+          <select class="form-select" id="opencodePresetSelect"></select>
+          <small id="opencodePresetHint" class="form-hint"></small>
+        </div>
+        <div class="form-group"><label id="opencodeNameLabel" for="opencodeProfileName">配置名称</label><input type="text" id="opencodeProfileName" required placeholder="例如：公司 OpenCode 网关"></div>
+        <div class="form-group"><label id="opencodeProviderLabel" for="opencodeProviderId">Provider ID</label><input type="text" id="opencodeProviderId" required placeholder="anthropic" autocomplete="off" spellcheck="false"><small id="opencodeProviderHint" class="form-hint">models.dev 的 provider id，例如 anthropic / openai / deepseek / moonshotai。</small></div>
+        <div class="form-group"><label id="opencodeApiKeyLabel" for="opencodeApiKey">API Key</label><input type="password" id="opencodeApiKey" required placeholder="sk-..." autocomplete="off" spellcheck="false"></div>
+        <div class="form-group"><div class="form-label-row"><label id="opencodeBaseUrlLabel" for="opencodeBaseUrl">Base URL</label></div><input type="text" id="opencodeBaseUrl" placeholder="留空使用该 provider 的官方地址"></div>
+        <div class="form-group"><label id="opencodeModelLabel" for="opencodeModel">模型</label><input type="text" id="opencodeModel" placeholder="例如：claude-sonnet-4-5"><small id="opencodeModelHint" class="form-hint">写入 opencode.json 顶层 model，格式为 provider/model。</small></div>
+        <div class="form-actions"><button type="button" class="btn btn-secondary" id="opencodeCancelBtn">取消</button><button type="submit" class="btn btn-primary" id="opencodeSubmitBtn">保存</button></div>
+      </form>
+    </div>
+  </div>
+
   <div class="mgmt-overlay" id="codexToolboxOverlay">
     <div class="mgmt-panel mgmt-panel-wide codex-toolbox-panel">
       <div class="mgmt-header">
@@ -891,6 +1013,7 @@
       <div class="skills-tab-content" id="skillsInstalledContent">
         <div class="mgmt-toolbar" id="skillsToolbar">
           <button class="btn btn-primary btn-sm" id="addSkillBtn" type="button">+ Add Skill</button>
+          <button class="btn btn-secondary btn-sm" id="installZipBtn" type="button">Install from ZIP</button>
         </div>
         <div class="mgmt-body" id="skillsList"></div>
         <div class="mgmt-edit" id="skillsEdit" style="display:none;">
@@ -965,6 +1088,28 @@
     </div>
   </div>
 
+  <!-- Install Skill from ZIP：目标应用选择弹层 -->
+  <div class="modal-overlay" id="zipInstallOverlay">
+    <div class="modal" style="max-width:480px;">
+      <div class="modal-header">
+        <h2 id="zipInstallTitle">Install Skill from ZIP</h2>
+        <button class="modal-close" id="zipInstallClose" type="button">&times;</button>
+      </div>
+      <div class="zip-install-file" id="zipInstallFileName"></div>
+      <div class="form-group">
+        <label id="zipInstallAppsLabel">Install to</label>
+        <div class="mcp-app-checks zip-app-checks">
+          <label class="mcp-app-check"><input type="checkbox" id="zipAppClaude" checked> Claude <span class="zip-app-path">~/.claude/skills/</span></label>
+          <label class="mcp-app-check"><input type="checkbox" id="zipAppCodex"> Codex <span class="zip-app-path">~/.codex/skills/</span></label>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" id="zipInstallCancel" type="button">Cancel</button>
+        <button class="btn btn-primary" id="zipInstallConfirm" type="button">Install</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Prompts Management Panel -->
   <div class="mgmt-overlay" id="promptsOverlay">
     <div class="mgmt-panel mgmt-panel-wide">
@@ -975,12 +1120,56 @@
 
       <!-- Prompt Tabs -->
       <div class="skills-tabs">
-        <button class="skills-tab active" id="promptTabEditor" type="button">Editor</button>
+        <button class="skills-tab active" id="promptTabPresets" type="button">Presets</button>
+        <button class="skills-tab" id="promptTabEditor" type="button">Editor</button>
         <button class="skills-tab" id="promptTabTemplates" type="button">Templates</button>
       </div>
 
+      <!-- Presets Tab（预设库：跨应用同步 + 回填保护） -->
+      <div class="skills-tab-content" id="promptPresetsContent">
+        <div class="prompt-presets-layout">
+          <div class="prompt-presets-side">
+            <button class="btn btn-primary btn-sm" id="addPromptPresetBtn" type="button">+ New Preset</button>
+            <div class="prompt-preset-list" id="promptPresetList"></div>
+          </div>
+          <div class="prompt-presets-editor">
+            <div class="form-group">
+              <label id="promptPresetNameLabel">Preset Name</label>
+              <input type="text" id="promptPresetNameInput" placeholder="e.g. Chinese Dev">
+            </div>
+            <div class="form-group">
+              <label id="promptPresetAppsLabel">Sync to apps</label>
+              <div class="prompt-preset-apps">
+                <label class="prompt-preset-app-check">
+                  <input type="checkbox" id="presetAppClaude" checked>
+                  <span>Claude</span>
+                  <span class="prompt-preset-path">~/.claude/CLAUDE.md</span>
+                </label>
+                <label class="prompt-preset-app-check">
+                  <input type="checkbox" id="presetAppCodex">
+                  <span>Codex</span>
+                  <span class="prompt-preset-path">~/.codex/AGENTS.md</span>
+                </label>
+                <label class="prompt-preset-app-check">
+                  <input type="checkbox" id="presetAppGemini">
+                  <span>Gemini</span>
+                  <span class="prompt-preset-path">~/.gemini/GEMINI.md</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label id="promptPresetContentLabel">Content</label>
+              <textarea class="mgmt-textarea" id="promptPresetContentInput" rows="14" placeholder="System prompt content..."></textarea>
+            </div>
+            <div class="mgmt-toolbar" style="justify-content:flex-end;">
+              <button class="btn btn-primary btn-sm" id="promptPresetSaveBtn" type="button">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Editor Tab -->
-      <div class="skills-tab-content" id="promptEditorContent">
+      <div class="skills-tab-content" id="promptEditorContent" style="display:none;">
         <div class="mgmt-hint" id="promptsPath">~/.claude/CLAUDE.md</div>
         <div class="mgmt-toolbar" style="gap:8px;">
           <select class="discover-filter" id="promptInsertSelect" style="flex:1;">
@@ -1016,7 +1205,9 @@
 
       <!-- Installed Tab -->
       <div class="skills-tab-content" id="mcpInstalledContent">
+        <div class="mgmt-hint" id="mcpIntro">MCP Server 为 AI CLI 提供额外能力（查文档、读写文件、连数据库等）。在这里登记一次，即可同步到下面各个应用的配置文件。</div>
         <div class="mgmt-hint" id="mcpPath">~/.claude.json</div>
+        <div class="mgmt-hint" id="mcpDesktopPath"></div>
         <div class="mgmt-toolbar" id="mcpToolbar">
           <button class="btn btn-primary btn-sm" id="addMcpBtn" type="button">+ Add Server</button>
         </div>
@@ -1024,11 +1215,62 @@
         <div class="mgmt-edit" id="mcpEdit" style="display:none;">
           <div class="form-group">
             <label id="mcpNameLabel2">Server Name</label>
-            <input type="text" id="mcpNameInput" placeholder="server-name">
+            <input type="text" id="mcpNameInput" placeholder="context7">
+            <small class="form-hint" id="mcpNameHint">供 CLI 引用的唯一标识，只影响显示与去重，例如 context7、filesystem。</small>
           </div>
           <div class="form-group">
+            <div class="segmented-filter mcp-mode-tabs" id="mcpModeTabs">
+              <button type="button" class="active" data-mcp-mode="form" id="mcpModeFormBtn">表单填写</button>
+              <button type="button" data-mcp-mode="json" id="mcpModeJsonBtn">JSON</button>
+            </div>
+          </div>
+          <div id="mcpFormMode">
+            <div class="form-group">
+              <label id="mcpTransportLabel">连接方式</label>
+              <select id="mcpTransport">
+                <option value="stdio">本地命令（stdio）</option>
+                <option value="http">远程 HTTP</option>
+                <option value="sse">远程 SSE</option>
+              </select>
+              <small class="form-hint" id="mcpTransportHint">大多数 MCP Server 是本地命令：由 CLI 启动一个进程并通过标准输入输出通信。</small>
+            </div>
+            <div id="mcpStdioFields">
+              <div class="form-group">
+                <label id="mcpCommandLabel">启动命令</label>
+                <input type="text" id="mcpCommandInput" placeholder="npx">
+              </div>
+              <div class="form-group">
+                <label id="mcpArgsLabel">参数（一行一个）</label>
+                <textarea class="mgmt-textarea mcp-compact-textarea" id="mcpArgsInput" rows="4" placeholder="-y&#10;@upstash/context7-mcp"></textarea>
+              </div>
+              <div class="form-group">
+                <label id="mcpEnvLabel">环境变量（一行一个 KEY=VALUE，可留空）</label>
+                <textarea class="mgmt-textarea mcp-compact-textarea" id="mcpEnvInput" rows="3" placeholder="API_KEY=sk-xxxx"></textarea>
+              </div>
+            </div>
+            <div id="mcpRemoteFields" hidden>
+              <div class="form-group">
+                <label id="mcpUrlLabel">服务地址</label>
+                <input type="text" id="mcpUrlInput" placeholder="https://example.com/mcp">
+              </div>
+              <div class="form-group">
+                <label id="mcpHeadersLabel">请求头（一行一个 Key: Value，可留空）</label>
+                <textarea class="mgmt-textarea mcp-compact-textarea" id="mcpHeadersInput" rows="3" placeholder="Authorization: Bearer xxxx"></textarea>
+              </div>
+            </div>
+          </div>
+          <div class="form-group" id="mcpJsonMode" hidden>
             <label id="mcpConfigLabel">Config (JSON)</label>
             <textarea class="mgmt-textarea" id="mcpConfigInput" rows="12" placeholder='{"command": "npx", "args": [...]}'></textarea>
+          </div>
+          <div class="form-group">
+            <label id="mcpAppsLabel">Enable for Apps</label>
+            <div class="mcp-app-checks">
+              <label class="mcp-app-check"><input type="checkbox" id="mcpAppClaude" checked> Claude</label>
+              <label class="mcp-app-check"><input type="checkbox" id="mcpAppCodex"> Codex</label>
+              <label class="mcp-app-check"><input type="checkbox" id="mcpAppGemini"> Gemini</label>
+              <label class="mcp-app-check"><input type="checkbox" id="mcpAppClaudeDesktop"> Claude Desktop</label>
+            </div>
           </div>
           <div class="form-actions">
             <button class="btn btn-secondary" id="mcpCancelBtn" type="button">Cancel</button>
@@ -1177,6 +1419,52 @@
             <div id="settingsBackupList" style="display:none"></div>
           </div>
         </div>
+
+        <!-- 数据目录（多设备同步） -->
+        <div class="settings-group">
+          <div class="settings-group-title" id="settingsGroupDataDir">数据目录（多设备同步）</div>
+          <div class="settings-group-items">
+            <div class="settings-row settings-data-dir-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label">
+                  <span id="settingsDataDirLabel">数据目录</span>
+                  <span class="data-dir-badge" id="settingsDataDirBadge">默认</span>
+                </div>
+                <div class="settings-row-value" id="settingsDataDirValue">--</div>
+                <div class="settings-row-desc" id="settingsDataDirDesc">可指向 OneDrive / Dropbox / 坚果云 / NAS 同步目录，在多台设备间共享配置。注意：配置含明文密钥，请确保同步目录可信。</div>
+              </div>
+              <div class="settings-row-action settings-compact-actions">
+                <button class="btn btn-secondary btn-sm" id="settingsDataDirPickBtn" type="button">选择目录…</button>
+                <button class="btn btn-secondary btn-sm" id="settingsDataDirResetBtn" type="button">恢复默认</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 深链导入确认弹窗（varswitch:// 一键导入，需用户确认后才写入） -->
+  <div class="modal-overlay" id="deeplinkOverlay" role="presentation">
+    <div class="app-dialog deeplink-dialog" role="dialog" aria-modal="true" aria-labelledby="deeplinkTitle">
+      <div class="modal-header">
+        <div><div class="dialog-kicker" id="deeplinkKicker">VarSwitch</div><h2 id="deeplinkTitle">通过链接导入</h2></div>
+        <button class="modal-close" id="deeplinkClose" type="button" aria-label="关闭">&times;</button>
+      </div>
+      <p class="deeplink-warning" id="deeplinkWarning">此配置来自外部链接，请确认链接来源可信后再导入。</p>
+      <div class="deeplink-fields">
+        <div class="deeplink-field"><span class="deeplink-field-label" id="deeplinkAppLabel">目标应用</span><span class="deeplink-field-value" id="deeplinkAppValue">--</span></div>
+        <div class="deeplink-field"><span class="deeplink-field-label" id="deeplinkNameLabel">名称</span><span class="deeplink-field-value" id="deeplinkNameValue">--</span></div>
+        <div class="deeplink-field" id="deeplinkBaseUrlRow"><span class="deeplink-field-label" id="deeplinkBaseUrlLabel">Base URL</span><span class="deeplink-field-value" id="deeplinkBaseUrlValue">--</span></div>
+        <div class="deeplink-field" id="deeplinkApiKeyRow"><span class="deeplink-field-label" id="deeplinkApiKeyLabel">API Key</span><span class="deeplink-field-value deeplink-masked" id="deeplinkApiKeyValue">--</span></div>
+      </div>
+      <div id="deeplinkConfigGroup" hidden>
+        <div class="deeplink-field-label" id="deeplinkConfigLabel">MCP 配置预览</div>
+        <pre class="deeplink-config-preview" id="deeplinkConfigPreview"></pre>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" id="deeplinkCancel" type="button">取消</button>
+        <button class="btn btn-primary" id="deeplinkConfirm" type="button">确认导入</button>
       </div>
     </div>
   </div>
