@@ -247,7 +247,7 @@ fn write_opencode_config(path: &Path, config: &Map<String, Value>) -> Result<(),
 
 // ── 档案列表存取 ────────────────────────────────────────────────────────────
 
-fn read_opencode_profiles(app: &tauri::AppHandle) -> OpenCodeProfilesData {
+pub(crate) fn read_opencode_profiles(app: &tauri::AppHandle) -> OpenCodeProfilesData {
     let path = opencode_profiles_path(app);
     if !path.exists() {
         return OpenCodeProfilesData::default();
@@ -263,7 +263,10 @@ fn write_opencode_profiles(
     data: &OpenCodeProfilesData,
 ) -> Result<(), String> {
     let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
-    crate::write_file_atomic(&opencode_profiles_path(app), &json)
+    crate::write_file_atomic(&opencode_profiles_path(app), &json)?;
+    // 与其他四个应用保持一致：列表变化后刷新托盘快速切换菜单
+    crate::refresh_tray_menu(app);
+    Ok(())
 }
 
 // ── 纯函数：字段归一化与配置合并 ────────────────────────────────────────────

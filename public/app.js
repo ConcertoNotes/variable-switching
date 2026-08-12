@@ -911,6 +911,37 @@ const I18N = {
     toastImportNone: "No new profiles to import",
     settingsSilentStart: "Silent startup",
     settingsSilentStartDesc: "Start minimized to system tray",
+    settingsHotkey: "Global shortcut",
+    settingsHotkeyDesc: "Show / hide the VarSwitch window from anywhere",
+    settingsHotkeyPlaceholder: "Click, then press keys",
+    settingsHotkeyClear: "Clear",
+    settingsHotkeyNeedModifier: "The shortcut must include Ctrl, Alt or Win",
+    settingsHotkeySaved: "Global shortcut set to {keys}",
+    settingsHotkeyCleared: "Global shortcut disabled",
+    balanceLabel: "Balance",
+    balanceCheck: "Check balance",
+    balanceLoading: "Checking...",
+    balanceUnsupported: "N/A",
+    balanceUnsupportedHint: "Balance query is not supported for this provider",
+    balanceFailedShort: "Query failed",
+    balanceUsedLabel: "Used",
+    balanceQuotaLabel: "Quota",
+    balanceGrantedLabel: "Granted",
+    balanceToppedUpLabel: "Topped up",
+    balanceUnlimitedHint: "This site reports no quota cap, so only the used amount is shown",
+    balanceUpdatedAt: "Updated {time}",
+    siteTokenTitle: "Site access token",
+    siteTokenHint: "Enter the system access token generated in the relay site's account settings to read your real account balance. This is not the sk- API key.",
+    siteTokenValueLabel: "Access token",
+    siteTokenUserIdLabel: "User ID (required by new-api sites)",
+    siteTokenUserIdHint: "Digits only, found in your profile on the site. Leave empty for one-api sites.",
+    siteTokenSave: "Save and check",
+    siteTokenDelete: "Delete",
+    siteTokenConfigure: "Set site token for real balance",
+    siteTokenSaved: "Site token saved for {host}",
+    siteTokenDeleted: "Site token removed for {host}",
+    siteTokenEmpty: "Please enter the access token",
+    siteTokenFailedHint: "Site token query failed: {error}",
     settingsLang: "Language",
     settingsTheme: "Theme",
     supportSectionTitle: "Quick Actions",
@@ -1493,6 +1524,37 @@ const I18N = {
     toastImportNone: "没有新配置可导入",
     settingsSilentStart: "静默启动",
     settingsSilentStartDesc: "启动时最小化到系统托盘",
+    settingsHotkey: "全局快捷键",
+    settingsHotkeyDesc: "在任意界面按下快捷键，显示 / 隐藏 VarSwitch 主窗口",
+    settingsHotkeyPlaceholder: "点击后按下组合键",
+    settingsHotkeyClear: "清除",
+    settingsHotkeyNeedModifier: "快捷键需要包含 Ctrl、Alt 或 Win 键",
+    settingsHotkeySaved: "全局快捷键已设为 {keys}",
+    settingsHotkeyCleared: "已关闭全局快捷键",
+    balanceLabel: "余额",
+    balanceCheck: "查询余额",
+    balanceLoading: "查询中...",
+    balanceUnsupported: "不支持",
+    balanceUnsupportedHint: "该供应商暂不支持余额查询",
+    balanceFailedShort: "查询失败",
+    balanceUsedLabel: "已用",
+    balanceQuotaLabel: "总额度",
+    balanceGrantedLabel: "赠送",
+    balanceToppedUpLabel: "充值",
+    balanceUnlimitedHint: "该站点未设置额度上限，因此只显示已用金额",
+    balanceUpdatedAt: "更新于 {time}",
+    siteTokenTitle: "站点访问令牌",
+    siteTokenHint: "填写中转站后台「个人设置」里生成的系统访问令牌，即可查询账户真实余额。这不是 sk- 开头的 API Key。",
+    siteTokenValueLabel: "访问令牌",
+    siteTokenUserIdLabel: "用户 ID（new-api 站点必填）",
+    siteTokenUserIdHint: "纯数字，可在站点后台个人资料中查看。one-api 站点可留空。",
+    siteTokenSave: "保存并查询",
+    siteTokenDelete: "删除",
+    siteTokenConfigure: "配置站点令牌以查询真实余额",
+    siteTokenSaved: "已保存 {host} 的站点令牌",
+    siteTokenDeleted: "已删除 {host} 的站点令牌",
+    siteTokenEmpty: "请填写访问令牌",
+    siteTokenFailedHint: "站点令牌查询失败：{error}",
     settingsLang: "语言",
     settingsTheme: "主题",
     supportSectionTitle: "快捷操作",
@@ -1741,6 +1803,8 @@ function bindProfileGridActions(grid, flag, type) {
     if (kind === "switch") switchAnyProviderProfile(type, id);
     else if (kind === "edit") editProviderProfile(type, id);
     else if (kind === "delete") deleteProviderProfile(type, id);
+    else if (kind === "balance") queryProfileBalance(type, id);
+    else if (kind === "balance-token") openSiteTokenDialog(type, id);
   });
 }
 
@@ -1783,6 +1847,328 @@ const PROFILE_SORT_KINDS = {
     reload: () => loadOpenCodeProfiles(),
   },
 };
+
+// ── 配置卡片余额查询 ──────────────────────────────
+// 根据配置的 Base URL 识别供应商，调用后端 query_provider_balance 查询余额。
+// 结果缓存在 localStorage：常规结果 10 分钟内不自动重查，「不支持」6 小时，
+// 失败 1 分钟后允许自动重试；手动点刷新按钮总是强制重查。
+// v2：v1 缓存里可能存着中转站占位额度算出的假余额，升版本号让旧数据直接作废
+const BALANCE_CACHE_STORAGE_KEY = "varswitch_balance_cache_v2";
+const BALANCE_TTL_MS = 10 * 60 * 1000;
+const BALANCE_UNSUPPORTED_TTL_MS = 6 * 60 * 60 * 1000;
+const BALANCE_ERROR_RETRY_MS = 60 * 1000;
+const BALANCE_REFRESH_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`;
+const BALANCE_TOKEN_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3"/></svg>`;
+
+// OpenCode 官方 provider 可以不填 Base URL，查询余额时映射到官方端点
+const OPENCODE_BALANCE_BASE_URLS = {
+  deepseek: "https://api.deepseek.com",
+  moonshotai: "https://api.moonshot.cn",
+  siliconflow: "https://api.siliconflow.cn",
+  openrouter: "https://openrouter.ai",
+};
+
+// 单个查询最坏要等后端探测多个端点，因此限制并发：手动点击插队优先，
+// 自动刷新排在后面慢慢跑，避免打开页面时对几十个配置同时发请求
+const BALANCE_MAX_CONCURRENCY = 3;
+
+let balanceCache = null;
+// 已配置站点令牌的列表（令牌本身由后端打码，前端只用来判断是否已配置）
+let siteTokens = [];
+const balanceInflight = new Set();
+const balanceQueue = [];
+let balanceRunningCount = 0;
+
+function pumpBalanceQueue() {
+  while (balanceRunningCount < BALANCE_MAX_CONCURRENCY && balanceQueue.length > 0) {
+    const task = balanceQueue.shift();
+    balanceRunningCount += 1;
+    task().finally(() => {
+      balanceRunningCount -= 1;
+      pumpBalanceQueue();
+    });
+  }
+}
+
+function scheduleBalanceTask(task, { priority = false } = {}) {
+  if (priority) balanceQueue.unshift(task);
+  else balanceQueue.push(task);
+  pumpBalanceQueue();
+}
+
+function getBalanceCache() {
+  if (balanceCache) return balanceCache;
+  try {
+    localStorage.removeItem("varswitch_balance_cache_v1");
+    balanceCache = JSON.parse(localStorage.getItem(BALANCE_CACHE_STORAGE_KEY)) || {};
+  } catch {
+    balanceCache = {};
+  }
+  return balanceCache;
+}
+
+function persistBalanceCache() {
+  try {
+    localStorage.setItem(BALANCE_CACHE_STORAGE_KEY, JSON.stringify(getBalanceCache()));
+  } catch {
+    // 存储写入失败时放弃持久化，内存缓存仍然可用
+  }
+}
+
+function balanceProfileTarget(type, profile) {
+  const apiKey = (profile.apiKey || "").trim();
+  let baseUrl = (profile.baseUrl || "").trim();
+  if (!baseUrl && type === "opencode") {
+    baseUrl = OPENCODE_BALANCE_BASE_URLS[profile.providerId] || "";
+  }
+  if (!apiKey || !baseUrl) return null;
+  return { apiKey, baseUrl };
+}
+
+// 缓存键带上地址和 Key 尾部：编辑配置换 Key/地址后旧缓存自动失效
+function balanceCacheKey(type, profile) {
+  const target = balanceProfileTarget(type, profile);
+  if (!target) return null;
+  return `${type}:${profile.id}:${target.baseUrl}:${target.apiKey.slice(-6)}`;
+}
+
+function isBalanceEntryStale(entry) {
+  if (!entry || !entry.ts) return true;
+  if (entry.error) return Date.now() - entry.ts > BALANCE_ERROR_RETRY_MS;
+  const unsupported = entry.result && entry.result.supported === false;
+  const ttl = unsupported ? BALANCE_UNSUPPORTED_TTL_MS : BALANCE_TTL_MS;
+  return Date.now() - entry.ts > ttl;
+}
+
+function formatBalanceAmount(value, currency) {
+  if (!Number.isFinite(value)) return "--";
+  const symbol = currency === "CNY" ? "¥" : currency === "USD" ? "$" : currency ? `${currency} ` : "";
+  const digits = Math.abs(value) >= 1000 ? 0 : 2;
+  return `${symbol}${value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+
+// 只有走通用计费接口（第三方中转站）的配置才谈得上「站点令牌」，
+// DeepSeek 这类官方端点有自己的余额接口，不需要额外凭据
+function balanceSupportsSiteToken(entry) {
+  const provider = entry?.result?.provider;
+  return provider === "openai_compat" || provider === "site_account" || provider === "unsupported";
+}
+
+function balanceTooltip(entry) {
+  const lines = [];
+  const result = entry.result || {};
+  if (result.totalQuota != null) lines.push(`${t("balanceQuotaLabel")}: ${formatBalanceAmount(result.totalQuota, result.currency)}`);
+  if (result.used != null) lines.push(`${t("balanceUsedLabel")}: ${formatBalanceAmount(result.used, result.currency)}`);
+  if (result.toppedUp != null) lines.push(`${t("balanceToppedUpLabel")}: ${formatBalanceAmount(result.toppedUp, result.currency)}`);
+  if (result.granted != null) lines.push(`${t("balanceGrantedLabel")}: ${formatBalanceAmount(result.granted, result.currency)}`);
+  if (result.unlimitedQuota) lines.push(t("balanceUnlimitedHint"));
+  if (result.siteTokenError) lines.push(t("siteTokenFailedHint", { error: result.siteTokenError }));
+  if (entry.ts) lines.push(t("balanceUpdatedAt", { time: new Date(entry.ts).toLocaleString() }));
+  return lines.join("\n");
+}
+
+function balanceDisplayHtml(entry) {
+  if (!entry) return `<span class="balance-muted">--</span>`;
+  if (entry.error) {
+    return `<span class="balance-error" title="${esc(entry.error)}">${t("balanceFailedShort")}</span>`;
+  }
+  const result = entry.result || {};
+  if (result.supported === false) {
+    return `<span class="balance-muted" title="${esc(t("balanceUnsupportedHint"))}">${t("balanceUnsupported")}</span>`;
+  }
+  const tooltip = esc(balanceTooltip(entry));
+  // 配了站点令牌却查不通时数值来自回退路径，标黄提醒用户去检查令牌
+  const tokenFailed = !!result.siteTokenError;
+  if (result.balance == null) {
+    // 算不出剩余余额时退化展示已用或总额度（站点不限额度，或 OpenRouter 不限额 Key）
+    const cls = tokenFailed ? "balance-warn" : "balance-neutral";
+    if (result.used != null) {
+      return `<span class="${cls}" title="${tooltip}">${t("balanceUsedLabel")} ${formatBalanceAmount(result.used, result.currency)}</span>`;
+    }
+    if (result.totalQuota != null) {
+      return `<span class="${cls}" title="${tooltip}">${t("balanceQuotaLabel")} ${formatBalanceAmount(result.totalQuota, result.currency)}</span>`;
+    }
+    return `<span class="balance-muted">--</span>`;
+  }
+  const cls = tokenFailed
+    ? "balance-warn"
+    : result.balance <= 0 ? "balance-error" : result.balance < 5 ? "balance-warn" : "balance-ok";
+  return `<span class="${cls}" title="${tooltip}">${formatBalanceAmount(result.balance, result.currency)}</span>`;
+}
+
+// 卡片里的「余额」行：缺 Key 或缺地址（无法查询）时整行不渲染
+function profileBalanceRowHtml(type, profile) {
+  const target = balanceProfileTarget(type, profile);
+  if (!target) return "";
+  const entry = getBalanceCache()[balanceCacheKey(type, profile)];
+  // 令牌入口只对第三方中转站显示，官方端点没有这个概念
+  const tokenBtn = balanceSupportsSiteToken(entry)
+    ? `<button class="balance-refresh-btn" data-action="balance-token" data-id="${esc(profile.id)}" type="button" title="${esc(t("siteTokenConfigure"))}" aria-label="${esc(t("siteTokenConfigure"))}">${BALANCE_TOKEN_ICON}</button>`
+    : "";
+  return `
+    <div class="profile-field balance-field">
+      <span class="field-label">${t("balanceLabel")}</span>
+      <span class="field-value balance-value" data-balance-slot="${esc(`${type}:${profile.id}`)}">${balanceDisplayHtml(entry)}</span>
+      ${tokenBtn}
+      <button class="balance-refresh-btn" data-action="balance" data-id="${esc(profile.id)}" type="button" title="${esc(t("balanceCheck"))}" aria-label="${esc(t("balanceCheck"))}">${BALANCE_REFRESH_ICON}</button>
+    </div>`;
+}
+
+// ── 站点访问令牌弹窗 ──────────────────────────────
+// 令牌按站点（host）存储，同一中转站的多套配置共用一份，保存后立即重查该站点全部配置。
+let siteTokenContext = null;
+
+function openSiteTokenDialog(type, profileId) {
+  const list = PROFILE_SORT_KINDS[type]?.getList() || [];
+  const profile = list.find((p) => p.id === profileId);
+  if (!profile) return;
+  const target = balanceProfileTarget(type, profile);
+  if (!target) return;
+  let host;
+  try {
+    host = new URL(target.baseUrl).host;
+  } catch {
+    showToast(t("balanceFailedShort"), "error");
+    return;
+  }
+  siteTokenContext = { baseUrl: target.baseUrl, host };
+  setText("siteTokenHost", host);
+  const existing = siteTokens.find((item) => item.host === host);
+  // 已保存的令牌无法回显明文，留空表示不修改由用户重填
+  $("siteTokenValue").value = "";
+  $("siteTokenValue").placeholder = existing ? existing.maskedToken : "";
+  $("siteTokenUserId").value = existing?.userId || "";
+  $("siteTokenDelete").hidden = !existing;
+  $("siteTokenOverlay").classList.add("open");
+  document.body.classList.add("modal-open");
+  setTimeout(() => $("siteTokenValue")?.focus(), 30);
+}
+
+function closeSiteTokenDialog() {
+  siteTokenContext = null;
+  $("siteTokenOverlay")?.classList.remove("open");
+  document.body.classList.remove("modal-open");
+}
+
+async function loadSiteTokens() {
+  try {
+    siteTokens = await invoke("get_site_balance_tokens");
+  } catch (error) {
+    console.error("get_site_balance_tokens failed:", error);
+    siteTokens = [];
+  }
+}
+
+// 令牌是按站点存的，保存后把该站点下所有配置的缓存作废并强制重查
+function refreshBalancesForHost(host) {
+  const cache = getBalanceCache();
+  for (const [type, kind] of Object.entries(PROFILE_SORT_KINDS)) {
+    for (const profile of kind.getList() || []) {
+      const target = balanceProfileTarget(type, profile);
+      if (!target) continue;
+      let profileHost;
+      try {
+        profileHost = new URL(target.baseUrl).host;
+      } catch {
+        continue;
+      }
+      if (profileHost !== host) continue;
+      delete cache[balanceCacheKey(type, profile)];
+      queryProfileBalance(type, profile.id, { force: true });
+    }
+  }
+  persistBalanceCache();
+}
+
+async function handleSiteTokenSave() {
+  if (!siteTokenContext) return;
+  const { baseUrl, host } = siteTokenContext;
+  const token = $("siteTokenValue").value.trim();
+  const userId = $("siteTokenUserId").value.trim();
+  if (!token) {
+    showToast(t("siteTokenEmpty"), "error");
+    return;
+  }
+  try {
+    await invoke("save_site_balance_token", { baseUrl, token, userId });
+    await loadSiteTokens();
+    closeSiteTokenDialog();
+    showToast(t("siteTokenSaved", { host }), "success");
+    refreshBalancesForHost(host);
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+async function handleSiteTokenDelete() {
+  if (!siteTokenContext) return;
+  const { baseUrl, host } = siteTokenContext;
+  try {
+    await invoke("delete_site_balance_token", { baseUrl });
+    await loadSiteTokens();
+    closeSiteTokenDialog();
+    showToast(t("siteTokenDeleted", { host }), "success");
+    refreshBalancesForHost(host);
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+function updateBalanceSlot(type, profileId) {
+  const slot = document.querySelector(`[data-balance-slot="${type}:${profileId}"]`);
+  if (!slot) return;
+  const list = PROFILE_SORT_KINDS[type]?.getList() || [];
+  const profile = list.find((p) => p.id === profileId);
+  if (!profile) return;
+  const entry = getBalanceCache()[balanceCacheKey(type, profile)];
+  slot.innerHTML = balanceDisplayHtml(entry);
+}
+
+// 只负责入队，不等待请求结果：调用方都是「触发一次刷新」的语义
+function queryProfileBalance(type, profileId, { force = true } = {}) {
+  const list = PROFILE_SORT_KINDS[type]?.getList() || [];
+  const profile = list.find((p) => p.id === profileId);
+  if (!profile) return;
+  const target = balanceProfileTarget(type, profile);
+  const key = balanceCacheKey(type, profile);
+  if (!target || !key) return;
+  const cache = getBalanceCache();
+  if (!force && !isBalanceEntryStale(cache[key])) {
+    updateBalanceSlot(type, profileId);
+    return;
+  }
+  if (balanceInflight.has(key)) return;
+  balanceInflight.add(key);
+  const slot = document.querySelector(`[data-balance-slot="${type}:${profileId}"]`);
+  if (slot) slot.innerHTML = `<span class="balance-muted">${t("balanceLoading")}</span>`;
+  scheduleBalanceTask(async () => {
+    try {
+      const result = await invoke("query_provider_balance", {
+        baseUrl: target.baseUrl,
+        apiKey: target.apiKey,
+      });
+      cache[key] = { ts: Date.now(), result };
+    } catch (error) {
+      cache[key] = { ts: Date.now(), error: String(error) };
+    } finally {
+      balanceInflight.delete(key);
+      persistBalanceCache();
+      updateBalanceSlot(type, profileId);
+    }
+  }, { priority: force });
+}
+
+// 列表渲染后触发：只对缓存过期的配置发起查询，避免每次切页都打一轮请求
+function autoRefreshProfileBalances(type) {
+  const list = PROFILE_SORT_KINDS[type]?.getList() || [];
+  for (const profile of list) {
+    const key = balanceCacheKey(type, profile);
+    if (!key) continue;
+    if (isBalanceEntryStale(getBalanceCache()[key])) {
+      queryProfileBalance(type, profile.id, { force: false });
+    }
+  }
+}
 
 // 当前拖拽会话状态（同一时刻只可能有一个拖拽）
 let profileDragState = null;
@@ -2655,6 +3041,11 @@ function applyLanguage() {
   setText("settingsViewBackupsBtn", t("settingsViewBackups"));
   setText("settingsSilentStartLabel", t("settingsSilentStart"));
   setText("settingsSilentStartDesc", t("settingsSilentStartDesc"));
+  setText("settingsHotkeyLabel", t("settingsHotkey"));
+  setText("settingsHotkeyDesc", t("settingsHotkeyDesc"));
+  setText("settingsHotkeyClear", t("settingsHotkeyClear"));
+  const hotkeyInput = $("settingsHotkeyInput");
+  if (hotkeyInput) hotkeyInput.placeholder = t("settingsHotkeyPlaceholder");
   // 数据目录（多设备同步）区块
   setText("settingsGroupDataDir", t("settingsGroupDataDir"));
   setText("settingsDataDirLabel", t("settingsDataDirLabel"));
@@ -2672,6 +3063,15 @@ function applyLanguage() {
   setText("deeplinkConfigLabel", t("deeplinkConfigPreview"));
   setText("deeplinkCancel", t("cancel"));
   setText("deeplinkConfirm", t("deeplinkConfirm"));
+  // 站点访问令牌弹窗
+  setText("siteTokenTitle", t("siteTokenTitle"));
+  setText("siteTokenHint", t("siteTokenHint"));
+  setText("siteTokenValueLabel", t("siteTokenValueLabel"));
+  setText("siteTokenUserIdLabel", t("siteTokenUserIdLabel"));
+  setText("siteTokenUserIdHint", t("siteTokenUserIdHint"));
+  setText("siteTokenCancel", t("cancel"));
+  setText("siteTokenSave", t("siteTokenSave"));
+  setText("siteTokenDelete", t("siteTokenDelete"));
 
   updateLangSegControl();
   updateThemeSegControl();
@@ -3986,6 +4386,7 @@ function renderProfiles() {
           <span class="field-value">${esc(profile.modelId)}</span>
         </div>` : ""}
         ${modelMappingBadgesHtml(profile)}
+        ${profileBalanceRowHtml("claude", profile)}
       </div>
       <div class="profile-actions">
         ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
@@ -3997,6 +4398,7 @@ function renderProfiles() {
 
   bindProfileGridActions(grid, "ClaudeProfiles", "claude");
   bindProfileGridDragSort(grid, "claude");
+  autoRefreshProfileBalances("claude");
   updateActiveConfigBar();
   updateProxyHealthPanel();
 }
@@ -4742,6 +5144,7 @@ function renderGrokProfiles() {
           <span class="field-label">${t("grokApiBackendLabel")}</span>
           <span class="field-value">${esc(profile.apiBackend)}</span>
         </div>` : ""}
+        ${profileBalanceRowHtml("grok", profile)}
       </div>
       <div class="profile-actions">
         ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="grok-switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
@@ -4753,6 +5156,7 @@ function renderGrokProfiles() {
 
   bindProfileGridActions(grid, "GrokProfiles", "grok");
   bindProfileGridDragSort(grid, "grok");
+  autoRefreshProfileBalances("grok");
   updateGrokActiveConfigBar();
 }
 
@@ -5058,6 +5462,7 @@ function renderGeminiProfiles() {
           <span class="field-label">${currentLang === "zh" ? "Gemini 模型" : "Gemini Model"}</span>
           <span class="field-value">${esc(profile.model)}</span>
         </div>` : ""}
+        ${profileBalanceRowHtml("gemini", profile)}
       </div>
       <div class="profile-actions">
         ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="gemini-switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
@@ -5068,6 +5473,7 @@ function renderGeminiProfiles() {
   `).join("");
   bindProfileGridActions(grid, "GeminiProfiles", "gemini");
   bindProfileGridDragSort(grid, "gemini");
+  autoRefreshProfileBalances("gemini");
 }
 
 async function loadGeminiStatus({ rethrow = false } = {}) {
@@ -5298,6 +5704,7 @@ function renderOpenCodeProfiles() {
           <span class="field-label">${t("opencodeModelLabel")}</span>
           <span class="field-value">${esc(profile.model)}</span>
         </div>` : ""}
+        ${profileBalanceRowHtml("opencode", profile)}
       </div>
       <div class="profile-actions">
         ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="opencode-switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
@@ -5309,6 +5716,7 @@ function renderOpenCodeProfiles() {
 
   bindProfileGridActions(grid, "OpenCodeProfiles", "opencode");
   bindProfileGridDragSort(grid, "opencode");
+  autoRefreshProfileBalances("opencode");
 }
 
 async function loadOpenCodeStatus({ rethrow = false } = {}) {
@@ -5645,6 +6053,7 @@ function renderCodexProfiles() {
           <span class="field-label">${t("codexImageBaseUrlLabel")}</span>
           <span class="field-value">${esc(truncUrl(profile.imageBaseUrl, 50))}</span>
         </div>` : ""}
+        ${profileBalanceRowHtml("codex", profile)}
       </div>
       <div class="profile-actions">
         ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="codex-switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
@@ -5656,6 +6065,7 @@ function renderCodexProfiles() {
 
   bindProfileGridActions(grid, "CodexProfiles", "codex");
   bindProfileGridDragSort(grid, "codex");
+  autoRefreshProfileBalances("codex");
   updateCodexStatusTitle();
 }
 
@@ -9677,6 +10087,7 @@ async function refreshSettingsPanelData() {
   $("settingsAutoStart").checked = !!appSettings.autoStart;
   $("settingsMinTray").checked = !!appSettings.minimizeToTray;
   $("settingsSilentStart").checked = !!appSettings.silentStartup;
+  $("settingsHotkeyInput").value = appSettings.globalShortcut || "";
   $("settingsConfigDirValue").textContent = appPaths.configDir || "--";
   $("settingsClaudePathValue").textContent = appPaths.claudeSettings || "--";
   $("settingsCodexPathValue").textContent = appPaths.codexSettings || "--";
@@ -9785,6 +10196,69 @@ function closeSettingsPanel() {
   $("settingsOverlay").classList.remove("open");
 }
 
+// ── 全局快捷键捕获 ──────────────────────────────
+// 输入框只读，点击聚焦后按下的组合键即被捕获并立即保存。
+// 组合键必须包含 Ctrl / Alt / Win 之一：无修饰键的全局热键会吞掉正常输入。
+const HOTKEY_CODE_MAP = {
+  Space: "Space", Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown",
+  Insert: "Insert", Delete: "Delete", Backspace: "Backspace", Enter: "Enter", Tab: "Tab",
+  ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+  Backquote: "`", Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]",
+  Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/", Backslash: "\\",
+};
+
+// 用 event.code 而不是 event.key：组合键里的字母不受输入法和 Shift 影响
+function hotkeyKeyFromEvent(event) {
+  const code = event.code || "";
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^Numpad[0-9]$/.test(code)) return code.slice(6);
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
+  return HOTKEY_CODE_MAP[code] || null;
+}
+
+async function handleHotkeyCapture(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.key === "Escape") {
+    event.target.blur();
+    return;
+  }
+  const key = hotkeyKeyFromEvent(event);
+  if (!key) return; // 只按下修饰键或不支持的键：继续等待
+  const mods = [];
+  if (event.ctrlKey) mods.push("Ctrl");
+  if (event.metaKey) mods.push("Super");
+  if (event.altKey) mods.push("Alt");
+  if (event.shiftKey) mods.push("Shift");
+  if (!mods.some((mod) => mod !== "Shift")) {
+    showToast(t("settingsHotkeyNeedModifier"), "error");
+    return;
+  }
+  await saveGlobalShortcut([...mods, key].join("+"));
+}
+
+// 保存并注册全局快捷键；后端解析/注册失败（如与其他程序冲突）时回滚为旧值
+async function saveGlobalShortcut(value) {
+  if (!appSettings) await loadAppSettings();
+  const previous = appSettings.globalShortcut || "";
+  const input = $("settingsHotkeyInput");
+  if (previous === value) {
+    if (input) input.value = value;
+    return;
+  }
+  appSettings.globalShortcut = value;
+  if (input) input.value = value;
+  try {
+    await persistAppSettings();
+    showToast(value ? t("settingsHotkeySaved", { keys: value }) : t("settingsHotkeyCleared"), "success");
+  } catch (error) {
+    appSettings.globalShortcut = previous;
+    if (input) input.value = previous;
+    showToast(String(error), "error");
+  }
+}
+
 async function handleSettingsToggle() {
   if (!appSettings) return;
   appSettings.autoStart = $("settingsAutoStart").checked;
@@ -9840,6 +10314,8 @@ bindOverlayDismiss("settingsOverlay", closeSettingsPanel);
 on("settingsAutoStart", "change", handleSettingsToggle);
 on("settingsMinTray", "change", handleSettingsToggle);
 on("settingsSilentStart", "change", handleSettingsToggle);
+on("settingsHotkeyInput", "keydown", handleHotkeyCapture);
+on("settingsHotkeyClear", "click", () => saveGlobalShortcut(""));
 on("settingsOpenConfigDir", "click", () => {
   if (appPaths) invoke("open_folder", { path: appPaths.configDir });
 });
@@ -10063,6 +10539,11 @@ async function bindDeepLinkListener() {
   on("deeplinkCancel", "click", closeDeepLinkModal);
   on("deeplinkConfirm", "click", confirmDeepLinkImport);
   bindOverlayDismiss("deeplinkOverlay", closeDeepLinkModal);
+  on("siteTokenClose", "click", closeSiteTokenDialog);
+  on("siteTokenCancel", "click", closeSiteTokenDialog);
+  on("siteTokenSave", "click", handleSiteTokenSave);
+  on("siteTokenDelete", "click", handleSiteTokenDelete);
+  bindOverlayDismiss("siteTokenOverlay", closeSiteTokenDialog);
   try {
     await listen("deeplink-import", (event) => {
       if (event?.payload) openDeepLinkModal(event.payload);
@@ -10214,6 +10695,7 @@ function renderSidebarVersion() {
     safeLoad("loadOpenCodeStatus", () => loadOpenCodeStatus()),
     safeLoad("loadCodexToolbox", () => loadCodexToolbox(), 10000),
     safeLoad("loadAppSettings", () => loadAppSettings()),
+    safeLoad("loadSiteTokens", () => loadSiteTokens()),
   ]);
 
   try {

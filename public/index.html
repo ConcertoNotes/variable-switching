@@ -106,7 +106,7 @@
       <button class="sidebar-item sidebar-settings" data-console-page="settings" type="button">
         <img src="icon-guide.svg" alt=""><span>设置</span>
       </button>
-      <div class="sidebar-version">VarSwitch <span>v2.4.5</span></div>
+      <div class="sidebar-version">VarSwitch <span>v3.1.2</span></div>
     </aside>
 
     <main class="workspace-main" id="workspaceMain">
@@ -1335,6 +1335,16 @@
                 <span class="toggle-slider"></span>
               </label>
             </div>
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsHotkeyLabel">Global shortcut</div>
+                <div class="settings-row-desc" id="settingsHotkeyDesc">Show / hide the VarSwitch window from anywhere</div>
+              </div>
+              <div class="settings-row-action settings-hotkey-actions">
+                <input class="settings-hotkey-input" id="settingsHotkeyInput" type="text" readonly placeholder="Click, then press keys">
+                <button class="btn btn-secondary btn-sm" id="settingsHotkeyClear" type="button">Clear</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1465,6 +1475,31 @@
       <div class="form-actions">
         <button class="btn btn-secondary" id="deeplinkCancel" type="button">取消</button>
         <button class="btn btn-primary" id="deeplinkConfirm" type="button">确认导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 站点访问令牌弹窗：中转站「不限额度」令牌只能查到已用金额，配置站点令牌后可查账户真实余额 -->
+  <div class="modal-overlay" id="siteTokenOverlay" role="presentation">
+    <div class="app-dialog site-token-dialog" role="dialog" aria-modal="true" aria-labelledby="siteTokenTitle">
+      <div class="modal-header">
+        <div><div class="dialog-kicker" id="siteTokenHost">--</div><h2 id="siteTokenTitle">站点访问令牌</h2></div>
+        <button class="modal-close" id="siteTokenClose" type="button" aria-label="关闭">&times;</button>
+      </div>
+      <p class="site-token-hint" id="siteTokenHint">填写中转站后台「个人设置」里生成的系统访问令牌，即可查询账户真实余额。这不是 sk- 开头的 API Key。</p>
+      <div class="form-group">
+        <label class="form-label" for="siteTokenValue" id="siteTokenValueLabel">访问令牌</label>
+        <input class="form-input" id="siteTokenValue" type="password" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="siteTokenUserId" id="siteTokenUserIdLabel">用户 ID（new-api 站点必填）</label>
+        <input class="form-input" id="siteTokenUserId" type="text" inputmode="numeric" autocomplete="off" spellcheck="false">
+        <div class="form-hint" id="siteTokenUserIdHint">纯数字，可在站点后台个人资料中查看。one-api 站点可留空。</div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-danger" id="siteTokenDelete" type="button">删除</button>
+        <button class="btn btn-secondary" id="siteTokenCancel" type="button">取消</button>
+        <button class="btn btn-primary" id="siteTokenSave" type="button">保存并查询</button>
       </div>
     </div>
   </div>

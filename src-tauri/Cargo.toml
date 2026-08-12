@@ -28,6 +28,8 @@ tauri-plugin-process = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 tauri-plugin-deep-link = "2.4.9"
+# 全局快捷键：一键显示/隐藏主窗口（快捷键内容在应用设置中配置）
+tauri-plugin-global-shortcut = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

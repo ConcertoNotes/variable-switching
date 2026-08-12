@@ -30,6 +30,11 @@ pub(crate) fn tray_profile_entries(app: &tauri::AppHandle, kind: &str) -> Vec<(S
             .iter()
             .map(|p| (p.id.clone(), p.name.clone(), p.is_active))
             .collect(),
+        "opencode" => opencode::read_opencode_profiles(app)
+            .profiles
+            .iter()
+            .map(|p| (p.id.clone(), p.name.clone(), p.is_active))
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -63,17 +68,18 @@ pub(crate) fn build_tray_submenu(
     builder.build()
 }
 
-/// 构建完整托盘菜单：Claude / Codex / Gemini / Grok 四个快速切换子菜单
+/// 构建完整托盘菜单：Claude / Codex / Gemini / Grok / OpenCode 五个快速切换子菜单
 /// + 分隔线 + 显示主窗口 + 退出（后两项保持既有行为）
 pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let claude = build_tray_submenu(app, "claude", "Claude")?;
     let codex = build_tray_submenu(app, "codex", "Codex")?;
     let gemini = build_tray_submenu(app, "gemini", "Gemini")?;
     let grok = build_tray_submenu(app, "grok", "Grok")?;
+    let opencode = build_tray_submenu(app, "opencode", "OpenCode")?;
     let show_item = MenuItemBuilder::with_id("show", "显示主窗口").build(app)?;
     let quit_item = MenuItemBuilder::with_id("quit", "退出").build(app)?;
     MenuBuilder::new(app)
-        .items(&[&claude, &codex, &gemini, &grok])
+        .items(&[&claude, &codex, &gemini, &grok, &opencode])
         .separator()
         .items(&[&show_item, &quit_item])
         .build()
@@ -116,6 +122,7 @@ pub(crate) fn handle_tray_switch(app: &tauri::AppHandle, kind: String, profile_i
             "codex" => switch_codex_profile(app.clone(), profile_id.clone()),
             "gemini" => switch_gemini_profile(app.clone(), profile_id.clone()),
             "grok" => switch_grok_profile(app.clone(), profile_id.clone()),
+            "opencode" => opencode::switch_opencode_profile(app.clone(), profile_id.clone()),
             _ => Err(format!("未知的托盘切换类型: {kind}")),
         };
         match result {

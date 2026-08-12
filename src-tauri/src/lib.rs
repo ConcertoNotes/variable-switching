@@ -5,6 +5,7 @@ mod opencode;
 
 // ── 领域模块（由 lib.rs 拆分而来，通过下方通配 re-export 保持原有扁平命名空间）──
 mod app_settings;
+mod balance;
 mod claude;
 mod codex;
 mod codex_toolbox;
@@ -19,6 +20,7 @@ mod skills;
 mod tray;
 
 pub(crate) use app_settings::*;
+pub(crate) use balance::*;
 pub(crate) use claude::*;
 pub(crate) use codex::*;
 pub(crate) use codex_toolbox::*;
@@ -1482,6 +1484,46 @@ fn focus_main_window(app: &tauri::AppHandle) {
     }
 }
 
+/// 全局快捷键的窗口显隐切换：可见且聚焦时隐藏，其余情况恢复并聚焦。
+/// （可见但被其他窗口盖住时，用户的意图显然是「把它调出来」而不是隐藏）
+pub(crate) fn toggle_main_window(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        log_error!("[window] 未找到主窗口 main，无法切换显隐");
+        return;
+    };
+    let visible = window.is_visible().unwrap_or(false);
+    let minimized = window.is_minimized().unwrap_or(false);
+    let focused = window.is_focused().unwrap_or(false);
+    if visible && focused && !minimized {
+        let _ = window.hide();
+    } else {
+        focus_main_window(app);
+    }
+}
+
+/// 注册 / 更新全局快捷键。accel 为空表示禁用（仅注销现有快捷键）。
+/// 解析失败或系统注册失败（例如与其他程序冲突）时返回错误，交给前端提示；
+/// 应用内只注册这一个快捷键，所以直接 unregister_all 再重注册即可。
+pub(crate) fn apply_global_shortcut(app: &tauri::AppHandle, accel: &str) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let manager = app.global_shortcut();
+    manager
+        .unregister_all()
+        .map_err(|e| format!("注销旧快捷键失败: {e}"))?;
+    let trimmed = accel.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let shortcut: tauri_plugin_global_shortcut::Shortcut = trimmed
+        .parse()
+        .map_err(|e| format!("快捷键格式无效（{trimmed}）: {e}"))?;
+    manager
+        .register(shortcut)
+        .map_err(|e| format!("注册全局快捷键失败（可能与其他程序冲突）: {e}"))?;
+    log_info!("[hotkey] 已注册全局快捷键: {trimmed}");
+    Ok(())
+}
+
 
 pub fn run() {
     tauri::Builder::default()
@@ -1498,6 +1540,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // 全局快捷键：应用内只注册「显示/隐藏主窗口」这一个快捷键，
+        // 处理器无需区分触发的是哪一个
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        toggle_main_window(app);
+                    }
+                })
+                .build(),
+        )
         .manage(AppState {
             cancel_flag: AtomicBool::new(false),
         })
@@ -1572,6 +1625,11 @@ pub fn run() {
             // 读取应用设置
             let settings = read_app_settings(&app.handle());
             let silent_startup = settings.silent_startup;
+
+            // 按设置注册全局快捷键（失败只记日志，不阻断启动）
+            if let Err(e) = apply_global_shortcut(&app.handle(), &settings.global_shortcut) {
+                log_warn!("[hotkey] 启动时注册全局快捷键失败：{e}");
+            }
 
             // B10: 上次退出时手机远程是开启状态，本次启动自动恢复连接。
             // 延迟 1.5 秒等窗口和前端就绪，再在后台线程拉起各通道，不阻塞启动。
@@ -1799,6 +1857,10 @@ pub fn run() {
             claude_proxy::claude_proxy_health,
             claude_proxy::claude_proxy_reset_breaker,
             usage_stats::get_usage_dashboard,
+            query_provider_balance,
+            get_site_balance_tokens,
+            save_site_balance_token,
+            delete_site_balance_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

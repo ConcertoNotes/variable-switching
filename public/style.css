@@ -1269,6 +1269,90 @@ body::before {
   flex: 1;
 }
 
+/* ======================== 配置卡片余额行 ======================== */
+
+.balance-field {
+  align-items: center;
+}
+
+.balance-value .balance-ok {
+  color: var(--success-text);
+  font-weight: 600;
+}
+
+.balance-value .balance-warn {
+  color: var(--warning-text);
+  font-weight: 600;
+}
+
+.balance-value .balance-error {
+  color: var(--error-text);
+  font-weight: 600;
+}
+
+.balance-value .balance-neutral {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.balance-value .balance-muted {
+  color: var(--text-muted);
+}
+
+.balance-refresh-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.balance-refresh-btn:hover {
+  background: var(--brand-subtle);
+  color: var(--brand);
+}
+
+.balance-refresh-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ======================== 设置页全局快捷键 ======================== */
+
+.settings-hotkey-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-hotkey-input {
+  width: 180px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", monospace;
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+  caret-color: transparent;
+}
+
+.settings-hotkey-input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-subtle);
+}
+
 /* ======================== EMPTY STATE ======================== */
 
 .empty-state {
@@ -5177,6 +5261,17 @@ body::before { display: none; }
   font-size: 12px;
   line-height: 1.55;
 }
+.site-token-dialog { max-width: 460px; }
+.site-token-hint {
+  margin: -4px 0 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.site-token-dialog .form-actions { justify-content: flex-end; }
+/* 删除按钮推到左侧，与取消/保存分开，避免误点 */
+.site-token-dialog #siteTokenDelete { margin-right: auto; }
+
 .deeplink-fields {
   display: flex;
   flex-direction: column;

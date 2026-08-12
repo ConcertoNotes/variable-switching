@@ -2,7 +2,7 @@
 
 VarSwitch 是一个面向 Claude Code、Codex CLI、Grok CLI、Gemini CLI 和 API 用户的桌面配置管理工具。它通过可视化界面集中管理 API Key / Token、Base URL、模型、编辑器设置、四个应用的多套配置、Skills、Prompts 预设、MCP Server、本机历史会话、Codex 插件市场与移动端控制能力，并提供托盘快速切换、本地代理故障转移、`varswitch://` 深链导入与多设备数据同步。
 
-当前应用版本：`2.3.5`。
+当前应用版本：`3.1.2`。
 
 ## 主要功能
 
@@ -23,6 +23,11 @@ VarSwitch 是一个面向 Claude Code、Codex CLI、Grok CLI、Gemini CLI 和 AP
 - **切换进度与取消**：切换过程中显示系统环境变量、编辑器、Claude 等步骤进度，并支持取消切换。
 - **手动同步**：当前有活动配置时，可使用 `Sync Now` 重新写入当前配置。
 - **接口测速**：添加/编辑配置时可对 Base URL 做连通性和延迟测试。
+- **余额查询**：配置卡片直接显示 API Key 的剩余余额，支持 DeepSeek、Kimi（月之暗面）、SiliconFlow、OpenRouter 官方接口以及 NewAPI / one-api 系中转站的通用计费接口；悬停可查看总额度、已用、充值/赠送明细，可点击刷新，结果本地缓存（10 分钟内不重复自动查询）。Claude / Codex / Grok / Gemini / OpenCode 五个配置列表均支持。
+  - 中转站把令牌设为「不限额度」时，其计费接口会返回 1e8 这类占位上限（one-api 源码中 `UnlimitedQuota` 即固定返回 `100000000`），直接相减会得出「余额 $99,999,971」的假数字，因此这种情况只展示真实的已用金额。
+  - **站点访问令牌**：想看中转站账户里真正剩多少钱，可点击余额行的钥匙图标，填入站点后台「个人设置」生成的系统访问令牌（不是 `sk-` 开头的 API Key）。令牌按站点域名保存，同一中转站的多套配置共用一份；new-api 站点还需填写数字用户 ID（写入 `New-Api-User` 请求头），one-api 站点留空即可。配置后余额改为读取 `/api/user/self` 的账户额度，并按站点 `/api/status` 返回的 `quota_per_unit` 换算金额。
+  - 令牌与 API Key 同等对待：以私有权限原子写入数据目录的 `site_balance_tokens.json`，界面只回显打码值，日志不记录。令牌查询失败时会退回计费接口，数值标黄并在悬停提示中给出站点返回的原始错误。
+  - 查询在后台线程执行并限制并发，不会阻塞界面；识别不出计费接口的站点显示「不支持」，Key 失效则显示具体的 HTTP 错误。
 - **拖拽排序**：配置卡片提供拖拽手柄，可调整列表顺序并自动保存；Codex、Grok、Gemini 配置列表同样支持。
 
 ### 2. 本地代理故障转移
@@ -175,6 +180,7 @@ Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
 - **Launch at startup**：开机自启。
 - **Silent startup**：启动后静默最小化到系统托盘。
 - **Minimize to tray**：关闭窗口时隐藏到托盘而不是退出。
+- **Global shortcut**：全局快捷键，在任意界面按组合键显示/隐藏主窗口。默认关闭；在设置中点击输入框并按下组合键即可录制（须包含 Ctrl / Alt / Win），点「清除」关闭。
 - **Config directory**：打开 VarSwitch 应用配置目录。
 - **数据目录（多设备同步）**：查看当前数据目录，切换到自定义目录或恢复默认，详见下一节。
 - **Claude settings**：查看 `~/.claude/settings.json` 路径。
@@ -233,7 +239,7 @@ https://download.varswitch.strova.top/
 
 - 启动后创建系统托盘图标。
 - 左键点击托盘图标可恢复主窗口。
-- **托盘快速切换**：托盘菜单按应用分为 Claude / Codex / Gemini / Grok 四个子菜单，子菜单标题显示当前激活配置名（如 `Claude · 主力配置`），菜单项列出该应用全部配置并在激活项上打勾，点击即可在后台完成切换。
+- **托盘快速切换**：托盘菜单按应用分为 Claude / Codex / Gemini / Grok / OpenCode 五个子菜单，子菜单标题显示当前激活配置名（如 `Claude · 主力配置`），菜单项列出该应用全部配置并在激活项上打勾，点击即可在后台完成切换。
 - 配置增删改、切换或导入后，托盘菜单自动刷新。
 - 托盘菜单还包含：
   - 显示主窗口
@@ -369,6 +375,7 @@ https://download.varswitch.strova.top/
 | 位置 | 写入内容 |
 | --- | --- |
 | 默认数据目录 | 应用数据（profiles、prompt_presets 等 `*.json` 与 `backups/`），未自定义时使用 |
+| `site_balance_tokens.json` | 余额查询用的站点访问令牌，按站点域名存放，私有权限写入 |
 | `data_dir_override.txt` | 默认数据目录下的指针文件，内容为自定义数据目录的绝对路径 |
 | 自定义数据目录 | 指针文件生效后，上述应用数据改存于该目录 |
 

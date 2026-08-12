@@ -20,6 +20,9 @@ pub(crate) struct AppSettings {
     /// 关闭窗口时最小化到托盘
     pub(crate) minimize_to_tray: bool,
     pub(crate) never_show_usage_guide: bool,
+    /// 全局快捷键（如 "Ctrl+Alt+V"），空字符串表示禁用。
+    /// 默认禁用：全局热键会抢占其他程序的组合键，必须由用户主动开启。
+    pub(crate) global_shortcut: String,
     pub(crate) editor_paths: HashMap<String, String>,
 }
 
@@ -32,6 +35,7 @@ impl Default for AppSettings {
             silent_startup: false,
             minimize_to_tray: true,
             never_show_usage_guide: false,
+            global_shortcut: String::new(),
             editor_paths: HashMap::new(),
         }
     }
@@ -325,6 +329,7 @@ pub(crate) fn normalize_app_settings(mut settings: AppSettings) -> AppSettings {
         }
     }
     settings.editor_paths = normalized_paths;
+    settings.global_shortcut = settings.global_shortcut.trim().to_string();
     settings
 }
 
@@ -553,6 +558,8 @@ pub(crate) fn save_app_settings(app: tauri::AppHandle, settings: AppSettings) ->
     let settings = normalize_app_settings(settings);
     // 处理开机自启
     set_auto_start(settings.auto_start)?;
+    // 全局快捷键先注册再落盘：解析/注册失败时直接报错，不把坏值写进设置
+    crate::apply_global_shortcut(&app, &settings.global_shortcut)?;
     write_app_settings(&app, &settings)
 }
 
