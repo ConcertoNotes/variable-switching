@@ -1,0 +1,19 @@
+# 强制把构建期的临时目录指向工程内一个纯 ASCII 路径。
+# 背景：本机系统 TEMP/TMP 变量损坏，值是字面量 "%USERP~1\AppData\Local\Temp"
+# （未展开的环境变量 + 用户名含非 ASCII 字符），导致 link.exe 无法创建
+# lnk{...}.tmp 临时文件，链接失败（LNK1104），构建产物无法更新。
+# force=true 覆盖损坏的系统变量；relative=true 让路径相对 src-tauri 解析为绝对路径。
+# 该目录需存在，已随仓库提供 .build-tmp/.gitkeep 占位。
+[env]
+TMP = { value = ".build-tmp", force = true, relative = true }
+TEMP = { value = ".build-tmp", force = true, relative = true }
+
+[profile.dev]
+# 关闭增量编译缓存，避免反复修改大文件后 incremental/ 无限膨胀（曾达44GB）
+# 首次构建稍慢，但后续 dev 循环速度基本一致，且不会再卡死链接器
+incremental = false
+
+[build]
+# 并行任务数；留2个核心给系统，防止机器完全卡死
+# 根据你的 CPU 核心数调整，注释掉则使用全部核心
+# jobs = 6

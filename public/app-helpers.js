@@ -54,6 +54,17 @@
     return { valid: true, value: normalized };
   }
 
+  // 统一供应商同一个网关地址在不同应用间的落地形式：
+  // Claude / Gemini 使用根地址（客户端自行拼 /v1/messages 等路径），
+  // Codex / Grok 遵循 OpenAI 兼容惯例要求以 /v1 结尾，未带版本段时自动补全。
+  function resolveUniversalAppBaseUrl(app, baseUrl) {
+    const trimmed = String(baseUrl || "").trim().replace(/\/+$/, "");
+    if (!trimmed) return "";
+    if (app !== "codex" && app !== "grok") return trimmed;
+    if (/\/v\d+[a-z]*$/i.test(trimmed)) return trimmed;
+    return `${trimmed}/v1`;
+  }
+
   function normalizeFetchedModels(models) {
     if (!Array.isArray(models)) return [];
     const seen = new Set();
@@ -75,88 +86,14 @@
       .sort((a, b) => a.localeCompare(b));
   }
 
-  const CODEX_PLUGIN_MARKETPLACE_URL =
-    "https://gitcode.com/2301_79703673/codex-plugins.git";
-  const VARSWITCH_GITHUB_PLUGIN_MARKETPLACE_URL =
-    "https://github.com/ConcertoNotes/codex-plugins.git";
-  const UPSTREAM_GITCODE_PLUGIN_MARKETPLACE_URL =
-    "https://gitcode.com/weixin_65003717/codex-plugin.git";
-  const AWESOME_CODEX_PLUGIN_MARKETPLACE_URL =
-    "https://github.com/hashgraph-online/awesome-codex-plugins.git";
-  const CODEX_PLUGIN_MARKETPLACES = [
-    {
-      id: "varswitch-gitcode",
-      name: "VarSwitch 插件合集（GitCode）",
-      url: CODEX_PLUGIN_MARKETPLACE_URL,
-      count: 316,
-      zh: "你的默认插件市场，融合官方常用插件和社区工作流插件，国内访问更稳。",
-      en: "Your default marketplace, combining common service plugins and community workflow plugins; better access in China.",
-    },
-    {
-      id: "varswitch-github",
-      name: "VarSwitch 插件合集（GitHub）",
-      url: VARSWITCH_GITHUB_PLUGIN_MARKETPLACE_URL,
-      count: 316,
-      zh: "同一套 VarSwitch 插件市场的 GitHub 版本，适合作为海外或备用源。",
-      en: "The GitHub mirror of the same VarSwitch marketplace; useful as an overseas or fallback source.",
-    },
-    {
-      id: "upstream-gitcode",
-      name: "上游常用插件合集",
-      url: UPSTREAM_GITCODE_PLUGIN_MARKETPLACE_URL,
-      count: 189,
-      zh: "常用服务和桌面能力插件来源，保留为参考/备选源。",
-      en: "Source collection for common service and desktop plugins, kept as a reference or fallback.",
-    },
-    {
-      id: "awesome",
-      name: "Awesome Codex Plugins",
-      url: AWESOME_CODEX_PLUGIN_MARKETPLACE_URL,
-      count: 128,
-      zh: "偏社区开发工作流和工具扩展，适合补充代码审查、记忆、自动化类插件。",
-      en: "Community workflow and tool extensions; useful for review, memory, and automation plugins.",
-    },
-  ];
-
-  function normalizeCodexPluginMarketplaceInput(value) {
-    const normalized = typeof value === "string" ? value.trim() : "";
-    if (normalized === "git@github.com:ConcertoNotes/codex-plugins.git") {
-      return VARSWITCH_GITHUB_PLUGIN_MARKETPLACE_URL;
-    }
-    if (normalized === "git@github.com:hashgraph-online/awesome-codex-plugins.git") {
-      return AWESOME_CODEX_PLUGIN_MARKETPLACE_URL;
-    }
-    if (CODEX_PLUGIN_MARKETPLACES.some((item) => item.url === normalized)) {
-      return normalized;
-    }
-    return normalized || CODEX_PLUGIN_MARKETPLACE_URL;
-  }
-
-  function getCodexPluginMarketplaceOption(value) {
-    const normalized = normalizeCodexPluginMarketplaceInput(value);
-    return (
-      CODEX_PLUGIN_MARKETPLACES.find((item) => item.url === normalized) ||
-      CODEX_PLUGIN_MARKETPLACES[0]
-    );
-  }
-
   function getCodexToolboxLayout(tab) {
-    if (tab === "market") {
-      return {
-        showMarketplaceList: false,
-        showSessionBindings: false,
-        showRemoteBindings: false,
-      };
-    }
     if (tab === "session") {
       return {
-        showMarketplaceList: false,
         showSessionBindings: false,
         showRemoteBindings: false,
       };
     }
     return {
-      showMarketplaceList: false,
       showSessionBindings: false,
       showRemoteBindings: true,
     };
@@ -228,14 +165,22 @@
     return { kind: hasCredential ? "bound" : "unbound", hasCredential, showQr: false, busy: false, channel };
   }
 
-  function matchesPluginFilter(plugin, filter = "all", query = "") {
-    const text = String(plugin?.text || "").toLowerCase();
-    const normalizedQuery = String(query || "").trim().toLowerCase();
-    if (normalizedQuery && !text.includes(normalizedQuery)) return false;
-    if (filter === "enabled") return !!plugin?.enabled;
-    if (filter === "repair") return !!plugin?.needsRepair;
-    if (filter === "installed") return !!plugin?.installed;
-    return true;
+  function sanitizeMobileLogValue(value) {
+    const secretKeys = new Set([
+      "appSecret", "app_secret", "botToken", "bot_token", "apiKey", "api_key",
+      "accessKey", "ticket", "authorization",
+    ]);
+    if (typeof value === "string") {
+      return value
+        .replace(/([?&](?:access_key|ticket|token|secret|authorization|app_secret|bot_token|api[_-]?key)=)[^&#\s]*/gi, "$1***")
+        .replace(/\b(access_key|ticket|token|secret|authorization|app_secret|bot_token|api[_-]?key)\s*[=:]\s*([^\s,&;\]\}"']+)/gi, "$1=***");
+    }
+    if (Array.isArray(value)) return value.map((item) => sanitizeMobileLogValue(item));
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+      key,
+      secretKeys.has(key) && typeof item === "string" && item ? "***" : sanitizeMobileLogValue(item),
+    ]));
   }
 
   function getCodexSessionMetrics(toolbox) {
@@ -264,17 +209,19 @@
       ["Claude", current.claude],
       ["Codex", current.codex],
       ["Grok", current.grok],
+      ["Gemini", current.gemini],
     ].filter(([, name]) => Boolean(name));
     const title = entries.length
       ? entries.map(([type, name]) => `${type}: ${name}`).join(" · ")
       : (isZh ? "尚未启用配置" : "No active configuration");
 
     if (page === "claude") return { label: "Claude", name: current.claude || inactive, title };
-    if (["codex", "plugins", "sessions", "mobile"].includes(page)) {
+    if (["codex", "sessions", "mobile"].includes(page)) {
       return { label: "Codex", name: current.codex || inactive, title };
     }
     if (page === "grok") return { label: "Grok", name: current.grok || inactive, title };
-    if (page === "configurations") {
+    if (page === "gemini") return { label: "Gemini", name: current.gemini || inactive, title };
+    if (page === "add-provider") {
       const total = Number(current.total) || 0;
       return {
         label: isZh ? "配置" : "Configs",
@@ -289,28 +236,69 @@
     };
   }
 
+  // 用量监控时间范围（unix 秒，前后端过滤均含端点）。两个易混概念的准确语义：
+  // - today：自然日，本地今天 00:00:00 → 23:59:59（凌晨零点到当天晚上零点）
+  // - 1d：滚动窗口，当前时刻往前推整 24 小时 → 当前时刻
+  // 其余：7d/14d/30d = (N-1) 天前本地零点 → 当前时刻（近 N 天，含今天）；
+  // all = 不限；custom = 用户输入（未填开始默认最近 24 小时）。
+  function resolveUsageRange(range, opts) {
+    const options = opts || {};
+    const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+    const nowSec = Math.floor(nowMs / 1000);
+    // 先取零点再挪日历日，避免用 86400000 毫秒近似“一天”在夏令时切换日出错
+    const localMidnight = (daysAgo) => {
+      const d = new Date(nowMs);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - daysAgo);
+      return Math.floor(d.getTime() / 1000);
+    };
+    switch (range) {
+      case "today":
+        // 结束边界是次日零点前一秒，而不是“不设上限”：
+        // 保证“今天”严格落在自然日内，与滚动的“24 小时”概念分明
+        return { startTs: localMidnight(0), endTs: localMidnight(-1) - 1 };
+      case "1d":
+        return { startTs: nowSec - 86400, endTs: nowSec };
+      case "7d":
+        return { startTs: localMidnight(6), endTs: nowSec };
+      case "14d":
+        return { startTs: localMidnight(13), endTs: nowSec };
+      case "30d":
+        return { startTs: localMidnight(29), endTs: nowSec };
+      case "custom": {
+        const startTs = Number.isFinite(options.customStartTs)
+          ? options.customStartTs
+          : nowSec - 86400;
+        const endTs =
+          options.customLiveEnd !== false
+            ? nowSec
+            : Number.isFinite(options.customEndTs)
+              ? options.customEndTs
+              : null;
+        return { startTs, endTs };
+      }
+      default:
+        return { startTs: null, endTs: null };
+    }
+  }
+
   return {
-    CODEX_PLUGIN_MARKETPLACE_URL,
-    VARSWITCH_GITHUB_PLUGIN_MARKETPLACE_URL,
-    UPSTREAM_GITCODE_PLUGIN_MARKETPLACE_URL,
-    AWESOME_CODEX_PLUGIN_MARKETPLACE_URL,
-    CODEX_PLUGIN_MARKETPLACES,
     shouldAutoOpenUsageGuide,
     getUpdateActionMode,
     formatVersionTag,
     getEditorPathMode,
     getSwitchOverlayState,
     validateEditorPathInput,
+    resolveUniversalAppBaseUrl,
     normalizeFetchedModels,
-    normalizeCodexPluginMarketplaceInput,
-    getCodexPluginMarketplaceOption,
     getCodexToolboxLayout,
     isFreshMobileQr,
     isQqAuthorizationTarget,
     shouldRenderChannelQr,
     getMobileBindingUiState,
-    matchesPluginFilter,
+    sanitizeMobileLogValue,
     getCodexSessionMetrics,
     getGlobalConfigDisplay,
+    resolveUsageRange,
   };
 });

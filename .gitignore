@@ -67,14 +67,24 @@ tmp/
 temp/
 .cache/
 .playwright-mcp/
+.playwright-cli
 .tmp_xdis*/
+.superpowers
 
 # Local test / extracted scratch outputs
 hi-codex-src/
 hi-codex-src-test/
 
-# Claude local settings
+# Claude local settings (root and nested)
 .claude/settings.local.json
+**/.claude/settings.local.json
+
+# Edge preview browser profile (cookies / login data / session — never commit)
+.edge-preview-profile/
+
+# Build-time linker temp dir: keep the folder (needed by link.exe) but ignore its temp files
+src-tauri/.build-tmp/*
+!src-tauri/.build-tmp/.gitkeep
 
 # Project local files
 PLAN.md
@@ -82,4 +92,13 @@ PLAN.md
 deploy-download-site.bat
 src-tauri/varswitch-profiles.json
 src-tauri/updater.key
-codex-plugins/
+codex-plugins/ 
+
+
+#.config
+.claude
+.github
+.vscode
+.agents
+%USERPROFILE%
+

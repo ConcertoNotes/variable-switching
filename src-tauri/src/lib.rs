@@ -1,3 +1,6 @@
+mod claude_proxy;
+mod usage_stats;
+
 use base64::Engine;
 use image::{DynamicImage, Luma};
 use qrcode::{EcLevel, QrCode};
@@ -10,9 +13,9 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
-use std::sync::{Condvar, Mutex};
+use std::sync::{mpsc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
@@ -44,6 +47,22 @@ const XAI_MODEL_ENV: &str = "XAI_MODEL";
 const GROK_API_KEY_ENV: &str = "GROK_API_KEY";
 const GROK_BASE_URL_ENV: &str = "GROK_BASE_URL";
 const DEFAULT_XAI_BASE_URL: &str = "https://api.x.ai/v1";
+const GEMINI_API_KEY_ENV: &str = "GEMINI_API_KEY";
+const GOOGLE_GEMINI_BASE_URL_ENV: &str = "GOOGLE_GEMINI_BASE_URL";
+const GEMINI_MODEL_ENV: &str = "GEMINI_MODEL";
+const CODEX_IMAGE_API_KEY_ENV: &str = "VARSWITCH_IMAGE_API_KEY";
+const CODEX_IMAGE_BASE_URL_ENV: &str = "VARSWITCH_IMAGE_BASE_URL";
+const CODEX_IMAGE_MODEL_ENV: &str = "VARSWITCH_IMAGE_MODEL";
+const CODEX_IMAGE_MODEL: &str = "gpt-image-2";
+const CODEX_IMAGE_SKILL_ID: &str = "varswitch-imagegen";
+const CODEX_IMAGE_PRIORITY_START: &str = "<!-- VARSWITCH:IMAGE-SKILL-PRIORITY:START -->";
+const CODEX_IMAGE_PRIORITY_END: &str = "<!-- VARSWITCH:IMAGE-SKILL-PRIORITY:END -->";
+const CODEX_IMAGE_PRIORITY_INSTRUCTIONS: &str = r#"<!-- VARSWITCH:IMAGE-SKILL-PRIORITY:START -->
+## VarSwitch image generation routing
+
+- For image creation or rendering requests, prefer `varswitch-imagegen` and read its `SKILL.md` before selecting an image-generation path.
+- Keep the built-in `imagegen` available as fallback. Use it when `varswitch-imagegen` is missing, not configured, or fails, or when the user explicitly requests the built-in path.
+<!-- VARSWITCH:IMAGE-SKILL-PRIORITY:END -->"#;
 /// VarSwitch 在 ~/.grok/config.toml 中管理的模型段 ID
 const GROK_MANAGED_MODEL_ID: &str = "varswitch";
 const SWITCH_TOTAL_STEPS: u32 = 6;
@@ -52,15 +71,41 @@ const ENDPOINT_TEST_DEFAULT_TIMEOUT_SECS: u64 = 8;
 const ENDPOINT_TEST_MIN_TIMEOUT_SECS: u64 = 2;
 const ENDPOINT_TEST_MAX_TIMEOUT_SECS: u64 = 30;
 static QQ_QR_ACTIVE: AtomicBool = AtomicBool::new(false);
+// B2: QQ 扫码子进程句柄，用于主动取消
+static QQ_QR_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
+// QQ 扫码轮次。取消或超时后递增，防止旧扫码 worker 清理新一轮子进程。
+static QQ_QR_GENERATION: AtomicU64 = AtomicU64::new(0);
+// 取消与扫码 worker 的状态写入必须串行，避免取消后旧 worker 回写二维码或凭据。
+static QQ_QR_STATE_LOCK: Mutex<()> = Mutex::new(());
 static WECHAT_QR_ACTIVE: AtomicBool = AtomicBool::new(false);
 static LARK_REGISTRATION_ACTIVE: AtomicBool = AtomicBool::new(false);
 static MOBILE_REMOTE_START_ACTIVE: AtomicBool = AtomicBool::new(false);
 static MOBILE_REMOTE_CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
+// B3: 保证看门狗单例，start→stop→start 快速操作不会产生多个看门狗
+static WATCHDOG_ACTIVE: AtomicBool = AtomicBool::new(false);
+// B6: 连接代际计数器，每次新 WS 连接递增，清理时校验代际避免新连接被旧连接收尾代码打翻
+static SMART_CONTROL_WS_GENERATION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+// B16: 飞书/QQ token 缓存（避免每条消息重新鉴权，防止触发限频）
+// 格式：app_id → (token, expiry_unix_secs)
+static LARK_TOKEN_CACHE: OnceLock<Mutex<std::collections::HashMap<String, (String, u64)>>> =
+    OnceLock::new();
+static QQ_TOKEN_CACHE: OnceLock<Mutex<std::collections::HashMap<String, (String, u64)>>> =
+    OnceLock::new();
+// B9: 每通道一把消息处理串行锁，防止并发处理同一通道的消息导致 Codex 乱序响应
+// （完整队列+超时+去重需重构整个消息流，这里做最小化串行互斥）
+static LARK_MSG_LOCK: Mutex<()> = Mutex::new(());
+static QQ_MSG_LOCK: Mutex<()> = Mutex::new(());
+static WECHAT_MSG_LOCK: Mutex<()> = Mutex::new(());
 static LARK_BRIDGE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static LARK_BRIDGE_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static QQ_GATEWAY_ACTIVE: AtomicBool = AtomicBool::new(false);
 static QQ_GATEWAY_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static WECHAT_LISTENER_ACTIVE: AtomicBool = AtomicBool::new(false);
+// B8: 全局写锁，保证多线程并发写 toolbox state 时不互相丢更新
+static TOOLBOX_STATE_WRITE_LOCK: Mutex<()> = Mutex::new(());
+// B18: QQ msg_seq 递增计数器，避免同毫秒并发时碰撞导致平台去重吞消息
+static QQ_MSG_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 static SMART_CONTROL_STATUS_CACHE: Mutex<Option<SmartControlStatus>> = Mutex::new(None);
 static SMART_CONTROL_SERVER_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SMART_CONTROL_SERVER_CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -71,6 +116,12 @@ static SMART_CONTROL_NEXT_REQUEST_ID: OnceLock<Mutex<u64>> = OnceLock::new();
 static SMART_CONTROL_PENDING: OnceLock<(Mutex<HashMap<u64, SmartControlPendingResult>>, Condvar)> =
     OnceLock::new();
 static SMART_CONTROL_EVENT_LOG: OnceLock<Mutex<Vec<SmartControlEvent>>> = OnceLock::new();
+// B9: 各通道最近收到的 message_id 去重缓冲（上限 512 条，防止平台重投消息重复触发 Codex）
+static LARK_SEEN_MSG_IDS: OnceLock<Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
+static QQ_SEEN_MSG_IDS: OnceLock<Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
+// B13: 飞书注册代际计数器，防止旧 worker 把过期凭据覆盖新凭据
+static LARK_REGISTRATION_GENERATION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 static SMART_CONTROL_CLIENT_STATE: OnceLock<Mutex<SmartControlClientState>> = OnceLock::new();
 static SMART_CONTROL_SERVER_CHUNKS: OnceLock<Mutex<HashMap<String, SmartControlChunkAssembly>>> =
     OnceLock::new();
@@ -89,8 +140,23 @@ struct Profile {
     base_url: String,
     #[serde(default)]
     model_id: String,
+    /// anthropic（默认，直连 Anthropic Messages 端点）
+    /// | openai_chat（上游仅有 OpenAI Chat Completions 接口，经本地代理转换协议）
+    #[serde(default = "default_claude_api_format")]
+    api_format: String,
     is_active: bool,
     created_at: String,
+}
+
+fn default_claude_api_format() -> String {
+    "anthropic".to_string()
+}
+
+fn normalize_claude_api_format(raw: &str) -> String {
+    match raw.trim() {
+        "openai_chat" => "openai_chat".to_string(),
+        _ => default_claude_api_format(),
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -107,13 +173,16 @@ struct CodexProfile {
     base_url: String,
     #[serde(default = "default_codex_auth_mode")]
     auth_mode: String,
+    /// 上游协议：responses（OpenAI Responses，默认）| chat（OpenAI Chat Completions）
+    #[serde(default = "default_codex_wire_api")]
+    wire_api: String,
     #[serde(default)]
     model: String,
     #[serde(default)]
     provider_name: String,
     #[serde(default)]
     image_api_key: String,
-    #[serde(default = "default_gpt_image_2_base_url_string")]
+    #[serde(default)]
     image_base_url: String,
     is_active: bool,
     created_at: String,
@@ -122,6 +191,9 @@ struct CodexProfile {
 #[derive(Serialize, Deserialize, Default)]
 struct CodexProfilesData {
     profiles: Vec<CodexProfile>,
+    /// 首次读取旧档案时清理历史默认图片地址；迁移完成后保留用户手动填写的 URL。
+    #[serde(default)]
+    image_base_url_migrated: bool,
 }
 
 /// Grok / xAI API 配置档案（对应 ~/.grok/config.toml 的 [model.*]）
@@ -144,6 +216,37 @@ struct GrokProfile {
 #[derive(Serialize, Deserialize, Default)]
 struct GrokProfilesData {
     profiles: Vec<GrokProfile>,
+}
+
+/// Gemini CLI API Key 配置档案（对应 ~/.gemini/settings.json 与官方环境变量）。
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GeminiProfile {
+    id: String,
+    name: String,
+    api_key: String,
+    base_url: String,
+    #[serde(default)]
+    model: String,
+    is_active: bool,
+    created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct GeminiProfilesData {
+    profiles: Vec<GeminiProfile>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GeminiRuntimeStatus {
+    api_key: String,
+    base_url: String,
+    model: String,
+    auth_type: String,
+    settings_path: String,
+    settings_exists: bool,
+    source: String,
 }
 
 fn default_grok_api_backend() -> String {
@@ -490,16 +593,35 @@ fn default_codex_auth_mode() -> String {
     "auth_json".to_string()
 }
 
+fn default_codex_wire_api() -> String {
+    "responses".to_string()
+}
+
+/// 规范化 Codex 上游协议，只允许 responses / chat 两种取值。
+fn normalize_codex_wire_api(raw: &str) -> String {
+    match raw.trim() {
+        "chat" => "chat".to_string(),
+        _ => default_codex_wire_api(),
+    }
+}
+
+/// 各应用官方 API 默认地址：Base URL 留空时回退到官方端点（与 cc-switch 行为一致）。
+const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
+const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com";
+
+/// trim 后为空则使用默认地址，否则去掉尾部斜杠。
+fn resolve_base_url_or_default(raw: &str, default_url: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        default_url.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn is_codex_official_account_api_quota(auth_mode: &str) -> bool {
     auth_mode == "official_account_api_quota"
-}
-
-fn default_gpt_image_2_base_url() -> &'static str {
-    "https://hk.getelucid.com/v1"
-}
-
-fn default_gpt_image_2_base_url_string() -> String {
-    default_gpt_image_2_base_url().to_string()
 }
 
 #[derive(Serialize)]
@@ -528,6 +650,7 @@ struct LocationStatus {
     base_url: String,
     image_api_key: String,
     image_base_url: String,
+    image_skill_installed: bool,
 }
 
 #[derive(Serialize)]
@@ -537,6 +660,7 @@ struct StatusResult {
     /// 动态编辑器状态: key = 编辑器 id, value = 状态
     editors: HashMap<String, LocationStatus>,
     claude: Option<LocationStatus>,
+    claude_model: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -750,6 +874,7 @@ fn format_compact_time(millis: u128) -> String {
 
 /// 写一条日志：同时输出到控制台（开发期可见）和日志文件（打包后可查）。
 fn app_log(level: &str, msg: &str) {
+    let msg = redact_log_message(msg);
     let line = format!(
         "[{}] [{level}] {msg}",
         format_log_time(chrono_timestamp_millis())
@@ -773,6 +898,71 @@ fn app_log(level: &str, msg: &str) {
             let _ = writeln!(file, "{line}");
         }
     }
+}
+
+/// 日志可能包含平台网关地址或错误原文。统一隐藏 URL 查询参数和常见凭据赋值，
+/// 避免后续新增日志点时意外写入 token、secret 或临时授权票据。
+fn redact_log_message(msg: &str) -> String {
+    let mut output = String::with_capacity(msg.len());
+    let mut remainder = msg;
+    loop {
+        let http = remainder.find("http://");
+        let https = remainder.find("https://");
+        let start = match (http, https) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(a), None) | (None, Some(a)) => a,
+            (None, None) => {
+                output.push_str(remainder);
+                break;
+            }
+        };
+        output.push_str(&remainder[..start]);
+        let url_and_rest = &remainder[start..];
+        let end = url_and_rest
+            .find(char::is_whitespace)
+            .unwrap_or(url_and_rest.len());
+        let url = &url_and_rest[..end];
+        if let Some(query_start) = url.find('?') {
+            output.push_str(&url[..query_start]);
+            output.push_str("?[query-redacted]");
+        } else {
+            output.push_str(url);
+        }
+        remainder = &url_and_rest[end..];
+    }
+
+    const SENSITIVE_MARKERS: [&str; 11] = [
+        "access_key=",
+        "ticket=",
+        "token=",
+        "secret=",
+        "authorization=",
+        "app_secret=",
+        "bot_token=",
+        "appsecret=",
+        "bottoken=",
+        "api_key=",
+        "apikey=",
+    ];
+    for marker in SENSITIVE_MARKERS {
+        let mut search_from = 0;
+        loop {
+            let lower = output[search_from..].to_ascii_lowercase();
+            let Some(relative) = lower.find(marker) else {
+                break;
+            };
+            let value_start = search_from + relative + marker.len();
+            let value_end = output[value_start..]
+                .find(|c: char| {
+                    c.is_whitespace() || matches!(c, '&' | ',' | ';' | ']' | '}' | '"' | '\'')
+                })
+                .map(|offset| value_start + offset)
+                .unwrap_or(output.len());
+            output.replace_range(value_start..value_end, "***");
+            search_from = value_start + 3;
+        }
+    }
+    output
 }
 
 /// 便捷日志宏，用法同 println!：log_info!("xxx {}", v)。
@@ -817,9 +1007,21 @@ fn read_profiles(app: &tauri::AppHandle) -> ProfilesData {
     data
 }
 
+/// 以「仅所有者可读写」的权限写入含敏感信息（API Key / token 等）的文件。
+/// Unix 下写入后设置 0600；Windows 依赖 AppData 默认 ACL（仅当前用户可访问）。
+fn write_private_file(path: &Path, contents: &str) -> Result<(), String> {
+    fs::write(path, contents).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
 fn write_profiles_to_path(path: &PathBuf, data: &ProfilesData) -> Result<(), String> {
     let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+    write_private_file(path, &json)
 }
 
 fn write_profiles(app: &tauri::AppHandle, data: &ProfilesData) -> Result<(), String> {
@@ -834,18 +1036,45 @@ fn codex_profiles_path(app: &tauri::AppHandle) -> PathBuf {
 fn read_codex_profiles(app: &tauri::AppHandle) -> CodexProfilesData {
     let path = codex_profiles_path(app);
     if !path.exists() {
-        return CodexProfilesData::default();
+        return CodexProfilesData {
+            image_base_url_migrated: true,
+            ..CodexProfilesData::default()
+        };
     }
-    fs::read_to_string(&path)
+    let mut data: CodexProfilesData = fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // 图片 Base URL 不设默认值。旧档案只在首次读取时清理一次，确保历史默认值
+    // 为空；迁移完成后用户主动填写的自定义 URL 可以正常保留。
+    let migrated = if data.image_base_url_migrated {
+        false
+    } else {
+        let _ = clear_codex_image_base_urls(&mut data);
+        data.image_base_url_migrated = true;
+        true
+    };
+    if migrated {
+        let _ = write_codex_profiles(app, &data);
+    }
+    data
+}
+
+fn clear_codex_image_base_urls(data: &mut CodexProfilesData) -> bool {
+    let mut changed = false;
+    for profile in &mut data.profiles {
+        if !profile.image_base_url.is_empty() {
+            profile.image_base_url.clear();
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn write_codex_profiles(app: &tauri::AppHandle, data: &CodexProfilesData) -> Result<(), String> {
     let path = codex_profiles_path(app);
     let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+    write_private_file(&path, &json)
 }
 
 fn grok_profiles_path(app: &tauri::AppHandle) -> PathBuf {
@@ -869,6 +1098,26 @@ fn write_grok_profiles(app: &tauri::AppHandle, data: &GrokProfilesData) -> Resul
     fs::write(path, json).map_err(|e| e.to_string())
 }
 
+fn gemini_profiles_path(app: &tauri::AppHandle) -> PathBuf {
+    data_dir(app).join("gemini_profiles.json")
+}
+
+fn read_gemini_profiles(app: &tauri::AppHandle) -> GeminiProfilesData {
+    let path = gemini_profiles_path(app);
+    if !path.exists() {
+        return GeminiProfilesData::default();
+    }
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_gemini_profiles(app: &tauri::AppHandle, data: &GeminiProfilesData) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
+    fs::write(gemini_profiles_path(app), json).map_err(|e| e.to_string())
+}
+
 fn default_xai_base_url() -> String {
     DEFAULT_XAI_BASE_URL.to_string()
 }
@@ -879,6 +1128,10 @@ fn grok_config_dir() -> PathBuf {
 
 fn grok_config_path() -> PathBuf {
     grok_config_dir().join("config.toml")
+}
+
+fn gemini_settings_path() -> PathBuf {
+    home_dir().join(".gemini").join("settings.json")
 }
 
 /// 删除 TOML 中指定 section（含表头与正文），保留其它内容。
@@ -1014,7 +1267,8 @@ fn read_grok_runtime_status() -> GrokRuntimeStatus {
     }
 
     if api_key.is_empty() {
-        if let Some(env_key) = reg_get_env_opt(XAI_API_KEY_ENV).or_else(|| reg_get_env_opt(GROK_API_KEY_ENV))
+        if let Some(env_key) =
+            reg_get_env_opt(XAI_API_KEY_ENV).or_else(|| reg_get_env_opt(GROK_API_KEY_ENV))
         {
             api_key = env_key;
             if source == "none" {
@@ -1057,6 +1311,7 @@ fn read_grok_status() -> Option<LocationStatus> {
         base_url: status.base_url,
         image_api_key: String::new(),
         image_base_url: String::new(),
+        image_skill_installed: false,
     })
 }
 
@@ -1205,6 +1460,99 @@ api_backend = "{api_backend}"
     Ok(())
 }
 
+fn read_gemini_runtime_status() -> GeminiRuntimeStatus {
+    let path = gemini_settings_path();
+    let settings_exists = path.exists();
+    let settings = read_json_or_default(&path, serde_json::json!({}));
+    let auth_type = settings
+        .pointer("/security/auth/selectedType")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let settings_model = settings
+        .pointer("/model/name")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let api_key = reg_get_env_opt(GEMINI_API_KEY_ENV).unwrap_or_default();
+    let base_url = reg_get_env_opt(GOOGLE_GEMINI_BASE_URL_ENV).unwrap_or_default();
+    let model = reg_get_env_opt(GEMINI_MODEL_ENV).unwrap_or(settings_model);
+    let source = if !api_key.is_empty() {
+        "env"
+    } else if settings_exists {
+        "settings.json"
+    } else {
+        "none"
+    };
+
+    GeminiRuntimeStatus {
+        api_key,
+        base_url,
+        model,
+        auth_type,
+        settings_path: path.to_string_lossy().to_string(),
+        settings_exists,
+        source: source.to_string(),
+    }
+}
+
+fn write_gemini_settings(profile: &GeminiProfile) -> Result<(), String> {
+    let path = gemini_settings_path();
+    let mut settings = read_json_or_default(&path, serde_json::json!({}));
+    if !settings.is_object() {
+        settings = serde_json::json!({});
+    }
+
+    if !settings
+        .get("security")
+        .is_some_and(|value| value.is_object())
+    {
+        settings["security"] = serde_json::json!({});
+    }
+    if !settings["security"]
+        .get("auth")
+        .is_some_and(|value| value.is_object())
+    {
+        settings["security"]["auth"] = serde_json::json!({});
+    }
+    settings["security"]["auth"]["selectedType"] = serde_json::json!("gemini-api-key");
+
+    if !settings.get("model").is_some_and(|value| value.is_object()) {
+        settings["model"] = serde_json::json!({});
+    }
+    if profile.model.trim().is_empty() {
+        if let Some(model) = settings
+            .get_mut("model")
+            .and_then(|value| value.as_object_mut())
+        {
+            model.remove("name");
+        }
+    } else {
+        settings["model"]["name"] = serde_json::json!(profile.model.trim());
+    }
+
+    write_json(&path, &settings)
+        .map_err(|error| format!("写入 ~/.gemini/settings.json 失败: {error}"))
+}
+
+fn apply_gemini_to_system_env(profile: &GeminiProfile) -> Result<(), String> {
+    reg_set_env(GEMINI_API_KEY_ENV, profile.api_key.trim())?;
+    if profile.base_url.trim().is_empty() {
+        reg_delete_env(GOOGLE_GEMINI_BASE_URL_ENV)?;
+    } else {
+        reg_set_env(
+            GOOGLE_GEMINI_BASE_URL_ENV,
+            profile.base_url.trim().trim_end_matches('/'),
+        )?;
+    }
+    if profile.model.trim().is_empty() {
+        reg_delete_env(GEMINI_MODEL_ENV)?;
+    } else {
+        reg_set_env(GEMINI_MODEL_ENV, profile.model.trim())?;
+    }
+    Ok(())
+}
+
 fn home_dir() -> PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
@@ -1226,6 +1574,10 @@ fn codex_auth_path() -> PathBuf {
 
 fn codex_config_path() -> PathBuf {
     codex_config_dir().join("config.toml")
+}
+
+fn codex_global_agents_path() -> PathBuf {
+    codex_config_dir().join("AGENTS.md")
 }
 
 fn codex_sessions_root() -> PathBuf {
@@ -1255,6 +1607,7 @@ fn normalize_smart_control_backend_url(value: &str) -> String {
     raw.trim_end_matches('/').to_string()
 }
 
+#[allow(dead_code)]
 fn smart_control_status_from_cache() -> Option<SmartControlStatus> {
     SMART_CONTROL_STATUS_CACHE
         .lock()
@@ -1397,14 +1750,14 @@ fn refresh_smart_control_status_for_state(state: &mut ToolboxState) -> SmartCont
 
 fn smart_control_bind_addr_from_url(base_url: &str) -> String {
     let normalized = normalize_smart_control_backend_url(base_url);
-    reqwest::Url::parse(&normalized)
+    // 安全：本机控制服务（HTTP/WebSocket）没有鉴权，只从 URL 中取端口，
+    // 强制绑定到回环地址，避免因 URL 中出现 0.0.0.0 或局域网 IP 而把无鉴权
+    // 的控制通道暴露给同一局域网内的其他设备。
+    let port = reqwest::Url::parse(&normalized)
         .ok()
-        .and_then(|url| {
-            let host = url.host_str()?.to_string();
-            let port = url.port_or_known_default().unwrap_or(3847);
-            Some(format!("{host}:{port}"))
-        })
-        .unwrap_or_else(|| "127.0.0.1:3847".into())
+        .and_then(|url| url.port_or_known_default())
+        .unwrap_or(3847);
+    format!("127.0.0.1:{port}")
 }
 
 fn smart_control_http_response(status: &str, content_type: &str, body: &str) -> String {
@@ -1482,23 +1835,39 @@ fn websocket_send_pong(stream: &mut TcpStream, payload: &[u8]) -> Result<(), Str
         .map_err(|e| format!("发送 WebSocket pong 失败: {e}"))
 }
 
-fn websocket_read_text_frame(stream: &mut TcpStream) -> Result<Option<String>, String> {
+// B6: timeout 与 EOF 使用不同返回值区分：
+//   Ok(None)         → 对端正常关闭（EOF/ConnectionReset）
+//   Err("__timeout__") → 读超时，调用方应发 ping 继续等
+//   Err(msg)         → 其他错误，断开
+// B19: fragment_buf 用于累积分片帧（opcode 0x0 continuation），
+//      首片(opcode=0x1, FIN=0)开始写入，末片(opcode=0x0, FIN=1)完成后返回完整消息
+fn websocket_read_text_frame(
+    stream: &mut TcpStream,
+    fragment_buf: &mut Vec<u8>,
+) -> Result<Option<String>, String> {
     let mut head = [0u8; 2];
     match stream.read_exact(&mut head) {
         Ok(()) => {}
         Err(error)
             if matches!(
                 error.kind(),
-                std::io::ErrorKind::WouldBlock
-                    | std::io::ErrorKind::TimedOut
-                    | std::io::ErrorKind::UnexpectedEof
-                    | std::io::ErrorKind::ConnectionReset
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            // B6: 超时 → 返回特殊标记，调用方发 ping 继续等
+            return Err("__timeout__".into());
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset
             ) =>
         {
             return Ok(None);
         }
         Err(error) => return Err(format!("读取 WebSocket 帧头失败: {error}")),
     }
+    let fin = (head[0] & 0x80) != 0;
     let opcode = head[0] & 0x0f;
     let masked = (head[1] & 0x80) != 0;
     let mut len = (head[1] & 0x7f) as usize;
@@ -1535,8 +1904,37 @@ fn websocket_read_text_frame(stream: &mut TcpStream) -> Result<Option<String>, S
             *byte ^= mask[idx % 4];
         }
     }
+    // 安全：分片消息在 fragment_buf 中累积。单帧大小已受 8MB 上限约束，但需要额外
+    // 限制整条消息的累积总量，防止对端用大量续帧持续累积导致内存耗尽。
+    const WS_MAX_MESSAGE: usize = 64 * 1024 * 1024;
+    if opcode == 0x0 && fragment_buf.len().saturating_add(payload.len()) > WS_MAX_MESSAGE {
+        fragment_buf.clear();
+        return Err("WebSocket 分片消息过大".into());
+    }
     match opcode {
-        0x1 => Ok(Some(String::from_utf8_lossy(&payload).to_string())),
+        0x1 if fin => {
+            // 单帧完整文本消息
+            fragment_buf.clear();
+            Ok(Some(String::from_utf8_lossy(&payload).to_string()))
+        }
+        0x1 => {
+            // B19: 首片，FIN=0，开始累积
+            fragment_buf.clear();
+            fragment_buf.extend_from_slice(&payload);
+            Ok(Some(String::new())) // 还未完整，返回空表示继续
+        }
+        0x0 if fin => {
+            // B19: 末片，拼完整消息
+            fragment_buf.extend_from_slice(&payload);
+            let complete = String::from_utf8_lossy(fragment_buf).to_string();
+            fragment_buf.clear();
+            Ok(Some(complete))
+        }
+        0x0 => {
+            // B19: 中间片，继续累积
+            fragment_buf.extend_from_slice(&payload);
+            Ok(Some(String::new()))
+        }
         0x8 => Ok(None),
         0x9 => {
             let _ = websocket_send_pong(stream, &payload);
@@ -2389,6 +2787,23 @@ fn smart_control_not_found(path: &str) -> String {
     .replacen("HTTP/1.1 200 OK", "HTTP/1.1 404 Not Found", 1)
 }
 
+/// 校验 HTTP Host 头是否指向本机回环地址。
+/// 用于 DNS 重绑定防护：服务虽只绑定 127.0.0.1，但恶意网页可把某个域名
+/// 重绑定到 127.0.0.1 后访问本地服务，因此需要额外校验 Host 头。
+fn smart_control_host_is_local(host_header: &str) -> bool {
+    let host = host_header.trim();
+    if host.is_empty() {
+        return false;
+    }
+    // 去掉端口；IPv6 形如 [::1]:3847
+    let hostname = if let Some(rest) = host.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        host.split(':').next().unwrap_or("")
+    };
+    matches!(hostname, "127.0.0.1" | "localhost" | "::1")
+}
+
 fn read_http_request_head(stream: &mut TcpStream) -> Result<String, String> {
     stream
         .set_read_timeout(Some(Duration::from_secs(3)))
@@ -2417,6 +2832,17 @@ fn handle_smart_control_http_connection(mut stream: TcpStream) -> Result<(), Str
     let method = parts.next().unwrap_or_default();
     let raw_path = parts.next().unwrap_or("/");
     let path = raw_path.split('?').next().unwrap_or(raw_path);
+    // 安全：DNS 重绑定防护。仅接受指向本机回环的 Host，阻止恶意网页
+    // 通过把域名解析到 127.0.0.1 来访问本地无鉴权控制服务。
+    if !smart_control_host_is_local(http_header_value(&head, "host").unwrap_or("")) {
+        let response = smart_control_http_response(
+            "403 Forbidden",
+            "application/json",
+            "{\"ok\":false,\"error\":\"forbidden_host\"}",
+        );
+        let _ = stream.write_all(response.as_bytes());
+        return Ok(());
+    }
     if method == "GET"
         && path == "/backend-api/wham/remote/control/server"
         && is_websocket_upgrade(&head)
@@ -2429,6 +2855,8 @@ fn handle_smart_control_http_connection(mut stream: TcpStream) -> Result<(), Str
             .map_err(|e| format!("写入 WebSocket 握手响应失败: {e}"))?;
         SMART_CONTROL_REMOTE_CONNECTED.store(true, Ordering::SeqCst);
         smart_control_reset_client_state();
+        // B6: 每次新连接分配唯一代际 id，退出时校验后再清全局状态，避免新连接被旧连接收尾代码打翻
+        let my_gen = SMART_CONTROL_WS_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
         if let Ok(writer) = stream.try_clone() {
             if let Ok(mut guard) = SMART_CONTROL_WS_WRITER.lock() {
                 *guard = Some(writer);
@@ -2442,28 +2870,50 @@ fn handle_smart_control_http_connection(mut stream: TcpStream) -> Result<(), Str
             detail: "Codex 已建立 remote-control WebSocket，等待协议事件。".into(),
             checked_at: chrono_now(),
         });
+        // B6: 每 30 秒超时后发 ping，连续 3 次无应答（90 秒空闲）才判定断线
         stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
         let _ = smart_control_send_json(&smart_control_build_ping_envelope());
+        let mut consecutive_timeouts: u32 = 0;
+        // B19: 分片帧累积缓冲区
+        let mut fragment_buf: Vec<u8> = Vec::new();
         loop {
-            match websocket_read_text_frame(&mut stream) {
-                Ok(Some(text)) if text.trim().is_empty() => continue,
+            match websocket_read_text_frame(&mut stream, &mut fragment_buf) {
+                Ok(Some(text)) if text.trim().is_empty() => {
+                    // pong 或空帧 → 重置超时计数
+                    consecutive_timeouts = 0;
+                    continue;
+                }
                 Ok(Some(text)) => {
+                    consecutive_timeouts = 0;
                     log_info!(
                         "[smart-control][ws] received frame: {}",
                         smart_control_preview(&text, 240)
                     );
                     remember_smart_control_event(&text);
                 }
-                Ok(None) => break,
+                Ok(None) => break, // 正常关闭（EOF / ConnectionReset）
+                Err(e) if e == "__timeout__" => {
+                    // B6: 超时不等于断线，发 ping 继续等；连续 3 次（90 秒）无响应才断
+                    consecutive_timeouts += 1;
+                    if consecutive_timeouts >= 3 {
+                        log_info!("[smart-control][ws] 持续 90s 无活动，主动关闭连接");
+                        break;
+                    }
+                    let _ = smart_control_send_json(&smart_control_build_ping_envelope());
+                }
                 Err(error) => {
                     log_warn!("[smart-control][ws] frame read failed: {}", error);
                     break;
                 }
             }
         }
-        SMART_CONTROL_REMOTE_CONNECTED.store(false, Ordering::SeqCst);
-        if let Ok(mut guard) = SMART_CONTROL_WS_WRITER.lock() {
-            *guard = None;
+        // B6: 仅在代际匹配时才清全局状态，避免新连接状态被旧连接收尾代码覆盖
+        let current_gen = SMART_CONTROL_WS_GENERATION.load(Ordering::SeqCst);
+        if current_gen == my_gen {
+            SMART_CONTROL_REMOTE_CONNECTED.store(false, Ordering::SeqCst);
+            if let Ok(mut guard) = SMART_CONTROL_WS_WRITER.lock() {
+                *guard = None;
+            }
         }
         return Ok(());
     }
@@ -2554,6 +3004,15 @@ fn start_smart_control_server(app: tauri::AppHandle, backend_url: String) {
         while !SMART_CONTROL_SERVER_CANCEL_REQUESTED.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((stream, _addr)) => {
+                    // nonblocking listener 接受的 socket 在 Windows 上也会保持非阻塞；
+                    // 请求刚到达时直接 read 会返回 WSAEWOULDBLOCK (10035)。
+                    if let Err(error) = stream.set_nonblocking(false) {
+                        log_warn!(
+                            "[smart-control] set accepted socket blocking failed: {}",
+                            error
+                        );
+                        continue;
+                    }
                     std::thread::spawn(move || {
                         if let Err(error) = handle_smart_control_http_connection(stream) {
                             log_warn!("[smart-control] request failed: {}", error);
@@ -2595,32 +3054,223 @@ fn codex_config_toml_content(
         model,
         base_url,
         api_key,
+        "responses",
         official_account_mode,
         "",
         "",
     )
 }
 
-fn gpt_image_2_config_toml_section(image_api_key: &str, image_base_url: &str) -> String {
-    let key = image_api_key.trim();
-    if key.is_empty() {
-        return String::new();
-    }
-    let base_url = if image_base_url.trim().is_empty() {
-        default_gpt_image_2_base_url().to_string()
-    } else {
-        image_base_url.trim().trim_end_matches('/').to_string()
-    };
+fn codex_image_skill_dir() -> PathBuf {
+    codex_config_dir().join("skills").join(CODEX_IMAGE_SKILL_ID)
+}
+
+fn codex_image_skill_script_path() -> PathBuf {
+    codex_image_skill_dir()
+        .join("scripts")
+        .join("generate-image.ps1")
+}
+
+fn codex_image_skill_manifest(script_path: &Path) -> String {
     format!(
-        r#"
-[gpt_image_2]
-api_key = "{api_key}"
-base_url = "{base_url}"
-model = "gpt-image-2"
+        r#"---
+name: varswitch-imagegen
+description: Use when the user asks to create, generate, or render an image and VarSwitch image settings are available. This is the preferred image-generation Skill over the built-in imagegen path while configured.
+---
+
+# VarSwitch Image Generation
+
+Use the configured image endpoint through the bundled script as the first choice for image generation. Keep the built-in `imagegen` as fallback only when this Skill is missing, not configured, or fails, or when the user explicitly requests the built-in path. Never print or copy image API credentials into chat, commands, logs, or generated files.
+
+Run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{script_path}" -Prompt "<prompt>" -OutputPath "<absolute-output-path.png>" -Size "1024x1024"
+```
+
+- Use an absolute output path inside the current workspace unless the user requests another location.
+- Supported default sizes are `1024x1024`, `1536x1024`, and `1024x1536`; pass through another size only when the configured provider supports it.
+- After the script succeeds, inspect the saved image with the available image viewing tool before handing it off.
+- If configuration is missing, tell the user to configure and enable the Codex Image Skill in VarSwitch, then restart Codex.
 "#,
-        api_key = escape_toml_string_value(key),
-        base_url = escape_toml_string_value(&base_url),
+        script_path = script_path.display()
     )
+}
+
+fn codex_image_skill_script() -> &'static str {
+    r##"param(
+  [Parameter(Mandatory = $true)][string]$Prompt,
+  [Parameter(Mandatory = $true)][string]$OutputPath,
+  [string]$Size = "1024x1024"
+)
+
+$ErrorActionPreference = "Stop"
+
+function Get-VarSwitchImageSetting([string]$Name) {
+  $value = [Environment]::GetEnvironmentVariable($Name, "Process")
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    $value = [Environment]::GetEnvironmentVariable($Name, "User")
+  }
+  return $value
+}
+
+$apiKey = Get-VarSwitchImageSetting "VARSWITCH_IMAGE_API_KEY"
+$baseUrl = Get-VarSwitchImageSetting "VARSWITCH_IMAGE_BASE_URL"
+$model = Get-VarSwitchImageSetting "VARSWITCH_IMAGE_MODEL"
+
+if ([string]::IsNullOrWhiteSpace($apiKey) -or [string]::IsNullOrWhiteSpace($baseUrl)) {
+  throw "VarSwitch image generation is not configured. Enable a Codex profile with image settings and restart Codex."
+}
+if ([string]::IsNullOrWhiteSpace($model)) {
+  $model = "gpt-image-2"
+}
+
+$endpoint = $baseUrl.TrimEnd('/') + "/images/generations"
+$headers = @{ Authorization = "Bearer $apiKey" }
+$payload = @{
+  model = $model
+  prompt = $Prompt
+  size = $Size
+} | ConvertTo-Json -Compress
+
+$response = Invoke-RestMethod -Method Post -Uri $endpoint -Headers $headers -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($payload))
+if (-not $response.data -or $response.data.Count -lt 1) {
+  throw "The image API returned no image data."
+}
+
+$resolvedPath = [IO.Path]::GetFullPath($OutputPath)
+$parent = Split-Path -Parent $resolvedPath
+if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+  New-Item -ItemType Directory -Path $parent -Force | Out-Null
+}
+
+$image = $response.data[0]
+if (-not [string]::IsNullOrWhiteSpace($image.b64_json)) {
+  [IO.File]::WriteAllBytes($resolvedPath, [Convert]::FromBase64String($image.b64_json))
+} elseif (-not [string]::IsNullOrWhiteSpace($image.url)) {
+  Invoke-WebRequest -UseBasicParsing -Uri $image.url -OutFile $resolvedPath
+} else {
+  throw "The image API response contains neither b64_json nor url."
+}
+
+@{ success = $true; path = $resolvedPath; model = $model } | ConvertTo-Json -Compress
+"##
+}
+
+fn install_codex_image_skill_at(skill_dir: &Path) -> Result<(), String> {
+    let script_path = skill_dir.join("scripts").join("generate-image.ps1");
+    let scripts_dir = script_path
+        .parent()
+        .ok_or("无法确定 Codex 图片 Skill 脚本目录")?;
+    fs::create_dir_all(scripts_dir).map_err(|e| format!("创建 Codex 图片 Skill 目录失败: {e}"))?;
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        codex_image_skill_manifest(&script_path),
+    )
+    .map_err(|e| format!("写入 Codex 图片 Skill 说明失败: {e}"))?;
+    fs::write(&script_path, codex_image_skill_script())
+        .map_err(|e| format!("写入 Codex 图片生成脚本失败: {e}"))?;
+    Ok(())
+}
+
+fn install_codex_image_skill() -> Result<(), String> {
+    install_codex_image_skill_at(&codex_image_skill_dir())
+}
+
+fn remove_codex_image_skill() -> Result<(), String> {
+    let dir = codex_image_skill_dir();
+    if dir.exists() {
+        fs::remove_dir_all(&dir).map_err(|e| format!("移除 Codex 图片 Skill 失败: {e}"))?;
+    }
+    Ok(())
+}
+
+fn merge_codex_image_priority_instructions(existing: &str, enabled: bool) -> String {
+    let mut output = existing.to_string();
+
+    while let Some(start) = output.find(CODEX_IMAGE_PRIORITY_START) {
+        let Some(relative_end) = output[start..].find(CODEX_IMAGE_PRIORITY_END) else {
+            break;
+        };
+        let end = start + relative_end + CODEX_IMAGE_PRIORITY_END.len();
+        let removal_start =
+            if output.as_bytes().get(start.saturating_sub(2)..start) == Some(b"\r\n") {
+                start - 2
+            } else if start > 0 && output.as_bytes()[start - 1] == b'\n' {
+                start - 1
+            } else {
+                start
+            };
+        output.replace_range(removal_start..end, "");
+    }
+
+    if !enabled {
+        return output;
+    }
+    if output.is_empty() {
+        return CODEX_IMAGE_PRIORITY_INSTRUCTIONS.to_string();
+    }
+
+    let newline = if existing.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    output.push_str(newline);
+    if newline == "\r\n" {
+        output.push_str(&CODEX_IMAGE_PRIORITY_INSTRUCTIONS.replace('\n', "\r\n"));
+    } else {
+        output.push_str(CODEX_IMAGE_PRIORITY_INSTRUCTIONS);
+    }
+    output
+}
+
+fn configure_codex_image_priority_instructions(enabled: bool) -> Result<(), String> {
+    let path = codex_global_agents_path();
+    if !enabled && !path.exists() {
+        return Ok(());
+    }
+
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let updated = merge_codex_image_priority_instructions(&existing, enabled);
+    if updated == existing {
+        return Ok(());
+    }
+
+    fs::create_dir_all(codex_config_dir()).map_err(|e| format!("创建 Codex 配置目录失败: {e}"))?;
+    fs::write(&path, updated).map_err(|e| format!("写入 Codex 全局指令失败: {e}"))
+}
+
+fn configure_codex_image_skill(profile: &CodexProfile) -> Result<(), String> {
+    // 图片 Skill 只有在 Key 与 URL 都由用户明确填写时才启用。绝不回退到内置地址。
+    if profile.image_api_key.trim().is_empty() || profile.image_base_url.trim().is_empty() {
+        for name in [
+            CODEX_IMAGE_API_KEY_ENV,
+            CODEX_IMAGE_BASE_URL_ENV,
+            CODEX_IMAGE_MODEL_ENV,
+        ] {
+            if reg_get_env_opt(name).is_some() {
+                reg_delete_env(name)?;
+            }
+        }
+        remove_codex_image_skill()?;
+        configure_codex_image_priority_instructions(false)?;
+        broadcast_env_change();
+        return Ok(());
+    }
+
+    let base_url = profile
+        .image_base_url
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    reg_set_env(CODEX_IMAGE_API_KEY_ENV, profile.image_api_key.trim())?;
+    reg_set_env(CODEX_IMAGE_BASE_URL_ENV, &base_url)?;
+    reg_set_env(CODEX_IMAGE_MODEL_ENV, CODEX_IMAGE_MODEL)?;
+    install_codex_image_skill()?;
+    configure_codex_image_priority_instructions(true)?;
+    broadcast_env_change();
+    Ok(())
 }
 
 fn codex_config_toml_content_with_image(
@@ -2628,12 +3278,13 @@ fn codex_config_toml_content_with_image(
     model: &str,
     base_url: &str,
     api_key: &str,
+    wire_api: &str,
     official_account_mode: bool,
-    image_api_key: &str,
-    image_base_url: &str,
+    _image_api_key: &str,
+    _image_base_url: &str,
 ) -> String {
     if official_account_mode {
-        let mut content = format!(
+        let content = format!(
             r#"model_provider = "customer"
 model = "gpt-5.5"
 review_model = "gpt-5.5"
@@ -2653,13 +3304,9 @@ experimental_bearer_token = "{api_key}"
             api_key = api_key,
             chatgpt_base_url = smart_control_backend_api_url(),
         );
-        content.push_str(&gpt_image_2_config_toml_section(
-            image_api_key,
-            image_base_url,
-        ));
         content
     } else {
-        let mut content = format!(
+        let content = format!(
             r#"model_provider = "{provider}"
 model = "{model}"
 chatgpt_base_url = "{chatgpt_base_url}"
@@ -2667,18 +3314,15 @@ chatgpt_base_url = "{chatgpt_base_url}"
 [model_providers.{provider}]
 name = "{provider}"
 base_url = "{base_url}"
-wire_api = "responses"
+wire_api = "{wire_api}"
 requires_openai_auth = true
 "#,
             provider = provider,
             model = model,
             base_url = base_url,
+            wire_api = normalize_codex_wire_api(wire_api),
             chatgpt_base_url = smart_control_backend_api_url(),
         );
-        content.push_str(&gpt_image_2_config_toml_section(
-            image_api_key,
-            image_base_url,
-        ));
         content
     }
 }
@@ -2711,24 +3355,16 @@ fn write_codex_config_with_base_url(profile: &CodexProfile, base_url: &str) -> R
     } else {
         profile.model.clone()
     };
-    let image_base_url = if profile.image_base_url.trim().is_empty() {
-        default_gpt_image_2_base_url().to_string()
-    } else {
-        profile
-            .image_base_url
-            .trim()
-            .trim_end_matches('/')
-            .to_string()
-    };
     let toml_content = if official_account_mode {
         codex_config_toml_content_with_image(
             &provider,
             &model,
             base_url,
             &profile.api_key,
+            &profile.wire_api,
             true,
             &profile.image_api_key,
-            &image_base_url,
+            &profile.image_base_url,
         )
     } else {
         let auth_path = codex_auth_path();
@@ -2750,16 +3386,18 @@ fn write_codex_config_with_base_url(profile: &CodexProfile, base_url: &str) -> R
             );
         }
         let auth_str = serde_json::to_string_pretty(&auth).map_err(|e| e.to_string())?;
-        fs::write(&auth_path, auth_str).map_err(|e| format!("写入 codex auth.json 失败: {}", e))?;
+        write_private_file(&auth_path, &auth_str)
+            .map_err(|e| format!("写入 codex auth.json 失败: {}", e))?;
 
         codex_config_toml_content_with_image(
             &provider,
             &model,
             base_url,
             &profile.api_key,
+            &profile.wire_api,
             false,
             &profile.image_api_key,
-            &image_base_url,
+            &profile.image_base_url,
         )
     };
     let final_toml = merge_codex_config_with_preserved_sections(&toml_content, &existing_config);
@@ -2814,14 +3452,20 @@ fn read_codex_status() -> Option<LocationStatus> {
             .unwrap_or_default()
     };
 
-    let image_api_key = toml_section_value(&config_str, "gpt_image_2", "api_key");
-    let image_base_url = toml_section_value(&config_str, "gpt_image_2", "base_url");
+    let image_api_key = reg_get_env_opt(CODEX_IMAGE_API_KEY_ENV)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| toml_section_value(&config_str, "gpt_image_2", "api_key"));
+    let image_base_url = reg_get_env_opt(CODEX_IMAGE_BASE_URL_ENV)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| toml_section_value(&config_str, "gpt_image_2", "base_url"));
 
     Some(LocationStatus {
         api_key,
         base_url,
         image_api_key,
         image_base_url,
+        image_skill_installed: codex_image_skill_dir().join("SKILL.md").exists()
+            && codex_image_skill_script_path().exists(),
     })
 }
 
@@ -3067,9 +3711,31 @@ fn default_mobile_channel(channel: &str) -> MobileChannelBinding {
 }
 
 fn write_toolbox_state(app: &tauri::AppHandle, state: &ToolboxState) -> Result<(), String> {
+    // B8: 全局写锁，保证多线程并发时不互相丢更新
+    let _write_guard = TOOLBOX_STATE_WRITE_LOCK
+        .lock()
+        .map_err(|e| format!("获取状态写锁失败: {e}"))?;
     let path = toolbox_state_path(app);
     let json = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+    // B8: 临时文件写入后 rename 原子替换，避免进程崩溃时写一半清空文件
+    let tmp_path = path.with_extension("json.tmp");
+    fs::write(&tmp_path, &json).map_err(|e| format!("写入临时状态文件失败: {e}"))?;
+    // B5: Windows 下设置文件权限为当前用户独占，Linux/macOS 设 0600（只有所有者可读写）
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        let _ = fs::set_permissions(&tmp_path, perms);
+    }
+    #[cfg(windows)]
+    {
+        // Windows 没有 POSIX 权限位，依赖文件系统 ACL（默认只有创建者有完全控制）
+        // 如需更严格，可用 winapi 设 ACL，但常规场景下 AppData 已足够隐私
+    }
+    fs::rename(&tmp_path, &path).map_err(|e| {
+        let _ = fs::remove_file(&tmp_path);
+        format!("原子替换状态文件失败: {e}")
+    })
 }
 
 const OPENAI_BUNDLED_MARKETPLACE_NAME: &str = "openai-bundled";
@@ -4489,6 +5155,10 @@ fn normalize_mobile_base_url(value: &str, channel: &str) -> String {
     if !raw.is_empty() && !raw.starts_with("http://") && !raw.starts_with("https://") {
         raw = format!("https://{raw}");
     }
+    // B5: Bearer token 走明文 http 会泄露凭据，强制升级为 https
+    if raw.starts_with("http://") {
+        raw = format!("https://{}", &raw["http://".len()..]);
+    }
     raw.trim_end_matches('/').to_string()
 }
 
@@ -4664,62 +5334,18 @@ fn probe_qq_channel(
 }
 
 fn probe_wechat_channel(
-    client: &reqwest::blocking::Client,
+    _client: &reqwest::blocking::Client,
     binding: &MobileChannelBinding,
 ) -> Result<(String, String), String> {
+    // B17: 不再用 notifystart 当探活（语义重复且会让 start_wechat_listener 再次 notifystart 两次）
+    // 只做凭据格式校验 + URL 规范化，真正的 notifystart 由 start_wechat_listener 调用
     if !mobile_channel_has_credentials(binding) {
         return Err(mobile_channel_credential_hint("wechat").into());
     }
     let base_url = normalize_mobile_base_url(&binding.base_url, "wechat");
-    let response = client
-        .post(format!("{base_url}/ilink/bot/msg/notifystart"))
-        .header("AuthorizationType", "ilink_bot_token")
-        .header(
-            "Authorization",
-            format!("Bearer {}", binding.bot_token.trim()),
-        )
-        .header("X-WECHAT-UIN", uuid::Uuid::new_v4().to_string())
-        .header("iLink-App-Id", "bot")
-        .header("iLink-App-ClientVersion", "132100")
-        .json(&serde_json::json!({
-            "base_info": {
-                "channel_version": "2.4.4",
-                "bot_agent": "VarSwitch/1.0"
-            }
-        }))
-        .send()
-        .map_err(|e| format!("微信 iLink 请求失败: {e}"))?;
-    let status = response.status();
-    let body = response
-        .text()
-        .map_err(|e| format!("微信 iLink 响应读取失败: {e}"))?;
-    if !status.is_success() {
-        return Err(format!(
-            "微信 iLink 返回 HTTP {}：{}",
-            status.as_u16(),
-            body
-        ));
-    }
-    if !body.trim().is_empty() {
-        let result: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("微信 iLink 返回不是 JSON: {e}; {body}"))?;
-        if !is_platform_code_ok(&result) {
-            let err_msg = platform_error_message(&result, "接口返回异常");
-            // 微信 iLink bot_token 有时效性，session timeout 提示用户重新绑定
-            if err_msg.to_lowercase().contains("session timeout")
-                || err_msg.to_lowercase().contains("expired")
-            {
-                return Err(format!(
-                    "微信 iLink 会话已过期（bot_token 失效），请清除微信绑定后重新扫码，并在扫码成功后立即开启连接。错误详情：{}",
-                    err_msg
-                ));
-            }
-            return Err(format!("微信 iLink 启动失败：{}", err_msg));
-        }
-    }
     Ok((
         base_url.clone(),
-        format!("微信 iLink 已验证：{}", gateway_url_label(&base_url)),
+        format!("微信 iLink 凭据已验证：{}", gateway_url_label(&base_url)),
     ))
 }
 
@@ -5005,6 +5631,7 @@ async function connectOnce() {
   await new Promise((resolve, reject) => {
     ws = new WebSocket(url);
     let settled = false;
+    let lastPongAt = Date.now(); // B14: 记录最近一次收到心跳 ACK 的时间
     const fail = (error) => {
       clearHeartbeat();
       if (!settled) {
@@ -5021,6 +5648,11 @@ async function connectOnce() {
         return;
       }
       if (payload.s != null) ws.nextSeq = payload.s;
+      // B14: op 11 = HeartbeatACK，更新最近 pong 时间
+      if (payload.op === 11) {
+        lastPongAt = Date.now();
+        return;
+      }
       if (payload.op === 10) {
         const heartbeatMs = Number(payload?.d?.heartbeat_interval || payload?.d?.heartbeatInterval || 30000);
         const t = await token();
@@ -5034,9 +5666,17 @@ async function connectOnce() {
           },
         }));
         clearHeartbeat();
+        lastPongAt = Date.now(); // 刚连接重置计时
         heartbeatTimer = setInterval(() => {
           try {
-            if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: 1, d: ws.nextSeq ?? null }));
+            if (ws?.readyState === WebSocket.OPEN) {
+              // B14: 连续两个心跳周期没收到 ACK 则主动断线重连
+              if (Date.now() - lastPongAt > heartbeatMs * 2 + 5000) {
+                fail(new Error(`QQ 心跳超时（${Math.round((Date.now() - lastPongAt) / 1000)}s 无应答）`));
+                return;
+              }
+              ws.send(JSON.stringify({ op: 1, d: ws.nextSeq ?? null }));
+            }
           } catch {}
         }, Math.max(1000, heartbeatMs));
         return;
@@ -5059,13 +5699,22 @@ async function connectOnce() {
 
 async function main() {
   if (!appId || !appSecret) throw new Error('缺少 QQ AppID/AppSecret');
+  let reconnectDelay = 1000; // B14: 指数退避初始值1s，上限60s
   while (!stopping) {
     try {
       await connectOnce();
+      reconnectDelay = 1000; // B14: 连接成功后重置退避
     } catch (error) {
       if (stopping) break;
-      emit({ type: 'status', message: `QQ 网关断开，准备重连：${error?.message || String(error)}` });
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      const msg = error?.message || String(error);
+      // B14: 鉴权类错误直接 failure 退出，无需重连（避免无限用错误凭据刷接口）
+      if (/401|unauthorized|access_token|invalid_client|appId|appSecret|鉴权/i.test(msg)) {
+        emit({ type: 'failure', message: `QQ 鉴权失败，请重新绑定：${msg}` });
+        process.exit(1);
+      }
+      emit({ type: 'status', message: `QQ 网关断开，${reconnectDelay / 1000}s 后重连：${msg}` });
+      await new Promise((resolve) => setTimeout(resolve, reconnectDelay));
+      reconnectDelay = Math.min(reconnectDelay * 2, 60000); // B14: 指数退避
     } finally {
       clearHeartbeat();
       try { ws?.close(); } catch {}
@@ -5523,13 +6172,22 @@ async function connectOnce() {
 }
 
 async function main() {
+  let reconnectDelay = 1000; // B14: 指数退避初始值1s，上限60s
   while (!stopping) {
     try {
       await connectOnce();
+      reconnectDelay = 1000; // B14: 连接成功后重置退避
     } catch (error) {
       if (stopping) break;
-      emit({ type: 'status', message: `飞书 WebSocket 异常，准备重连：${error?.message || String(error)}` });
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      const msg = error?.message || String(error);
+      // B14: 飞书鉴权类错误（token无效/AppID错误）直接 failure 退出，不重连
+      if (/99991663|99991672|token.*invalid|invalid.*token|AppID.*不|unauthorized|10003/i.test(msg)) {
+        emit({ type: 'failure', message: `飞书鉴权失败，请重新绑定：${msg}` });
+        process.exit(1);
+      }
+      emit({ type: 'status', message: `飞书 WebSocket 异常，${reconnectDelay / 1000}s 后重连：${msg}` });
+      await new Promise((resolve) => setTimeout(resolve, reconnectDelay));
+      reconnectDelay = Math.min(reconnectDelay * 2, 60000); // B14: 指数退避
     } finally {
       if (pingTimer) clearInterval(pingTimer);
       pingTimer = null;
@@ -5944,6 +6602,7 @@ fn start_lark_registration_poll_worker(
     app: tauri::AppHandle,
     device_code: String,
     initial_interval_secs: u64,
+    generation: u64,
 ) {
     std::thread::spawn(move || {
         let client = match build_http_client(15) {
@@ -5955,16 +6614,47 @@ fn start_lark_registration_poll_worker(
             }
         };
         let mut interval = initial_interval_secs.clamp(2, 10);
+        let mut consecutive_errors = 0u32;
         for _ in 0..120 {
             std::thread::sleep(Duration::from_secs(interval));
+            // B13: 代际检查，新注册流程已启动时旧 worker 应退出，不覆盖新凭据
+            if LARK_REGISTRATION_GENERATION.load(Ordering::SeqCst) != generation {
+                log_info!("[mobile-control][lark-reg] generation changed, worker exiting");
+                return;
+            }
             let poll = match poll_lark_registration_device(&client, &device_code) {
-                Ok(poll) => poll,
+                Ok(poll) => {
+                    consecutive_errors = 0; // 成功则重置连续错误计数
+                    poll
+                }
                 Err(error) => {
+                    consecutive_errors += 1;
+                    // 已被新注册流程取代的旧 worker 不再回写错误状态，避免覆盖新流程的 UI 提示
+                    if LARK_REGISTRATION_GENERATION.load(Ordering::SeqCst) != generation {
+                        log_info!(
+                            "[mobile-control][lark-reg] generation changed during error, worker exiting"
+                        );
+                        return;
+                    }
                     update_channel_status(&app, "lark", "飞书注册轮询失败", &error);
-                    LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
-                    return;
+                    // B13: 最多容忍 3 次连续网络错误，避免瞬时抖动中断整个注册流程
+                    if consecutive_errors >= 3 {
+                        log_info!(
+                            "[mobile-control][lark-reg] 3 consecutive errors, worker exiting"
+                        );
+                        LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
+                        return;
+                    }
+                    continue;
                 }
             };
+            // 轮询请求可能持续数秒；请求返回后再次检查，避免清除绑定后旧 worker 回写凭据。
+            if LARK_REGISTRATION_GENERATION.load(Ordering::SeqCst) != generation {
+                log_info!(
+                    "[mobile-control][lark-reg] generation changed after poll, worker exiting"
+                );
+                return;
+            }
             interval = poll.interval_secs.clamp(2, 10);
             let final_status = matches!(
                 poll.status.as_str(),
@@ -5984,6 +6674,27 @@ fn start_lark_registration_poll_worker(
         );
         LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
     });
+}
+
+/// B9: 检查并记录消息ID，返回true=重复消息应忽略，false=新消息
+fn check_and_record_msg_id(
+    store: &OnceLock<Mutex<std::collections::VecDeque<String>>>,
+    id: &str,
+) -> bool {
+    if id.is_empty() {
+        return false;
+    }
+    let deque = store.get_or_init(|| Mutex::new(std::collections::VecDeque::new()));
+    if let Ok(mut guard) = deque.lock() {
+        if guard.iter().any(|s| s.as_str() == id) {
+            return true;
+        }
+        guard.push_back(id.to_string());
+        if guard.len() > 512 {
+            guard.pop_front();
+        }
+    }
+    false
 }
 
 fn json_string<'a>(value: &'a serde_json::Value, keys: &[&str]) -> String {
@@ -6072,10 +6783,11 @@ fn update_mobile_channel_credentials_from_qr(
         if !app_id.trim().is_empty() {
             binding.app_id = app_id.trim().to_string();
         }
-        if !app_secret.trim().is_empty() {
+        // B5: build_toolbox_snapshot 把 secret 掩码成 "*"，防止该掩码值被当成真凭据回写
+        if !app_secret.trim().is_empty() && app_secret.trim() != "*" {
             binding.app_secret = app_secret.trim().to_string();
         }
-        if !bot_token.trim().is_empty() {
+        if !bot_token.trim().is_empty() && bot_token.trim() != "*" {
             binding.bot_token = bot_token.trim().to_string();
         }
         if !account_id.trim().is_empty() {
@@ -6088,6 +6800,10 @@ fn update_mobile_channel_credentials_from_qr(
             binding.user_id = user_id.trim().to_string();
         }
         binding.qr_status = "绑定成功".into();
+        binding.qr_url.clear();
+        binding.qr_data_url.clear();
+        binding.qr_device_code.clear();
+        binding.qr_started_at.clear();
         binding.credential_status = "平台凭据已保存".into();
         binding.last_error.clear();
         binding.updated_at = chrono_now();
@@ -6097,6 +6813,8 @@ fn update_mobile_channel_credentials_from_qr(
     Ok(build_toolbox_snapshot(app))
 }
 
+/// 用后台 Codex CLI `exec resume <thread_id>` 续接指定会话并返回最终回复。
+/// 作为 App 注入不可用时的兜底路径（CLI 与桌面 App 共享 ~/.codex 会话存储）。
 fn run_codex_cli_reply(prompt: &str, cwd: &str, thread_id: &str) -> Result<String, String> {
     let text = prompt.trim();
     if text.is_empty() {
@@ -6149,24 +6867,61 @@ fn run_codex_cli_reply(prompt: &str, cwd: &str, thread_id: &str) -> Result<Strin
     }
     // 关闭 stdin，通知 codex 输入结束，否则 `exec -` 会一直等待。
     drop(child.stdin.take());
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("等待 Codex CLI 回复失败: {e}"))?;
+    // B9: 分离 stdout/stderr 用后台线程排干，主线程以 try_wait() 轮询 + 5 分钟超时，
+    // 避免 wait_with_output() 无限阻塞，也防止 pipe 缓冲区满后子进程反过来卡死。
+    let child_stdout = child.stdout.take();
+    let child_stderr = child.stderr.take();
+    let stdout_handle = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut buf = Vec::new();
+        if let Some(mut out) = child_stdout {
+            let _ = out.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let stderr_handle = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut buf = Vec::new();
+        if let Some(mut err) = child_stderr {
+            let _ = err.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let exit_status = loop {
+        match child
+            .try_wait()
+            .map_err(|e| format!("等待 Codex CLI 失败: {e}"))?
+        {
+            Some(status) => break status,
+            None => {
+                if Instant::now() > deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = fs::remove_file(&output_path);
+                    return Err("Codex CLI 执行超时（5分钟），已强制终止".into());
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
+    };
+    let stdout_bytes = stdout_handle.join().unwrap_or_default();
+    let stderr_bytes = stderr_handle.join().unwrap_or_default();
     let reply = fs::read_to_string(&output_path)
-        .unwrap_or_else(|_| String::from_utf8_lossy(&output.stdout).to_string())
+        .unwrap_or_else(|_| String::from_utf8_lossy(&stdout_bytes).to_string())
         .trim()
         .to_string();
     let _ = fs::remove_file(&output_path);
-    if !output.status.success() {
-        let mut detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !exit_status.success() {
+        let mut detail = String::from_utf8_lossy(&stderr_bytes).trim().to_string();
         if detail.is_empty() {
-            detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            detail = String::from_utf8_lossy(&stdout_bytes).trim().to_string();
         }
         return Err(format!("Codex CLI 执行失败: {detail}"));
     }
     if reply.is_empty() {
         // 退出码成功但没有 last-message 文件时，退回用 stdout 内容。
-        let stdout_text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stdout_text = String::from_utf8_lossy(&stdout_bytes).trim().to_string();
         if !stdout_text.is_empty() {
             return Ok(stdout_text);
         }
@@ -6223,14 +6978,14 @@ fn codex_debug_port() -> Option<u16> {
     codex_debug_port_from_process()
 }
 
-/// 从正在运行的 Codex.exe 命令行里解析 `--remote-debugging-port=<port>`。
+/// 从正在运行的 Codex.exe / ChatGPT.exe 命令行里解析 `--remote-debugging-port=<port>`。
 #[cfg(windows)]
 fn codex_debug_port_from_process() -> Option<u16> {
     let mut cmd = Command::new("powershell");
     cmd.args([
             "-NoProfile",
             "-Command",
-            "Get-CimInstance Win32_Process -Filter \"name='Codex.exe'\" | Select-Object -ExpandProperty CommandLine",
+            "Get-CimInstance Win32_Process -Filter \"name='ChatGPT.exe' OR name='Codex.exe'\" | Select-Object -ExpandProperty CommandLine",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -6244,7 +6999,9 @@ fn codex_debug_port_from_process() -> Option<u16> {
             let rest = &line[idx + marker.len()..];
             let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
             if let Ok(port) = digits.parse::<u16>() {
-                if port > 0 {
+                // 命令行里带参数不代表端口已在监听（进程可能刚启动、或是同名 CLI），
+                // 必须实际探测 HTTP 端点，避免误报导致跳过重启流程。
+                if port > 0 && codex_cdp_port_responds(port) {
                     return Some(port);
                 }
             }
@@ -6262,79 +7019,290 @@ fn codex_debug_port_from_process() -> Option<u16> {
 #[allow(dead_code)]
 const CODEX_PREFERRED_DEBUG_PORT: u16 = 9229;
 
+/// 探测指定端口上的 CDP HTTP 端点是否真正可用。
+/// 注意不能用「进程命令行里带 --remote-debugging-port」来判断就绪：
+/// 参数在进程启动瞬间就存在，而端口要等页面初始化后才开始监听。
+fn codex_cdp_port_responds(port: u16) -> bool {
+    let Ok(client) = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(800))
+        .build()
+    else {
+        return false;
+    };
+    client
+        .get(format!("http://127.0.0.1:{port}/json/version"))
+        .send()
+        .map(|resp| resp.status().is_success())
+        .unwrap_or(false)
+}
+
 /// 探测调试端口。
 ///
-/// 注意：这里故意不再自动 `taskkill Codex.exe` 后重启。
-/// 首条手机消息如果强制重启 Codex App，会打断用户当前窗口、改变窗口尺寸/布局，
-/// 还可能造成用户看到“第一次发消息需要重启 Codex App”的体验。
-/// 现在策略是：CDP 可用就做兼容注入；不可用则交给高级控制通道或 CLI 兜底。
+/// CDP 不可用时，自动重启当前桌面 App 并开启本地调试端口，
+/// 确保手机消息进入用户选择的 Codex App 对话，而不是静默转到 CLI。
 fn codex_debug_port_or_relaunch() -> Result<u16, String> {
     if let Some(port) = codex_debug_port() {
         return Ok(port);
     }
-    Err("Codex App 当前没有开启本地调试端口，已跳过会改变窗口状态的兼容注入".into())
+    let port = CODEX_PREFERRED_DEBUG_PORT;
+    relaunch_codex_with_debug_port(port)?;
+    // Windows 桌面 App 启动后端口通常需要几秒才出现，等待期间不回退到 CLI，
+    // 确保本次消息仍然进入用户选择的 Codex App 对话。冷启动(尤其 MSIX 包)可能
+    // 较慢，这里直接探测 HTTP 端点，最多等约 60 秒。
+    for _ in 0..60 {
+        if codex_cdp_port_responds(port) {
+            return Ok(port);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Err(format!(
+        "Codex App 已尝试开启本地调试端口 {port}，但端口仍未就绪；请手动关闭并重新打开 Codex 桌面应用后重试"
+    ))
 }
 
-/// 从正在运行的 Codex 主进程拿到其可执行文件完整路径(动态获取，不写死安装位置)。
+/// 从正在运行的 Codex/ChatGPT 桌面 App 拿到 PID 和完整路径(动态获取，不写死安装位置)。
+/// 2026-07 起 Codex 桌面 App 并入统一的 ChatGPT 桌面应用：Windows 主程序从 Codex.exe
+/// 改名为 ChatGPT.exe（商店包标识沿用 OpenAI.Codex_*）。这里同时匹配两个进程名，
+/// 并按可信度排序，避免匹配到旧版残留或 ChatGPT Classic。
 #[cfg(windows)]
-#[allow(dead_code)]
-fn running_codex_exe_path() -> Option<String> {
+fn running_codex_desktop_process() -> Option<(u32, String)> {
+    fn is_desktop_app_path(path: &str) -> bool {
+        let trimmed = path.trim();
+        if trimmed.is_empty() || !Path::new(trimmed).is_file() {
+            return false;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        // 系统里有很多同名的 codex.exe 并非桌面 App 主程序：npm 全局包
+        // (node_modules/vendor)、桌面 App 包内置的 CLI(app\resources\codex.exe)、
+        // 编辑器扩展自带的 CLI(.cursor/.vscode 下 extensions\...\bin\...)。
+        // 杀掉/重启这些进程不会让桌面 App 打开调试端口，反而会误杀其他工具的
+        // 后台进程，或者让仍在运行的 GUI 单实例吞掉激活参数导致端口永远不就绪。
+        const EXCLUDED_SEGMENTS: [&str; 7] = [
+            "node_modules",
+            "\\vendor\\",
+            "\\resources\\",
+            "\\.cursor\\",
+            "\\.vscode\\",
+            "\\extensions\\",
+            "\\bin\\",
+        ];
+        !EXCLUDED_SEGMENTS
+            .iter()
+            .any(|segment| lower.contains(segment))
+    }
+
+    fn parse_process_line(line: &str) -> Option<(u32, String)> {
+        let (pid, path) = line.trim().split_once('\t')?;
+        let pid = pid.trim().parse::<u32>().ok()?;
+        let path = path.trim().to_string();
+        is_desktop_app_path(&path).then_some((pid, path))
+    }
+
+    /// 候选可信度：统一版包（OpenAI.Codex_*，即合并后的 ChatGPT 桌面应用）最优，
+    /// 其次是 ChatGPT.exe，再次旧版 Codex.exe；路径含 classic 的（ChatGPT Classic
+    /// 旧聊天版，没有 Codex 模式）殿后。同分保持启动时间先后（主进程先启动）。
+    fn candidate_rank(path: &str) -> u32 {
+        let lower = path.to_ascii_lowercase();
+        let mut rank = if lower.contains("openai.codex") {
+            0
+        } else if lower.ends_with("\\chatgpt.exe") {
+            1
+        } else {
+            2
+        };
+        if lower.contains("classic") {
+            rank += 10;
+        }
+        rank
+    }
+
+    fn pick_best(text: &str) -> Option<(u32, String)> {
+        let mut candidates: Vec<(u32, String)> =
+            text.lines().filter_map(parse_process_line).collect();
+        // 稳定排序：先按可信度，同分保持 PowerShell 输出顺序（已按启动时间排序）。
+        candidates.sort_by_key(|(_, path)| candidate_rank(path));
+        candidates.into_iter().next()
+    }
+
     let mut cmd = Command::new("powershell");
     cmd.args([
             "-NoProfile",
             "-Command",
-            // 主进程:名为 Codex.exe、命令行不含 --type= (排除 GPU/渲染子进程) 且不在 resources 下。
-            "Get-CimInstance Win32_Process -Filter \"name='Codex.exe'\" | Where-Object { $_.CommandLine -notlike '*--type=*' -and $_.CommandLine -notlike '*resources*' } | Select-Object -First 1 -ExpandProperty ExecutablePath",
+            // 强制 UTF-8，避免用户名含中文时 Rust 把 PowerShell 输出解码成乱码。
+            // 列出全部候选（不能只取第一个：同名的 CLI 进程可能排在桌面 App 前面），
+            // 由 Rust 侧按路径过滤后选出真正的桌面 App 主程序。
+            "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-CimInstance Win32_Process -Filter \"name='ChatGPT.exe' OR name='Codex.exe'\" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath -notlike '*node_modules*' -and $_.CommandLine -notlike '*--type=*' } | Sort-Object CreationDate | ForEach-Object { \"$($_.ProcessId)`t$($_.ExecutablePath)\" }",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    let output = cmd.output().ok()?;
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        None
-    } else {
-        Some(path)
+    if let Ok(output) = cmd.output() {
+        if let Some(process) = pick_best(&String::from_utf8_lossy(&output.stdout)) {
+            return Some(process);
+        }
     }
+    // Windows 的 WMI 权限受限时，Get-Process 仍能读取桌面版 Store App 路径。
+    let mut fallback = Command::new("powershell");
+    fallback
+        .args([
+            "-NoProfile",
+            "-Command",
+            // 按启动时间排序：Electron 主进程先于渲染子进程启动，这里拿不到命令行
+            // 无法按 --type= 排除子进程，取最早启动的同名进程即主进程。
+            "$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-Process -Name ChatGPT,Codex -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -notlike '*node_modules*' } | Sort-Object StartTime | ForEach-Object { \"$($_.Id)`t$($_.Path)\" }",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    fallback.creation_flags(CREATE_NO_WINDOW);
+    let output = fallback.output().ok()?;
+    pick_best(&String::from_utf8_lossy(&output.stdout))
 }
 
-/// 关闭所有 Codex.exe 进程，再用 `--remote-debugging-port` 重启同一个可执行文件。
+#[cfg(not(windows))]
+fn running_codex_desktop_process() -> Option<(u32, String)> {
+    None
+}
+
 #[cfg(windows)]
-#[allow(dead_code)]
+fn windows_package_family_from_exe_path(exe_path: &str) -> Option<String> {
+    // WindowsApps 包目录形如 <Name>_<Version>_<Arch>__<PublisherId>。
+    // 合并后的 ChatGPT 桌面应用沿用 OpenAI.Codex_* 包标识，但为兼容今后
+    // 可能的包名变更，这里接受任何 <identity>__<publisherId> 形态的目录段
+    // （本函数只在路径位于 WindowsApps 下时被调用，该形态即包目录）。
+    let package_dir = Path::new(exe_path)
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .find(|component| component.contains("__"))?;
+    let (identity, publisher_id) = package_dir.rsplit_once("__")?;
+    let package_name = identity.split('_').next()?;
+    if package_name.is_empty() || publisher_id.is_empty() {
+        return None;
+    }
+    Some(format!("{package_name}_{publisher_id}"))
+}
+
+/// WindowsApps 中的 MSIX 可执行文件受 ACL 保护，普通桌面进程直接 spawn 会得到
+/// ERROR_ACCESS_DENIED。通过系统的 ApplicationActivationManager 按 AUMID 激活，
+/// 同时把 Electron 的 CDP 参数作为 activation arguments 传入。
+#[cfg(windows)]
+fn activate_packaged_codex(exe_path: &str, port: u16) -> Result<(), String> {
+    let package_family = windows_package_family_from_exe_path(exe_path)
+        .ok_or_else(|| format!("未能从 Codex App 路径解析包标识: {exe_path}"))?;
+    let arguments =
+        format!("--remote-debugging-port={port} --remote-allow-origins=http://127.0.0.1:{port}");
+    let script = r#"
+$ErrorActionPreference = 'Stop'
+$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$app = Get-StartApps | Where-Object { $_.AppID -like ($env:VARSWITCH_CODEX_PACKAGE_FAMILY + '!*') } | Select-Object -First 1
+if (-not $app) { throw ('未找到 Codex AppUserModelId，package_family=' + $env:VARSWITCH_CODEX_PACKAGE_FAMILY) }
+if (-not ('VarSwitch.ApplicationActivationManager' -as [type])) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace VarSwitch {
+  [Flags] public enum ActivateOptions { None = 0 }
+  [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IApplicationActivationManager {
+    [PreserveSig] int ActivateApplication(
+      [MarshalAs(UnmanagedType.LPWStr)] string appUserModelId,
+      [MarshalAs(UnmanagedType.LPWStr)] string arguments,
+      ActivateOptions options, out uint processId);
+  }
+  [ComImport, Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
+  public class ApplicationActivationManager {}
+  public static class PackagedAppActivator {
+    public static uint Activate(string appUserModelId, string arguments) {
+      var manager = (IApplicationActivationManager)new ApplicationActivationManager();
+      uint processId;
+      int hr = manager.ActivateApplication(appUserModelId, arguments, ActivateOptions.None, out processId);
+      if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+      return processId;
+    }
+  }
+}
+'@
+}
+$pidValue = [VarSwitch.PackagedAppActivator]::Activate($app.AppID, $env:VARSWITCH_CODEX_ACTIVATION_ARGS)
+Write-Output ($app.AppID + "`t" + $pidValue)
+"#;
+    let mut command = Command::new("powershell");
+    command
+        .args(["-NoProfile", "-Sta", "-Command", script])
+        .env("VARSWITCH_CODEX_PACKAGE_FAMILY", &package_family)
+        .env("VARSWITCH_CODEX_ACTIVATION_ARGS", &arguments)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command.creation_flags(CREATE_NO_WINDOW);
+    let output = command
+        .output()
+        .map_err(|e| format!("调用 Windows 应用激活器失败: {e}"))?;
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if error.is_empty() {
+            format!("Windows 应用激活器返回退出码 {}", output.status)
+        } else {
+            format!("Windows 应用激活器失败: {error}")
+        });
+    }
+    let detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    log_info!(
+        "[mobile-control][codex-app] packaged App activated: package_family={}, detail={}",
+        package_family,
+        detail
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
 fn relaunch_codex_with_debug_port(port: u16) -> Result<(), String> {
-    // 1) 先拿到当前运行的 Codex.exe 路径(重启后要用同一个版本)。
-    let exe_path = running_codex_exe_path()
-        .ok_or("未找到正在运行的 Codex App，请先手动打开 Codex 桌面应用")?;
-    // 2) 关闭所有 Codex.exe(taskkill /F /T 连子进程一并结束)。
+    let (pid, exe_path) = running_codex_desktop_process()
+        .ok_or("未找到正在运行的 Codex/ChatGPT 桌面应用，请先打开 ChatGPT 桌面应用（原 Codex App，2026-07 起已改名）")?;
+    log_info!(
+        "[mobile-control][codex-app] restarting selected desktop App with CDP: pid={}, executable={}, port={}",
+        pid,
+        exe_path,
+        port
+    );
     let mut kill_cmd = Command::new("taskkill");
     kill_cmd
-        .args(["/F", "/T", "/IM", "Codex.exe"])
+        .args(["/F", "/T", "/PID", &pid.to_string()])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     #[cfg(target_os = "windows")]
     kill_cmd.creation_flags(CREATE_NO_WINDOW);
-    let _ = kill_cmd.status();
-    // 等待进程退出，端口释放。
+    let status = kill_cmd
+        .status()
+        .map_err(|e| format!("终止 Codex App 失败(PID {pid}): {e}"))?;
+    if !status.success() {
+        return Err(format!("终止 Codex App 失败(PID {pid})"));
+    }
     std::thread::sleep(Duration::from_millis(1500));
-    // 3) 用调试端口重启。--remote-allow-origins 允许本地 CDP 连接。
-    let allow_origin = format!("http://127.0.0.1:{port}");
-    let mut launch_cmd = Command::new(&exe_path);
-    launch_cmd
-        .arg(format!("--remote-debugging-port={port}"))
-        .arg(format!("--remote-allow-origins={allow_origin}"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    #[cfg(target_os = "windows")]
-    launch_cmd.creation_flags(CREATE_NO_WINDOW);
-    launch_cmd
-        .spawn()
-        .map_err(|e| format!("重启 Codex App 失败({exe_path}): {e}"))?;
+    if exe_path.to_ascii_lowercase().contains("\\windowsapps\\") {
+        activate_packaged_codex(&exe_path, port)
+            .map_err(|e| format!("重启 Codex App 失败({exe_path}): {e}"))?;
+    } else {
+        let allow_origin = format!("http://127.0.0.1:{port}");
+        let mut launch_cmd = Command::new(&exe_path);
+        launch_cmd
+            .arg(format!("--remote-debugging-port={port}"))
+            .arg(format!("--remote-allow-origins={allow_origin}"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        launch_cmd.creation_flags(CREATE_NO_WINDOW);
+        launch_cmd
+            .spawn()
+            .map_err(|e| format!("重启 Codex App 失败({exe_path}): {e}"))?;
+    }
+    log_info!(
+        "[mobile-control][codex-app] desktop App restart command started: port={}",
+        port
+    );
     Ok(())
 }
 
 #[cfg(not(windows))]
-#[allow(dead_code)]
 fn relaunch_codex_with_debug_port(_port: u16) -> Result<(), String> {
     Err("当前平台暂不支持自动重启 Codex App".into())
 }
@@ -6391,6 +7359,7 @@ fn codex_find_page_target_once(port: u16) -> Result<String, String> {
             if url.contains("index.html")
                 || url.starts_with("app://")
                 || title.to_lowercase().contains("codex")
+                || title.to_lowercase().contains("chatgpt")
             {
                 return Ok(ws);
             }
@@ -6427,7 +7396,9 @@ impl CdpClient {
         };
         let mut stream = TcpStream::connect((host.as_str(), port))
             .map_err(|e| format!("连接 Codex 调试端口失败: {e}"))?;
-        stream.set_read_timeout(Some(Duration::from_secs(180))).ok();
+        // 读超时设短（30s），recv_text 在帧边界超时时发 ping 保活并继续等待；
+        // 整体等待上限由 recv_text 的 deadline 控制（须大于注入脚本的 300s 轮询上限）。
+        stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
         stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
         // 随机 16 字节做握手 key。
         let key_bytes = uuid::Uuid::new_v4().into_bytes();
@@ -6501,10 +7472,51 @@ impl CdpClient {
         Ok(buf)
     }
 
+    /// 发送一个带掩码的空 ping 帧（客户端→服务端必须带掩码）。
+    fn send_ping(&mut self) -> Result<(), String> {
+        let mask = uuid::Uuid::new_v4().into_bytes();
+        let mut frame = Vec::with_capacity(6);
+        frame.push(0x89); // FIN + ping
+        frame.push(0x80); // masked, len=0
+        frame.extend_from_slice(&mask[..4]);
+        self.stream
+            .write_all(&frame)
+            .map_err(|e| format!("发送 CDP ping 失败: {e}"))
+    }
+
+    /// 读取 2 字节帧头。仅在「帧边界」（首字节尚未到达）容忍读超时：
+    /// Codex 执行长任务时页面可能几分钟不发任何帧，读超时不代表连接断开，
+    /// 发 ping 保活并继续等待，直到 deadline。帧中途超时视为真实错误。
+    fn read_frame_head(&mut self, deadline: Instant) -> Result<[u8; 2], String> {
+        let mut head = [0u8; 2];
+        loop {
+            match self.stream.read(&mut head[..1]) {
+                Ok(0) => return Err("CDP 连接已关闭".into()),
+                Ok(_) => break,
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::TimedOut
+                        || e.kind() == std::io::ErrorKind::WouldBlock =>
+                {
+                    if Instant::now() > deadline {
+                        return Err("等待 CDP 响应超时（Codex 长时间未返回结果）".into());
+                    }
+                    self.send_ping()?;
+                }
+                Err(e) => return Err(format!("读取 CDP 数据失败: {e}")),
+            }
+        }
+        self.stream
+            .read_exact(&mut head[1..])
+            .map_err(|e| format!("读取 CDP 数据失败: {e}"))?;
+        Ok(head)
+    }
+
     /// 读取一个完整帧的 payload(自动应答 ping，跳过非文本控制帧)。
     fn recv_text(&mut self) -> Result<String, String> {
+        // 整体等待上限：略大于注入脚本自身的 300s 轮询上限。
+        let deadline = Instant::now() + Duration::from_secs(330);
         loop {
-            let head = self.read_exact(2)?;
+            let head = self.read_frame_head(deadline)?;
             let opcode = head[0] & 0x0f;
             let masked = (head[1] & 0x80) != 0;
             let mut len = (head[1] & 0x7f) as usize;
@@ -6516,6 +7528,10 @@ impl CdpClient {
                 len = u64::from_be_bytes([
                     ext[0], ext[1], ext[2], ext[3], ext[4], ext[5], ext[6], ext[7],
                 ]) as usize;
+            }
+            // 安全：限制单帧大小，避免对端声明超大长度导致一次性分配巨量内存。
+            if len > 64 * 1024 * 1024 {
+                return Err("CDP WebSocket 帧过大".into());
             }
             let mask = if masked {
                 Some(self.read_exact(4)?)
@@ -6567,7 +7583,13 @@ impl CdpClient {
         let request = serde_json::json!({ "id": id, "method": method, "params": params });
         self.send_text(&request.to_string())?;
         // 循环读取直到拿到本次命令的响应(跳过事件通知)。
+        // 墙钟总时限：页面持续发事件帧（如 console 日志）会让每次读取都成功，
+        // 若响应因页面跳转等原因永远不来，仅靠读取次数上限可能等非常久。
+        let deadline = Instant::now() + Duration::from_secs(360);
         for _ in 0..10000 {
+            if Instant::now() > deadline {
+                return Err(format!("CDP 命令 {method} 等待响应超过总时限"));
+            }
             let text = self.recv_text()?;
             let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
                 continue;
@@ -6610,9 +7632,10 @@ fn cdp_evaluate(client: &mut CdpClient, expression: &str) -> Result<serde_json::
         .unwrap_or(serde_json::Value::Null))
 }
 
-/// 注入到 Codex 页面的发送脚本(移植自参考实现 send_prompt_to_codex_page_no_wait)。
-/// `{PROMPT_JSON}` 处会被替换为 JSON 安全转义后的消息字符串字面量。
-/// 逻辑:找输入框 → 写入消息 → 点发送(兜底回车) → 轮询助手回复直到稳定 → 返回 {ok,text}。
+/// 注入到 Codex 页面的“只发送”脚本。`{PROMPT_JSON}` 处会被替换为 JSON 安全转义后的消息。
+/// 逻辑:找输入框 → 写入消息 → 点发送(兜底回车) → 确认输入框清空后立刻返回 {ok:true,sent:true}。
+/// 不在页面里等待/抓取回复——回复由后端 `codex_capture_reply_from_session` 从共享会话文件读取，
+/// 避免新版 ChatGPT 界面 DOM 抓取失败导致的 300 秒空等（会拖过平台被动回复窗口）。
 fn codex_inject_send_script(prompt_json: &str) -> String {
     const TEMPLATE: &str = r#"
 (async () => {
@@ -6637,8 +7660,9 @@ fn codex_inject_send_script(prompt_json: &str) -> String {
       return false;
     }
     const values = [];
-    // 优先用 markdown 内容块(每条回复一个 _markdownContent_ 容器)。
-    let blocks = Array.from(document.querySelectorAll("[class*='markdownContent'], [class*='markdown-content'], [class*='_markdown']"))
+    // 优先用 markdown 内容块(每条回复一个 _markdownContent_ 容器；
+    // 合并后的 ChatGPT 桌面应用也常用 prose 类渲染 markdown)。
+    let blocks = Array.from(document.querySelectorAll("[class*='markdownContent'], [class*='markdown-content'], [class*='_markdown'], [class*='prose']"))
       .filter(visible)
       .filter(n => !inUserBubble(n));
     // 退路:旧版属性选择器。
@@ -6670,10 +7694,16 @@ fn codex_inject_send_script(prompt_json: &str) -> String {
         || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
       if (setter) {
         setter.call(input, "");
-        for (const char of value) {
-          const current = input.value;
-          setter.call(input, current + char);
-          input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: char }));
+        if (value.length > 200) {
+          // 长文本一次性写入：逐字符模拟在重型 React 组件上可能耗时数分钟。
+          setter.call(input, value);
+          input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+        } else {
+          for (const char of value) {
+            const current = input.value;
+            setter.call(input, current + char);
+            input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: char }));
+          }
         }
       } else {
         input.value = value;
@@ -6681,14 +7711,14 @@ fn codex_inject_send_script(prompt_json: &str) -> String {
       }
       input.dispatchEvent(new Event("change", { bubbles: true }));
     } else {
-      // contenteditable: execCommand 逐字符插入。
+      // contenteditable: execCommand 逐字符插入(长文本一次性写入)。
       input.textContent = "";
-      if (document.execCommand) {
+      if (value.length > 200 || !document.execCommand) {
+        input.textContent = value;
+      } else {
         for (const char of value) {
           document.execCommand("insertText", false, char);
         }
-      } else {
-        input.textContent = value;
       }
       input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -6735,7 +7765,6 @@ fn codex_inject_send_script(prompt_json: &str) -> String {
     input.dispatchEvent(new KeyboardEvent("keypress", opts));
     input.dispatchEvent(new KeyboardEvent("keyup", opts));
   }
-  const before = assistantTexts();
   // 等待输入框出现（重启 Codex 后页面需要时间加载，最多等约 15 秒）。
   let input = null;
   for (let i = 0; i < 100; i++) {
@@ -6752,80 +7781,27 @@ fn codex_inject_send_script(prompt_json: &str) -> String {
     if (button && !button.disabled) { sent = activateButton(button); break; }
   }
   if (!sent) submitByKeyboard(input);
-  // 给输入框清空留足时间(逐字符输入+发送后 Codex 清空输入框需要时间)。
-  await sleep(1500);
-  // 检测 Codex 是否仍在生成/思考。综合多种信号，任一命中即认为忙碌。
-  function isGenerating() {
-    // 1) 停止/取消按钮（生成中常出现，结束后变回发送按钮）。
-    const stopBtn = document.querySelector(
-      "[data-testid*='stop'], [data-testid*='Stop'], " +
-      "button[aria-label*='Stop'], button[aria-label*='停止'], " +
-      "button[aria-label*='Cancel'], button[aria-label*='取消'], " +
-      "button[aria-label*='中断']"
-    );
-    if (stopBtn) {
-      const s = getComputedStyle(stopBtn);
-      const r = stopBtn.getBoundingClientRect();
-      if (s.visibility !== "hidden" && s.display !== "none" && r.width > 0 && r.height > 0) return true;
-    }
-    // 2) 思考/加载文案与转圈指示器。
-    const thinking = document.querySelector(
-      "[class*='thinking'], [class*='Thinking'], [class*='loading'], " +
-      "[class*='spinner'], [class*='Spinner'], [role='progressbar'], " +
-      "[class*='generating'], [class*='Generating'], [aria-busy='true']"
-    );
-    if (thinking) return true;
-    // 3) 页面文本里出现“正在思考/Thinking…”等提示。
-    const bodyText = (document.body.innerText || "");
-    if (/正在思考|思考中|Thinking…|Thinking\.\.\.|Generating|正在生成/.test(bodyText)) return true;
-    return false;
+  // 只负责把消息发出去，不在页面里等待/抓取回复：新版 ChatGPT 桌面应用界面
+  // DOM 结构多变，抓取回复常常空等到 300 秒超时，拖过平台被动回复窗口（QQ 仅 5 分钟）。
+  // 回复改由后端从共享会话文件读取（稳定且快）。这里确认输入框已清空作为“已发送”信号，
+  // 最多等约 3 秒。
+  let cleared = false;
+  for (let i = 0; i < 20; i++) {
+    await sleep(150);
+    const v = ("value" in input) ? input.value : (input.textContent || "");
+    if (!v || !v.trim()) { cleared = true; break; }
   }
-  const startedAt = Date.now();
-  const beforeCount = before.length;
-  const baseLast = before[before.length - 1] || "";
-  let latest = "";
-  let lastChangeAt = 0;
-  let everChanged = false;
-  while (Date.now() - startedAt < 300000) {
-    await sleep(700);
-    const after = assistantTexts();
-    const lastBlock = after[after.length - 1] || "";
-    // 检测新回复：块数量增加，或末块内容相对发送前发生变化（流式更新同一块）。
-    const hasNew = after.length > beforeCount || (lastBlock && lastBlock !== baseLast);
-    if (hasNew) {
-      // 拿完整回复：若有新增块则合并所有新增块；
-      // 若数量没增加（Codex 在同一块内流式输出），则取末块本身。
-      let current;
-      if (after.length > beforeCount) {
-        current = after.slice(beforeCount).join("\n\n").trim();
-      } else {
-        current = lastBlock;
-      }
-      if (current) {
-        everChanged = true;
-        if (current !== latest) {
-          latest = current;
-          lastChangeAt = Date.now();
-        }
-      }
-    }
-    if (everChanged && latest) {
-      const busy = isGenerating();
-      const stableFor = Date.now() - lastChangeAt;
-      // 只有在“不忙 + 文本连续稳定 4 秒”时才判定完成；
-      // 思考停顿期间 busy 为真会持续等待，避免只回传摘要就结束。
-      if (!busy && stableFor > 4000) return { ok: true, text: latest };
-      // 极端兜底：即使一直判忙，但文本已 45 秒没变，也返回当前结果。
-      if (busy && stableFor > 45000) return { ok: true, text: latest };
-    }
-  }
-  return { ok: !!latest, text: latest, error: latest ? "" : "Codex 没有产生回复" };
+  return { ok: true, sent: true, cleared };
 })()
 "#;
     TEMPLATE.replace("__PROMPT_JSON__", prompt_json)
 }
 
+/// 最近一次通过深链接激活的对话（thread_id + 时间），用于缩短重复激活的等待。
+static CODEX_LAST_ACTIVATED_THREAD: OnceLock<Mutex<Option<(String, Instant)>>> = OnceLock::new();
+
 /// 用 codex://threads/<id> deep link 让 Codex App 切到指定对话，并等待切换完成。
+/// （合并后的 ChatGPT 桌面应用仍注册 codex:// 协议处理 Codex 线程链接。）
 fn activate_codex_thread(thread_id: &str) -> Result<(), String> {
     let id = thread_id.trim();
     if id.is_empty() {
@@ -6858,88 +7834,356 @@ fn activate_codex_thread(thread_id: &str) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("打开 Codex 对话失败: {e}"))?;
     }
-    // 等待 App 切换对话并渲染(参考实现的 CODEX_DEEPLINK_SETTLE_SECONDS≈2.5s)。
-    std::thread::sleep(Duration::from_millis(2500));
+    // 等待 App 切换对话并渲染。若上一条消息刚激活过同一对话（App 已停在该对话上），
+    // 深链接等同无操作，缩短等待以降低每条消息的固定延迟。
+    let cache = CODEX_LAST_ACTIVATED_THREAD.get_or_init(|| Mutex::new(None));
+    let recently_same = cache
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .map(|(last_id, at)| last_id == id && at.elapsed() < Duration::from_secs(600))
+        .unwrap_or(false);
+    let settle = if recently_same {
+        Duration::from_millis(700)
+    } else {
+        Duration::from_millis(2000)
+    };
+    std::thread::sleep(settle);
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some((id.to_string(), Instant::now()));
+    }
     Ok(())
+}
+
+/// Codex App 注入失败的两种性质，决定兜底策略：
+enum CodexAppSendFailure {
+    /// 消息确定没有进入 Codex（探测/重启/连接/找输入框失败），可安全改投后台 CLI 重发。
+    NotSent(String),
+    /// 消息可能已经发送成功（连接中断或回复未捕获），绝不能重发，只允许只读回捞回复。
+    MaybeSent { port: u16, error: String },
 }
 
 /// 把消息注入 Codex 桌面 App 选中的对话，等待并返回助手回复。
 /// 流程:切对话 → 探测调试端口 → 找页面 target → CDP 注入发送脚本 → 解析回复。
-fn send_prompt_to_codex_app(thread_id: &str, prompt: &str) -> Result<String, String> {
+fn send_prompt_to_codex_app(thread_id: &str, prompt: &str) -> Result<String, CodexAppSendFailure> {
+    use CodexAppSendFailure::{MaybeSent, NotSent};
     let text = prompt.trim();
     if text.is_empty() {
-        return Err("消息内容为空".into());
+        return Err(NotSent("消息内容为空".into()));
     }
     // 1) 探测调试端口；没有则自动用调试端口重启 Codex App(放在切对话之前，
     //    因为重启会重置页面，切对话必须在重启之后做)。
-    let port = codex_debug_port_or_relaunch()?;
+    let port = codex_debug_port_or_relaunch().map_err(NotSent)?;
     // 2) 切到选中的对话(thread_id 为空则注入当前打开的对话)。
     if let Err(error) = activate_codex_thread(thread_id) {
         log_warn!("[mobile-control][codex-app] 切换对话失败(继续尝试注入当前对话): {error}");
     }
     // 3) 找页面 target。
-    let ws_url = codex_find_page_target(port)?;
-    // 4) 连接 CDP 并注入。
-    let mut client = CdpClient::connect(&ws_url)?;
-    let prompt_json = serde_json::to_string(text).map_err(|e| format!("序列化消息失败: {e}"))?;
+    let ws_url = codex_find_page_target(port).map_err(NotSent)?;
+    // 4) 连接 CDP 并注入。消息在脚本点击发送后才算「可能已发出」；
+    //    在那之前的所有失败都可以安全重投 CLI。
+    let mut client = CdpClient::connect(&ws_url).map_err(NotSent)?;
+    client
+        .command("Runtime.enable", serde_json::json!({}))
+        .map_err(NotSent)?;
+    let prompt_json = serde_json::to_string(text)
+        .map_err(|e| NotSent(format!("序列化消息失败: {e}")))?;
     let script = codex_inject_send_script(&prompt_json);
-    let value = cdp_evaluate(&mut client, &script)?;
-    // 4) 解析脚本返回 {ok, text, error}。
+    let result = client
+        .command(
+            "Runtime.evaluate",
+            serde_json::json!({
+                "expression": script,
+                "returnByValue": true,
+                "awaitPromise": true,
+                "allowUnsafeEvalBlockedByCSP": true,
+                "userGesture": true,
+            }),
+        )
+        .map_err(|e| MaybeSent {
+            port,
+            error: format!("CDP 连接中断（消息可能已发送）: {e}"),
+        })?;
+    if let Some(exception) = result.get("exceptionDetails") {
+        return Err(MaybeSent {
+            port,
+            error: format!("Codex 页面脚本异常: {exception}"),
+        });
+    }
+    let value = result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    // 5) 解析脚本返回 {ok, sent, [text]}。当前脚本只负责发送，正常返回 {ok:true}
+    //    且不含 text；回复交由调用方从共享会话文件读取。若某个旧路径仍返回了 text，
+    //    也照常直接使用。
     let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
     if ok {
         let reply = json_string(&value, &["text"]);
         if reply.trim().is_empty() {
-            return Err("Codex App 已发送但未捕获到回复内容".into());
+            return Err(MaybeSent {
+                port,
+                error: "消息已发送到 Codex，正在从会话文件读取回复".into(),
+            });
         }
         Ok(reply.trim().to_string())
     } else {
         let error = json_string(&value, &["error"]);
-        Err(if error.is_empty() {
-            "Codex App 注入失败".into()
+        let error = if error.is_empty() {
+            "Codex App 注入失败".to_string()
         } else {
             error
-        })
+        };
+        // 「未找到输入框」发生在输入/点击之前，消息一定没有发出去。
+        if error.contains("未找到 Codex 输入框") {
+            Err(NotSent(error))
+        } else {
+            Err(MaybeSent { port, error })
+        }
     }
 }
 
-/// 统一的回复分发：
-/// 1) 优先走高级控制 WebSocket，完全不触碰 Codex App 窗口；
-/// 2) 不可用时优先走后台 Codex CLI resume，避免 deep link / CDP 改变桌面窗口；
-/// 3) 只有 CLI 也失败时，才最后尝试 CDP 兼容注入。
+/// 只读回捞：消息可能已送达 Codex 但回复没拿到时，重新连接页面轮询最新的
+/// 助手回复，直到生成结束且文本稳定。绝不重新发送消息，避免重复执行。
+fn codex_capture_reply_readonly(port: u16) -> Result<String, String> {
+    const CAPTURE_SCRIPT: &str = r#"
+(() => {
+  const textOf = (n) => (n?.innerText || n?.textContent || "").trim();
+  function visible(n) {
+    if (!n) return false;
+    const s = getComputedStyle(n);
+    const r = n.getBoundingClientRect();
+    return s.visibility !== "hidden" && s.display !== "none" && r.width > 0 && r.height > 0;
+  }
+  function inUserBubble(node) {
+    let c = node;
+    for (let i = 0; c && i < 12; i++, c = c.parentElement) {
+      const cl = (c.className || "").toString();
+      if (cl.includes("items-end") || cl.includes("bg-token-foreground")) return true;
+    }
+    return false;
+  }
+  let blocks = Array.from(document.querySelectorAll("[class*='markdownContent'], [class*='markdown-content'], [class*='_markdown'], [class*='prose']"))
+    .filter(visible)
+    .filter(n => !inUserBubble(n));
+  if (!blocks.length) {
+    blocks = Array.from(document.querySelectorAll("[data-message-author-role='assistant'], [data-role='assistant'], [class*='assistant'], article"))
+      .filter(visible);
+  }
+  const values = [];
+  for (const n of blocks) {
+    const t = textOf(n);
+    if (t && !values.includes(t)) values.push(t);
+  }
+  let busy = false;
+  const stopBtn = document.querySelector(
+    "[data-testid*='stop'], [data-testid*='Stop'], button[aria-label*='Stop'], button[aria-label*='停止'], " +
+    "button[aria-label*='Cancel'], button[aria-label*='取消'], button[aria-label*='中断']"
+  );
+  if (stopBtn) {
+    const s = getComputedStyle(stopBtn);
+    const r = stopBtn.getBoundingClientRect();
+    busy = s.visibility !== "hidden" && s.display !== "none" && r.width > 0 && r.height > 0;
+  }
+  if (!busy) {
+    busy = !!document.querySelector(
+      "[class*='thinking'], [class*='Thinking'], [class*='loading'], [class*='spinner'], [class*='Spinner'], " +
+      "[role='progressbar'], [class*='generating'], [class*='Generating'], [aria-busy='true']"
+    );
+  }
+  return { busy, last: values[values.length - 1] || "" };
+})()
+"#;
+    let ws_url = codex_find_page_target(port)?;
+    let mut client = CdpClient::connect(&ws_url)?;
+    let deadline = Instant::now() + Duration::from_secs(240);
+    let mut stable: Option<(String, Instant)> = None;
+    loop {
+        let value = cdp_evaluate(&mut client, CAPTURE_SCRIPT)?;
+        let busy = value.get("busy").and_then(|v| v.as_bool()).unwrap_or(false);
+        let last = json_string(&value, &["last"]);
+        if !busy && !last.is_empty() {
+            match &stable {
+                Some((prev, since)) if *prev == last => {
+                    // 连续两次读取一致且间隔 ≥3s，认为回复已完成。
+                    if since.elapsed() >= Duration::from_secs(3) {
+                        return Ok(last);
+                    }
+                }
+                _ => stable = Some((last.clone(), Instant::now())),
+            }
+        } else {
+            stable = None;
+        }
+        if Instant::now() > deadline {
+            return Err("回捞超时：Codex 长时间未完成回复".into());
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    }
+}
+
+/// 解析 Codex 会话 jsonl，返回 (助手 final_answer 条数, 最后一条 final_answer 文本)。
+/// 桌面 App 与 CLI 共享该文件，App 生成的每条最终回复都会实时追加进去，因此这是
+/// 比抓取 GUI DOM 更可靠的回复来源。若该会话使用旧格式（消息不带 phase 字段），
+/// 退化为统计全部助手消息。返回 None 表示定位不到会话文件。
+fn codex_session_reply_state(thread_id: &str) -> Option<(usize, String)> {
+    let relative = codex_session_relative_file(thread_id)?;
+    let path = codex_session_path_from_relative(&relative);
+    Some(codex_session_reply_state_at(&path))
+}
+
+/// 直接解析给定路径的会话 jsonl（避免轮询期间反复递归扫描 sessions 目录）。
+fn codex_session_reply_state_at(path: &Path) -> (usize, String) {
+    let content = fs::read_to_string(path).unwrap_or_default();
+    let mut final_count = 0usize;
+    let mut last_final = String::new();
+    let mut assistant_count = 0usize;
+    let mut last_assistant = String::new();
+    let mut saw_phase = false;
+    for line in content.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        // 只认 response_item 里的 assistant 消息（type=message, role=assistant）。
+        if value.pointer("/payload/type").and_then(|v| v.as_str()) != Some("message") {
+            continue;
+        }
+        if value.pointer("/payload/role").and_then(|v| v.as_str()) != Some("assistant") {
+            continue;
+        }
+        let text = value
+            .pointer("/payload/content")
+            .map(extract_text_from_content_value)
+            .unwrap_or_default();
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        assistant_count += 1;
+        last_assistant = text.to_string();
+        if let Some(phase) = value.pointer("/payload/phase").and_then(|v| v.as_str()) {
+            saw_phase = true;
+            if phase == "final_answer" {
+                final_count += 1;
+                last_final = text.to_string();
+            }
+        }
+    }
+    if saw_phase {
+        (final_count, last_final)
+    } else {
+        (assistant_count, last_assistant)
+    }
+}
+
+/// 从共享会话文件里捕获「本次发送后新增的」助手最终回复。
+/// baseline 是发送前的 final_answer 计数；轮询直到计数增长且文本稳定。
+fn codex_capture_reply_from_session(thread_id: &str, baseline: usize) -> Result<String, String> {
+    let relative = codex_session_relative_file(thread_id)
+        .ok_or("未能定位该会话的存档文件")?;
+    let path = codex_session_path_from_relative(&relative);
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let mut stable: Option<(String, Instant)> = None;
+    loop {
+        let (count, last) = codex_session_reply_state_at(&path);
+        if count > baseline && !last.is_empty() {
+            match &stable {
+                Some((prev, since)) if *prev == last => {
+                    // 文本连续 3 秒不变，认为该轮回复已写完。
+                    if since.elapsed() >= Duration::from_secs(3) {
+                        return Ok(last);
+                    }
+                }
+                _ => stable = Some((last.clone(), Instant::now())),
+            }
+        }
+        if Instant::now() > deadline {
+            return Err("等待会话文件出现新回复超时".into());
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+/// 所有手机消息都必须进入用户选择的 Codex 对话（绝不改投其他会话）。
+///
+/// 首选把消息注入 Codex/ChatGPT 桌面 App（回复会实时显示在 App 界面里）。
+/// 无论走哪条路，回复优先从「共享会话文件」读取——桌面 App 每条最终回复都会
+/// 实时写进该 jsonl，比抓取 GUI DOM 可靠得多（DOM 抓取受调试连接超时影响）。
+/// 失败时按性质兜底：
+/// - 消息「确定没发出去」（探测/重启/连接/找输入框失败）→ 用后台 Codex CLI
+///   `exec resume <thread_id>` 续接同一个会话重投（Happy/Paseo 式的 CLI 驱动）；
+/// - 消息「可能已发出」（连接中断/回复未捕获）→ 绝不重发（防止 Codex 重复执行），
+///   从会话文件捕获本轮新回复；文件不可用时再退回只读抓取 DOM。
 fn dispatch_codex_reply(thread_id: &str, text: &str, cwd: &str) -> Result<String, String> {
-    match try_smart_control_dispatch(thread_id, text) {
-        Ok(Some(reply)) => return Ok(reply),
-        Ok(None) => {}
-        Err(error) => {
+    // 发送前记录会话文件里的 final_answer 基线，用于识别「本次新增」的回复。
+    let baseline = codex_session_reply_state(thread_id)
+        .map(|(count, _)| count)
+        .unwrap_or(0);
+    let failure = match send_prompt_to_codex_app(thread_id, text) {
+        Ok(reply) => {
+            log_info!(
+                "[mobile-control][codex-app] message sent to selected Codex App thread: thread_id={}",
+                thread_id
+            );
+            return Ok(reply);
+        }
+        Err(failure) => failure,
+    };
+    match failure {
+        CodexAppSendFailure::NotSent(app_error) => {
             log_warn!(
-                "[smart-control][dispatch] protocol dispatch failed, fallback to compatibility mode: {}",
+                "[mobile-control][codex-app] 消息未能送入 App，改用后台 CLI 续接同一会话: thread_id={}, error={}",
+                thread_id,
+                app_error
+            );
+            match run_codex_cli_reply(text, cwd, thread_id) {
+                Ok(reply) => {
+                    log_info!(
+                        "[mobile-control][codex-cli] reply produced via CLI resume: thread_id={}",
+                        thread_id
+                    );
+                    Ok(reply)
+                }
+                Err(cli_error) => Err(format!(
+                    "Codex App 注入失败（{app_error}）；后台 CLI 续接同一会话也失败（{cli_error}）"
+                )),
+            }
+        }
+        CodexAppSendFailure::MaybeSent { port, error } => {
+            log_warn!(
+                "[mobile-control][codex-app] 消息可能已送达但回复未捕获，改从会话文件捕获（不重发）: thread_id={}, error={}",
+                thread_id,
                 error
             );
-        }
-    }
-    if let Some(status) = smart_control_status_from_cache() {
-        if status.connected {
-            log_info!(
-                "[mobile-control][smart-control] 高级控制通道已连接，当前版本保留兼容分发；backend={}",
-                status.backend_url
-            );
-        } else if status.available {
-            log_info!(
-                "[mobile-control][smart-control] 高级控制服务已响应但 Codex 未连接，使用兼容分发；detail={}",
-                status.detail
-            );
-        }
-    }
-    match run_codex_cli_reply(text, cwd, thread_id) {
-        Ok(reply) => return Ok(reply),
-        Err(cli_err) => {
-            log_warn!(
-                "[mobile-control][codex-cli] 后台回复失败，最后尝试 Codex App 兼容注入: {cli_err}"
-            );
-            match send_prompt_to_codex_app(thread_id, text) {
-                Ok(reply) => Ok(reply),
-                Err(app_err) => Err(format!(
-                    "后台 CLI 回复失败({cli_err})；Codex App 兼容注入也失败：{app_err}"
+            // 首选：从共享会话文件捕获本轮新回复（App 一定会把 final_answer 写进去）。
+            match codex_capture_reply_from_session(thread_id, baseline) {
+                Ok(reply) => {
+                    log_info!(
+                        "[mobile-control][codex-app] reply captured from session file: thread_id={}",
+                        thread_id
+                    );
+                    return Ok(reply);
+                }
+                Err(session_error) => {
+                    log_warn!(
+                        "[mobile-control][codex-app] 会话文件捕获失败，改为只读抓取 DOM: thread_id={}, error={}",
+                        thread_id,
+                        session_error
+                    );
+                }
+            }
+            // 退路：直接从页面 DOM 只读抓取最新回复。
+            match codex_capture_reply_readonly(port) {
+                Ok(reply) => {
+                    log_info!(
+                        "[mobile-control][codex-app] reply captured via readonly poll: thread_id={}",
+                        thread_id
+                    );
+                    Ok(reply)
+                }
+                Err(capture_error) => Err(format!(
+                    "消息已发送到 Codex App，但未能带回回复（{error}；会话文件与页面抓取均失败：{capture_error}）；请在电脑上查看 Codex 的回答"
                 )),
             }
         }
@@ -6950,6 +8194,17 @@ fn lark_tenant_access_token(
     client: &reqwest::blocking::Client,
     binding: &MobileChannelBinding,
 ) -> Result<String, String> {
+    // B16: 先查缓存，避免每条消息重新鉴权触发限频。飞书 token TTL=7200s，提前 60s 刷新
+    let cache_key = format!("lark:{}", binding.app_id.trim());
+    let now = (chrono_timestamp_millis() / 1000) as u64;
+    let cache = LARK_TOKEN_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some((token, expiry)) = guard.get(&cache_key) {
+            if now < *expiry {
+                return Ok(token.clone());
+            }
+        }
+    }
     let base_url = normalize_mobile_base_url(&binding.base_url, "lark");
     let result = post_json_value(
         client,
@@ -6966,6 +8221,15 @@ fn lark_tenant_access_token(
             platform_error_message(&result, "未返回 token")
         ))
     } else {
+        // token 默认有效期 7200s，提前 60s 刷新
+        let ttl = result
+            .get("expire")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(7200);
+        let expiry = now + ttl.saturating_sub(60);
+        if let Ok(mut guard) = cache.lock() {
+            guard.insert(cache_key, (token.clone(), expiry));
+        }
         Ok(token)
     }
 }
@@ -7065,6 +8329,17 @@ fn qq_access_token(
     client: &reqwest::blocking::Client,
     binding: &MobileChannelBinding,
 ) -> Result<String, String> {
+    // B16: 先查缓存，QQ token 有 expires_in 字段，提前 60s 刷新
+    let cache_key = format!("qq:{}", binding.app_id.trim());
+    let now = (chrono_timestamp_millis() / 1000) as u64;
+    let cache = QQ_TOKEN_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some((token, expiry)) = guard.get(&cache_key) {
+            if now < *expiry {
+                return Ok(token.clone());
+            }
+        }
+    }
     let result = post_json_value(
         client,
         "https://bots.qq.com/app/getAppAccessToken".into(),
@@ -7080,8 +8355,111 @@ fn qq_access_token(
             platform_error_message(&result, "未返回 access_token")
         ))
     } else {
+        let ttl = result
+            .get("expires_in")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1800);
+        let expiry = now + ttl.saturating_sub(60);
+        if let Ok(mut guard) = cache.lock() {
+            guard.insert(cache_key, (token.clone(), expiry));
+        }
         Ok(token)
     }
+}
+
+/// 在字符序列里从 `from` 起找到第一个目标字符的下标。
+fn md_find_char(chars: &[char], from: usize, target: char) -> Option<usize> {
+    (from..chars.len()).find(|&j| chars[j] == target)
+}
+
+/// 把一行里的行内 Markdown 语法清理成纯文本：
+/// `[文字](链接)`/`![alt](链接)` → `文字 (链接)`；去掉 `**`、`__` 加粗标记与行内反引号。
+fn strip_inline_markdown(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let is_img = c == '!' && i + 1 < chars.len() && chars[i + 1] == '[';
+        if c == '[' || is_img {
+            let bracket = if is_img { i + 1 } else { i };
+            if let Some(close) = md_find_char(&chars, bracket + 1, ']') {
+                if close + 1 < chars.len() && chars[close + 1] == '(' {
+                    if let Some(rparen) = md_find_char(&chars, close + 2, ')') {
+                        let text: String = chars[bracket + 1..close].iter().collect();
+                        let url: String = chars[close + 2..rparen].iter().collect();
+                        let text = text.trim();
+                        let url = url.trim();
+                        if url.is_empty() {
+                            out.push_str(text);
+                        } else if text.is_empty() {
+                            out.push_str(url);
+                        } else {
+                            out.push_str(text);
+                            out.push_str(" (");
+                            out.push_str(url);
+                            out.push(')');
+                        }
+                        i = rparen + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out.replace("**", "").replace("__", "").replace('`', "")
+}
+
+/// 把 Codex 回复里的 Markdown 粗略转成整洁纯文本，供「不渲染 Markdown」的平台
+/// （QQ 官方机器人只能发纯文本）使用，避免 `#`、`**`、代码围栏等符号原样显示。
+/// 保守处理：只去装饰性符号，不改动正文与换行结构；代码围栏内的内容原样保留。
+fn markdown_to_plaintext(md: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut in_fence = false;
+    for raw in md.lines() {
+        let trimmed_start = raw.trim_start();
+        if trimmed_start.starts_with("```") || trimmed_start.starts_with("~~~") {
+            // 代码围栏标记行本身丢弃，围栏内容原样保留。
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            lines.push(raw.to_string());
+            continue;
+        }
+        let indent_len = raw.len() - raw.trim_start().len();
+        let indent = &raw[..indent_len];
+        let mut body = raw[indent_len..].to_string();
+        // 标题：去掉行首连续的 # 号及其后空格。
+        if body.starts_with('#') {
+            body = body.trim_start_matches('#').trim_start().to_string();
+        }
+        // 引用块：去掉行首 > 。
+        if body.starts_with('>') {
+            body = body[1..].trim_start().to_string();
+        }
+        // 无序列表符号统一成 • （有序列表的数字保留）。
+        let body = if body.starts_with("- ") || body.starts_with("* ") || body.starts_with("+ ") {
+            format!("• {}", &body[2..])
+        } else {
+            body
+        };
+        lines.push(format!("{indent}{}", strip_inline_markdown(&body)));
+    }
+    // 折叠连续空行（>=2 压成 1），并去掉首尾空白。
+    let mut result: Vec<String> = Vec::new();
+    let mut prev_blank = false;
+    for line in lines {
+        let is_blank = line.trim().is_empty();
+        if is_blank && prev_blank {
+            continue;
+        }
+        prev_blank = is_blank;
+        result.push(line);
+    }
+    result.join("\n").trim().to_string()
 }
 
 fn send_qq_text_reply(
@@ -7091,6 +8469,10 @@ fn send_qq_text_reply(
 ) -> Result<(), String> {
     let client = build_http_client(20)?;
     let token = qq_access_token(&client, binding)?;
+    // QQ 官方机器人只支持纯文本渲染，把 Markdown 清理成整洁纯文本再发，
+    // 否则 #、**、代码围栏等符号会原样显示（用户反馈“没格式”）。
+    let content = markdown_to_plaintext(content);
+    let content = content.as_str();
     let scene = json_string(message, &["scene"]);
     let group_openid = json_string(message, &["groupOpenid", "group_openid"]);
     let openid = json_string(message, &["openid", "openId", "userOpenid"]);
@@ -7113,14 +8495,14 @@ fn send_qq_text_reply(
             percent_encode_query_value(&openid)
         )
     };
-    for (index, chunk) in split_platform_reply_text(content, 1800, 5)
+    for (_index, chunk) in split_platform_reply_text(content, 1800, 5)
         .into_iter()
         .enumerate()
     {
         let mut payload = serde_json::json!({
             "content": chunk,
             "msg_type": 0,
-            "msg_seq": ((chrono_timestamp_millis() % 90_000_000) as usize + index + 1),
+            "msg_seq": QQ_MSG_SEQ.fetch_add(1, Ordering::SeqCst),
         });
         if let Some(object) = payload.as_object_mut() {
             if !message_id.is_empty() {
@@ -7359,12 +8741,19 @@ fn update_channel_status(app: &tauri::AppHandle, channel: &str, status: &str, er
         binding.updated_at = chrono_now();
     }
     let _ = write_toolbox_state(app, &state);
+    // B15: 主动推送最新快照给前端，弹窗关闭后的断线/重连也能被看到，
+    //      前端不必依赖短时轮询（listen("mobile-channel-status")）
+    let _ = app.emit("mobile-channel-status", build_toolbox_snapshot(app));
 }
 
 fn handle_lark_bridge_message(
     app: &tauri::AppHandle,
     payload: &serde_json::Value,
 ) -> Result<(), String> {
+    // B9: 串行锁，确保飞书消息按接收顺序处理完一条再处理下一条，防止 Codex 乱序响应
+    let _guard = LARK_MSG_LOCK
+        .lock()
+        .map_err(|e| format!("获取飞书消息处理锁失败: {e}"))?;
     let message_id = json_string(payload, &["messageId", "message_id"]);
     let chat_id = json_string(payload, &["chatId", "chat_id"]);
     let text = json_string(payload, &["text", "content"]);
@@ -7373,6 +8762,14 @@ fn handle_lark_bridge_message(
             "[mobile-control][lark] ignored empty message: message_id_empty={}, text_empty={}",
             message_id.is_empty(),
             text.is_empty()
+        );
+        return Ok(());
+    }
+    // B9: message_id 去重，防止飞书重投相同消息重复触发 Codex
+    if check_and_record_msg_id(&LARK_SEEN_MSG_IDS, &message_id) {
+        log_info!(
+            "[mobile-control][lark] duplicate message_id={}, skipped",
+            message_id
         );
         return Ok(());
     }
@@ -7388,23 +8785,39 @@ fn handle_lark_bridge_message(
         .find(|binding| binding.channel == "lark")
         .cloned()
         .ok_or("飞书通道不存在")?;
+    // B7: 解绑后通道进程虽已被停止，但若 handler 仍被调用要在此拒绝，
+    // 避免以 --ephemeral 在本机启动新 Codex 会话执行任意命令
+    if !binding.enabled || binding.thread_id.trim().is_empty() {
+        log_info!(
+            "[mobile-control][lark] rejected: channel disabled or no thread bound (enabled={}, thread_id='{}')",
+            binding.enabled, binding.thread_id
+        );
+        return Err("飞书通道未绑定会话，消息已忽略".into());
+    }
     let selected_thread = state
         .synced_codex_threads
         .iter()
-        .find(|thread| {
-            thread.id == binding.thread_id || thread.id == state.selected_mobile_thread_id
-        })
+        .find(|thread| thread.id == binding.thread_id)
         .cloned();
     let cwd = selected_thread
         .as_ref()
         .map(|thread| thread.cwd.as_str())
         .unwrap_or("");
+    let thread_id = selected_thread
+        .as_ref()
+        .map(|thread| thread.id.as_str())
+        .unwrap_or("");
+    // B7: 飞书同 QQ，防御绑定的会话不在 synced 列表时传空 thread_id 导致 --ephemeral 兜底
+    if thread_id.is_empty() {
+        log_info!(
+            "[mobile-control][lark] rejected: bound thread not in synced list (binding.thread_id='{}')",
+            binding.thread_id
+        );
+        return Err("飞书通道绑定的会话不存在，消息已忽略".into());
+    }
     log_info!(
         "[mobile-control][lark] dispatching to codex: thread_id={}, thread_name={}, cwd={}",
-        selected_thread
-            .as_ref()
-            .map(|thread| thread.id.as_str())
-            .unwrap_or(""),
+        thread_id,
         selected_thread
             .as_ref()
             .map(|thread| thread.thread_name.as_str())
@@ -7412,12 +8825,19 @@ fn handle_lark_bridge_message(
         cwd
     );
     update_channel_status(app, "lark", "收到飞书消息，正在发送给 Codex", "");
-    let thread_id = selected_thread
-        .as_ref()
-        .map(|thread| thread.id.as_str())
-        .unwrap_or("");
-    let reply = dispatch_codex_reply(thread_id, &text, cwd)
-        .map_err(|error| format!("Codex 执行失败：{error}"))?;
+    let reply = match dispatch_codex_reply(thread_id, &text, cwd) {
+        Ok(reply) => reply,
+        Err(error) => {
+            // B9: 执行失败也回传简短状态，手机端不会无响应且不泄露本机错误细节。
+            let _ = send_lark_text_reply(
+                &binding,
+                &message_id,
+                &chat_id,
+                "Codex 当前未完成本次请求，请稍后重试。",
+            );
+            return Err(format!("Codex 执行失败：{error}"));
+        }
+    };
     log_info!(
         "[mobile-control][lark] codex replied: message_id={}, reply_len={}",
         message_id,
@@ -7489,15 +8909,21 @@ fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Re
                 log_info!("[mobile-control][lark][stdout] {}", line);
                 continue;
             };
-            log_info!("[mobile-control][lark][event] {}", payload);
+            log_info!(
+                "[mobile-control][lark][event] type={}",
+                json_string(&payload, &["type"])
+            ); // B5: 不记录完整 payload，避免用户聊天原文写进日志
             match json_string(&payload, &["type"]).as_str() {
                 "ready" => {
                     update_channel_status(&app, "lark", "飞书智能体已在线，等待手机消息", "")
                 }
                 "message" => {
-                    if let Err(error) = handle_lark_bridge_message(&app, &payload) {
-                        update_channel_status(&app, "lark", "飞书消息处理失败", &error);
-                    }
+                    let message_app = app.clone();
+                    std::thread::spawn(move || {
+                        if let Err(error) = handle_lark_bridge_message(&message_app, &payload) {
+                            update_channel_status(&message_app, "lark", "飞书消息处理失败", &error);
+                        }
+                    });
                 }
                 "status" => {
                     let message = json_string(&payload, &["message"]);
@@ -7510,6 +8936,8 @@ fn start_lark_bridge(app: tauri::AppHandle, binding: MobileChannelBinding) -> Re
                 _ => {}
             }
         }
+        // B10: 飞书连接断开时主动上报状态，UI 显示"已断开"而非继续显示"在线"
+        update_channel_status(&app, "lark", "飞书连接已断开，看门狗将尝试重连", "");
         LARK_BRIDGE_ACTIVE.store(false, Ordering::SeqCst);
         if let Ok(mut guard) = LARK_BRIDGE_CHILD.lock() {
             let _ = guard.take().map(|mut child| child.wait());
@@ -7530,25 +8958,24 @@ fn stop_lark_bridge() {
     }
 }
 
-fn selected_thread_for_message(
-    state: &ToolboxState,
-    binding: &MobileChannelBinding,
-) -> Option<CodexThreadRecord> {
-    state
-        .synced_codex_threads
-        .iter()
-        .find(|thread| {
-            thread.id == binding.thread_id || thread.id == state.selected_mobile_thread_id
-        })
-        .cloned()
-}
+// B7: selected_thread_for_message 已不再使用，因为它有危险的 selected_mobile_thread_id 兜底。
+// 所有 handler (lark/qq/wechat) 现在都直接按 binding.thread_id 查找，找不到则拒绝。
 
 fn handle_qq_gateway_message(
     app: &tauri::AppHandle,
     payload: &serde_json::Value,
 ) -> Result<(), String> {
+    // B9: 串行锁，确保 QQ 消息按顺序处理
+    let _guard = QQ_MSG_LOCK
+        .lock()
+        .map_err(|e| format!("获取 QQ 消息处理锁失败: {e}"))?;
     let text = json_string(payload, &["content", "text"]);
     if text.is_empty() {
+        return Ok(());
+    }
+    // B9: QQ message_id/eventId 去重，防止网关重投相同消息重复触发 Codex
+    let qq_msg_key = json_string(payload, &["messageId", "eventId", "id"]);
+    if check_and_record_msg_id(&QQ_SEEN_MSG_IDS, &qq_msg_key) {
         return Ok(());
     }
     let state = read_toolbox_state(app);
@@ -7558,7 +8985,15 @@ fn handle_qq_gateway_message(
         .find(|binding| binding.channel == "qq")
         .cloned()
         .ok_or("QQ 通道不存在")?;
-    let selected_thread = selected_thread_for_message(&state, &binding);
+    // B7: 未绑定会话时拒绝执行，避免 --ephemeral 任意起新会话
+    if !binding.enabled || binding.thread_id.trim().is_empty() {
+        return Err("QQ 通道未绑定会话，消息已忽略".into());
+    }
+    let selected_thread = state
+        .synced_codex_threads
+        .iter()
+        .find(|thread| thread.id == binding.thread_id)
+        .cloned();
     let cwd = selected_thread
         .as_ref()
         .map(|thread| thread.cwd.clone())
@@ -7567,8 +9002,18 @@ fn handle_qq_gateway_message(
         .as_ref()
         .map(|thread| thread.id.as_str())
         .unwrap_or("");
+    if thread_id.is_empty() {
+        return Err("QQ 通道绑定的会话不存在，消息已忽略".into());
+    }
     update_channel_status(app, "qq", "收到 QQ 消息，正在发送给 Codex", "");
-    let reply = dispatch_codex_reply(thread_id, &text, &cwd)?;
+    let reply = match dispatch_codex_reply(thread_id, &text, &cwd) {
+        Ok(reply) => reply,
+        Err(error) => {
+            // B9: 失败时给 QQ 发送可见回执，避免用户只看到静默超时。
+            let _ = send_qq_text_reply(&binding, payload, "Codex 当前未完成本次请求，请稍后重试。");
+            return Err(format!("Codex 执行失败：{error}"));
+        }
+    };
     send_qq_text_reply(&binding, payload, &reply)?;
     update_channel_status(app, "qq", "Codex 回复已同步回 QQ", "");
     Ok(())
@@ -7605,8 +9050,18 @@ fn start_qq_gateway(app: tauri::AppHandle, binding: MobileChannelBinding) -> Res
         format!("启动 QQ 网关失败: {e}")
     })?;
     let stdout = child.stdout.take().ok_or("QQ 网关没有输出通道")?;
+    // B1: 消费 stderr，避免 Node 进程 stderr 缓冲区满后 write 阻塞（静默假死）
+    let stderr_opt = child.stderr.take();
     if let Ok(mut guard) = QQ_GATEWAY_CHILD.lock() {
         *guard = Some(child);
+    }
+    if let Some(stderr) = stderr_opt {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().flatten() {
+                log_info!("[mobile-control][qq][stderr] {}", line);
+            }
+        });
     }
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
@@ -7624,9 +9079,12 @@ fn start_qq_gateway(app: tauri::AppHandle, binding: MobileChannelBinding) -> Res
                     update_channel_status(&app, "qq", &message, "");
                 }
                 "message" => {
-                    if let Err(error) = handle_qq_gateway_message(&app, &payload) {
-                        update_channel_status(&app, "qq", "QQ 消息处理失败", &error);
-                    }
+                    let message_app = app.clone();
+                    std::thread::spawn(move || {
+                        if let Err(error) = handle_qq_gateway_message(&message_app, &payload) {
+                            update_channel_status(&message_app, "qq", "QQ 消息处理失败", &error);
+                        }
+                    });
                 }
                 "failure" => {
                     let error = json_string(&payload, &["message"]);
@@ -7635,6 +9093,8 @@ fn start_qq_gateway(app: tauri::AppHandle, binding: MobileChannelBinding) -> Res
                 _ => {}
             }
         }
+        // B10: QQ 网关断开时主动上报，UI 停留在"在线"而非正确显示"已断开"
+        update_channel_status(&app, "qq", "QQ 连接已断开，看门狗将尝试重连", "");
         QQ_GATEWAY_ACTIVE.store(false, Ordering::SeqCst);
         if let Ok(mut guard) = QQ_GATEWAY_CHILD.lock() {
             let _ = guard.take().map(|mut child| child.wait());
@@ -7720,6 +9180,10 @@ fn handle_wechat_bot_message(
     app: &tauri::AppHandle,
     payload: &serde_json::Value,
 ) -> Result<(), String> {
+    // B9: 串行锁，确保微信消息按顺序处理
+    let _guard = WECHAT_MSG_LOCK
+        .lock()
+        .map_err(|e| format!("获取微信消息处理锁失败: {e}"))?;
     let text = json_string(payload, &["content", "text"]);
     if text.is_empty() {
         return Ok(());
@@ -7731,7 +9195,15 @@ fn handle_wechat_bot_message(
         .find(|binding| binding.channel == "wechat")
         .cloned()
         .ok_or("微信通道不存在")?;
-    let selected_thread = selected_thread_for_message(&state, &binding);
+    // B7: 未绑定会话时拒绝执行，避免以 --ephemeral 任意起新 Codex 会话
+    if !binding.enabled || binding.thread_id.trim().is_empty() {
+        return Err("微信通道未绑定会话，消息已忽略".into());
+    }
+    let selected_thread = state
+        .synced_codex_threads
+        .iter()
+        .find(|thread| thread.id == binding.thread_id)
+        .cloned();
     let cwd = selected_thread
         .as_ref()
         .map(|thread| thread.cwd.clone())
@@ -7740,8 +9212,20 @@ fn handle_wechat_bot_message(
         .as_ref()
         .map(|thread| thread.id.as_str())
         .unwrap_or("");
+    // B7: 微信同 QQ，防御绑定的会话不在 synced 列表时传空 thread_id 导致 --ephemeral 兜底
+    if thread_id.is_empty() {
+        return Err("微信通道绑定的会话不存在，消息已忽略".into());
+    }
     update_channel_status(app, "wechat", "收到微信消息，正在发送给 Codex", "");
-    let reply = dispatch_codex_reply(thread_id, &text, &cwd)?;
+    let reply = match dispatch_codex_reply(thread_id, &text, &cwd) {
+        Ok(reply) => reply,
+        Err(error) => {
+            // B9: 失败时给微信发送可见回执，避免用户只看到静默超时。
+            let _ =
+                send_wechat_text_reply(&binding, payload, "Codex 当前未完成本次请求，请稍后重试。");
+            return Err(format!("Codex 执行失败：{error}"));
+        }
+    };
     send_wechat_text_reply(&binding, payload, &reply)?;
     update_channel_status(app, "wechat", "Codex 回复已同步回微信", "");
     Ok(())
@@ -7815,13 +9299,32 @@ fn start_wechat_listener(
             ) {
                 Ok(result) => result,
                 Err(error) => {
+                    let lower = error.to_lowercase();
+                    // B12: token 过期不再无限重试，立即停止并通知用户重新绑定
+                    if lower.contains("session timeout")
+                        || lower.contains("expired")
+                        || lower.contains("token")
+                    {
+                        update_channel_status(
+                            &app,
+                            "wechat",
+                            "微信 token 已过期，请清除绑定后重新扫码",
+                            &error,
+                        );
+                        break;
+                    }
                     update_channel_status(&app, "wechat", "微信消息拉取失败", &error);
                     std::thread::sleep(Duration::from_secs(3));
                     continue;
                 }
             };
             cursor = wechat_next_update_cursor(&result, &cursor);
-            for item in wechat_update_items(&result) {
+            let items = wechat_update_items(&result);
+            // B12: 空结果时不热循环，休眠 1 秒降低 CPU 和 API 调用频率
+            if items.is_empty() {
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            for item in items {
                 let Some(message) = parse_wechat_incoming_message(&item, &binding.account_id)
                 else {
                     continue;
@@ -7833,20 +9336,18 @@ fn start_wechat_listener(
                 if seen.len() > 300 {
                     seen.clear();
                 }
-                if let Err(error) = handle_wechat_bot_message(&app, &message) {
-                    update_channel_status(&app, "wechat", "微信消息处理失败", &error);
-                }
+                let message_app = app.clone();
+                std::thread::spawn(move || {
+                    if let Err(error) = handle_wechat_bot_message(&message_app, &message) {
+                        update_channel_status(&message_app, "wechat", "微信消息处理失败", &error);
+                    }
+                });
             }
         }
-        let _ = wechat_request_json(
-            &client,
-            "POST",
-            &binding.base_url,
-            "ilink/bot/msg/notifystop",
-            &binding.bot_token,
-            serde_json::json!({ "base_info": wechat_bot_base_info() }),
-        );
-        update_channel_status(&app, "wechat", "微信监听已停止", "");
+        // B10: 连接断开时上报状态，让 UI 显示"已断开"而非继续显示旧状态
+        // B17: 不再在此调 notifystop，stop_wechat_listener 是唯一的 notifystop 调用点，
+        //      避免 stop 后 start 线程再次 notifystop 产生双重调用
+        update_channel_status(&app, "wechat", "微信连接已断开，看门狗将尝试重连", "");
         WECHAT_LISTENER_ACTIVE.store(false, Ordering::SeqCst);
     });
     Ok(())
@@ -7880,6 +9381,22 @@ fn build_toolbox_snapshot(app: &tauri::AppHandle) -> ToolboxSnapshot {
     let config_text = fs::read_to_string(&config_path).unwrap_or_default();
     let current_source = state.plugin_marketplace_input.clone();
     let visible_threads = visible_codex_threads(&state);
+    // B5: 对发给前端的凭据字段掩码，避免 secret 通过 snapshot 暴露到 devtools/DOM
+    let masked_channels: Vec<MobileChannelBinding> = state
+        .mobile_channels
+        .iter()
+        .cloned()
+        .map(|mut ch| {
+            // 用布尔语义标记（非空 → "*"），前端判断 hasAppSecret 即可，无需明文
+            if !ch.app_secret.is_empty() {
+                ch.app_secret = "*".to_string();
+            }
+            if !ch.bot_token.is_empty() {
+                ch.bot_token = "*".to_string();
+            }
+            ch
+        })
+        .collect();
     ToolboxSnapshot {
         plugin_marketplace_input: current_source.clone(),
         plugin_marketplaces: list_plugin_marketplaces(&config_text, &current_source),
@@ -7892,7 +9409,7 @@ fn build_toolbox_snapshot(app: &tauri::AppHandle) -> ToolboxSnapshot {
             last_synced_at: state.session_sync.last_synced_at.clone(),
             total: visible_threads.len(),
         },
-        mobile_channels: state.mobile_channels.clone(),
+        mobile_channels: masked_channels,
         selected_mobile_thread_id: state.selected_mobile_thread_id.clone(),
         mobile_remote: state.mobile_remote.clone(),
         codex_home: codex_config_dir().to_string_lossy().to_string(),
@@ -8199,6 +9716,37 @@ fn read_json(path: &PathBuf) -> Result<serde_json::Value, String> {
 /// 读取 JSON 文件，如果不存在则返回默认值
 fn read_json_or_default(path: &PathBuf, default: serde_json::Value) -> serde_json::Value {
     read_json(path).unwrap_or(default)
+}
+
+/// 在 ~/.claude.json 中把 hasCompletedOnboarding 标记为 true。
+///
+/// Claude Code CLI 与 IDE 插件用这个字段判断是否需要展示首次使用引导。
+/// 切换 API Key / Base URL 之后如果它不是 true，用户下次打开就会被引导页拦住，
+/// 所以每次切换 Claude 配置时都顺带补齐。已经是 true 时不重写文件。
+fn mark_claude_onboarding_completed() -> Result<(), String> {
+    let path = claude_mcp_path(); // ~/.claude.json
+
+    let mut config = if path.exists() {
+        read_json(&path).map_err(|e| format!("读取 ~/.claude.json 失败: {e}"))?
+    } else {
+        serde_json::json!({})
+    };
+    if !config.is_object() {
+        config = serde_json::json!({});
+    }
+
+    if config
+        .get("hasCompletedOnboarding")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    config["hasCompletedOnboarding"] = serde_json::json!(true);
+    write_json(&path, &config).map_err(|e| format!("写入 ~/.claude.json 失败: {e}"))?;
+    log_info!("[claude] 已将 ~/.claude.json 的 hasCompletedOnboarding 置为 true");
+    Ok(())
 }
 
 fn write_json(path: &PathBuf, val: &serde_json::Value) -> Result<(), String> {
@@ -8696,6 +10244,7 @@ fn fetch_available_models(
     base_url: String,
     api_key: String,
     timeout_secs: Option<u64>,
+    protocol: Option<String>,
 ) -> Result<Vec<AvailableModel>, String> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
@@ -8709,15 +10258,40 @@ fn fetch_available_models(
         .build()
         .map_err(|e| e.to_string())?;
 
+    let is_gemini = protocol.as_deref() == Some("gemini");
+    let urls = if is_gemini {
+        let normalized = normalize_endpoint_url(&base_url)?;
+        if normalized.ends_with("/models") {
+            vec![normalized]
+        } else if normalized.ends_with("/v1beta") {
+            vec![format!("{normalized}/models")]
+        } else {
+            vec![format!("{normalized}/v1beta/models")]
+        }
+    } else {
+        models_endpoint_candidates(&base_url)?
+    };
+
+    let is_anthropic = matches!(protocol.as_deref(), Some("claude") | Some("anthropic"));
     let mut last_error = String::new();
-    for url in models_endpoint_candidates(&base_url)? {
-        match client
+    for url in urls {
+        let mut request = client
             .get(&url)
-            .bearer_auth(api_key)
             .header("Accept", "application/json")
-            .timeout(timeout)
-            .send()
-        {
+            .timeout(timeout);
+        request = if is_gemini {
+            request.header("x-goog-api-key", api_key)
+        } else if is_anthropic {
+            // Anthropic 官方要求 x-api-key + anthropic-version；
+            // 同时附带 Bearer 以兼容仅支持 OpenAI 风格鉴权的中转网关。
+            request
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01")
+                .bearer_auth(api_key)
+        } else {
+            request.bearer_auth(api_key)
+        };
+        match request.send() {
             Ok(resp) => {
                 let status = resp.status();
                 let body = resp.text().map_err(|e| e.to_string())?;
@@ -8729,7 +10303,13 @@ fn fetch_available_models(
                     .map_err(|e| format!("模型列表 JSON 解析失败: {e}"))?;
                 let models: Vec<AvailableModel> = extract_model_ids(&value)
                     .into_iter()
-                    .map(|id| AvailableModel { id })
+                    .map(|id| AvailableModel {
+                        id: if is_gemini {
+                            id.strip_prefix("models/").unwrap_or(&id).to_string()
+                        } else {
+                            id
+                        },
+                    })
                     .collect();
                 if models.is_empty() {
                     last_error = format!("{url} 没有返回可识别的模型 ID");
@@ -8763,17 +10343,23 @@ fn add_profile(
     api_key: String,
     base_url: String,
     model_id: Option<String>,
+    api_format: Option<String>,
 ) -> Result<Profile, String> {
-    if name.is_empty() || api_key.is_empty() || base_url.is_empty() {
-        return Err("所有字段都必须填写".into());
+    if name.trim().is_empty() || api_key.trim().is_empty() {
+        return Err("配置名称和 API Key 都必须填写".into());
+    }
+    let api_format = normalize_claude_api_format(&api_format.unwrap_or_default());
+    if api_format == "openai_chat" && base_url.trim().is_empty() {
+        return Err("OpenAI 格式必须填写上游 Base URL".into());
     }
     let mut data = read_profiles(&app);
     let profile = Profile {
         id: uuid::Uuid::new_v4().to_string(),
         name: name.trim().to_string(),
         api_key: api_key.trim().to_string(),
-        base_url: base_url.trim().trim_end_matches('/').to_string(),
+        base_url: resolve_base_url_or_default(&base_url, DEFAULT_ANTHROPIC_BASE_URL),
         model_id: model_id.unwrap_or_default().trim().to_string(),
+        api_format,
         is_active: false,
         created_at: chrono_now(),
     };
@@ -8790,6 +10376,7 @@ fn update_profile(
     api_key: String,
     base_url: String,
     model_id: Option<String>,
+    api_format: Option<String>,
 ) -> Result<Profile, String> {
     let mut data = read_profiles(&app);
     let p = data
@@ -8803,10 +10390,9 @@ fn update_profile(
     if !api_key.is_empty() {
         p.api_key = api_key.trim().to_string();
     }
-    if !base_url.is_empty() {
-        p.base_url = base_url.trim().trim_end_matches('/').to_string();
-    }
+    p.base_url = resolve_base_url_or_default(&base_url, DEFAULT_ANTHROPIC_BASE_URL);
     p.model_id = model_id.map(|m| m.trim().to_string()).unwrap_or_default();
+    p.api_format = normalize_claude_api_format(&api_format.unwrap_or_default());
     let updated = p.clone();
     write_profiles(&app, &data)?;
     Ok(updated)
@@ -8817,6 +10403,25 @@ fn delete_profile(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let mut data = read_profiles(&app);
     data.profiles.retain(|x| x.id != id);
     write_profiles(&app, &data)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeProxyStatus {
+    running: bool,
+    port: u16,
+    upstream_base_url: String,
+}
+
+#[tauri::command]
+fn get_claude_proxy_status() -> ClaudeProxyStatus {
+    ClaudeProxyStatus {
+        running: claude_proxy::is_running(),
+        port: claude_proxy::CLAUDE_PROXY_PORT,
+        upstream_base_url: claude_proxy::current_upstream()
+            .map(|u| u.base_url)
+            .unwrap_or_default(),
+    }
 }
 
 #[tauri::command]
@@ -8875,14 +10480,14 @@ fn cancel_switch(state: State<'_, AppState>) {
 }
 
 // ── 配置自动备份 ─────────────────────────────────────
-// 切换配置前自动快照 profiles.json / codex_profiles.json / grok_profiles.json，误操作可回滚。
+// 切换配置前自动快照各应用的 profiles 文件，误操作可回滚。
 
 /// 返回给前端的备份信息。
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConfigBackupInfo {
     name: String,  // 备份文件名
-    kind: String,  // "claude" | "codex" | "grok"
+    kind: String,  // "claude" | "codex" | "grok" | "gemini"
     stamp: String, // 紧凑时间戳，如 20260624-143025（前端格式化展示）
 }
 
@@ -8997,6 +10602,7 @@ fn auto_backup_configs(app: &tauri::AppHandle) {
     backup_one_config(&dir, &profiles_path(app), "profiles", &stamp);
     backup_one_config(&dir, &codex_profiles_path(app), "codex", &stamp);
     backup_one_config(&dir, &grok_profiles_path(app), "grok", &stamp);
+    backup_one_config(&dir, &gemini_profiles_path(app), "gemini", &stamp);
     let runtime_backup = backup_codex_runtime_files(app);
     // 同时备份 Grok CLI 运行时配置 ~/.grok/config.toml
     let grok_runtime_dir = dir.join("grok-runtime");
@@ -9011,6 +10617,7 @@ fn auto_backup_configs(app: &tauri::AppHandle) {
     prune_backups(&dir, "profiles", 20);
     prune_backups(&dir, "codex", 20);
     prune_backups(&dir, "grok", 20);
+    prune_backups(&dir, "gemini", 20);
     let runtime_dir = dir.join("codex-runtime");
     prune_backups(&runtime_dir, "config", 20);
     prune_backups(&runtime_dir, "auth", 20);
@@ -9075,6 +10682,7 @@ fn read_codex_config_diagnostics(app: &tauri::AppHandle) -> CodexConfigDiagnosti
         base_url: String::new(),
         image_api_key: String::new(),
         image_base_url: String::new(),
+        image_skill_installed: false,
     });
     let model_provider = toml_line_value(&config, "model_provider");
     let model = toml_line_value(&config, "model");
@@ -9133,6 +10741,10 @@ fn read_codex_config_diagnostics(app: &tauri::AppHandle) -> CodexConfigDiagnosti
     if auth_mode == "auth_json" && !auth_exists {
         issues.push("当前看起来需要 auth.json，但文件不存在".into());
     }
+    if !status.image_api_key.is_empty() && !status.image_skill_installed {
+        issues.push("图片 API 已配置，但 Codex 图片生成 Skill 尚未安装".into());
+        suggestions.push("重新同步当前 Codex 配置，然后重启 Codex".into());
+    }
     if plugin_marketplaces.is_empty() {
         suggestions.push("可在 Toolbox 安装 Codex 插件市场".into());
     }
@@ -9190,6 +10802,8 @@ fn list_config_backups(app: tauri::AppHandle) -> Vec<ConfigBackupInfo> {
             ("codex", rest.trim_end_matches(".json"))
         } else if let Some(rest) = fname.strip_prefix("grok-") {
             ("grok", rest.trim_end_matches(".json"))
+        } else if let Some(rest) = fname.strip_prefix("gemini-") {
+            ("gemini", rest.trim_end_matches(".json"))
         } else {
             continue;
         };
@@ -9220,6 +10834,8 @@ fn restore_config_backup(app: tauri::AppHandle, name: String) -> Result<(), Stri
         codex_profiles_path(&app)
     } else if name.starts_with("grok-") {
         grok_profiles_path(&app)
+    } else if name.starts_with("gemini-") {
+        gemini_profiles_path(&app)
     } else {
         return Err("无法识别的备份类型".into());
     };
@@ -9266,6 +10882,28 @@ fn switch_profile(
     // 切换前只备份配置文件；会话同步不属于切换热路径。
     auto_backup_configs(&app);
 
+    // OpenAI 格式的配置经本地代理转换协议：环境变量指向 127.0.0.1，
+    // 真实上游（base_url / key / 模型）写入代理状态。代理起不来时中止切换，
+    // 避免写入一个连不上的地址。
+    let effective_base_url = if profile.api_format == "openai_chat" {
+        claude_proxy::set_upstream(Some(claude_proxy::ProxyUpstream {
+            base_url: profile.base_url.clone(),
+            api_key: profile.api_key.clone(),
+            model: profile.model_id.clone(),
+        }));
+        claude_proxy::ensure_server()?;
+        log_info!(
+            "[claude-proxy] 配置 {} 走本地代理，转发至 {}",
+            profile.name,
+            profile.base_url
+        );
+        claude_proxy::local_base_url()
+    } else {
+        // 直连配置生效后清空上游，代理拒绝后续请求，避免旧配置被误用
+        claude_proxy::set_upstream(None);
+        profile.base_url.clone()
+    };
+
     if state.cancel_flag.load(Ordering::SeqCst) {
         return Ok(SwitchResult {
             success: false,
@@ -9277,7 +10915,7 @@ fn switch_profile(
     }
 
     emit_switch_progress(&app, 2, "system");
-    match apply_auth_to_system_env(&profile.api_key, &profile.base_url) {
+    match apply_auth_to_system_env(&profile.api_key, &effective_base_url) {
         Ok(_) => {
             broadcast_env_change();
             details.env_vars = true;
@@ -9313,7 +10951,7 @@ fn switch_profile(
             .get_mut("claudeCode.environmentVariables")
             .and_then(|v| v.as_array_mut())
         {
-            apply_auth_to_env_array(arr, &profile.api_key, &profile.base_url);
+            apply_auth_to_env_array(arr, &profile.api_key, &effective_base_url);
         }
         // 处理 claudeCode.selectedModel: 仅当 profile.model_id 非空时才写入
         if !profile.model_id.is_empty() {
@@ -9360,7 +10998,7 @@ fn switch_profile(
         settings["env"] = serde_json::json!({});
     }
     if let Some(env) = settings.get_mut("env").and_then(|v| v.as_object_mut()) {
-        apply_auth_to_env_object(env, &profile.api_key, &profile.base_url);
+        apply_auth_to_env_object(env, &profile.api_key, &effective_base_url);
     }
     // 处理 model: 仅当 profile.model_id 非空时才写入，逻辑与编辑器一致
     if !profile.model_id.is_empty() {
@@ -9369,6 +11007,12 @@ fn switch_profile(
     match write_json(&cp, &settings) {
         Ok(_) => details.claude = true,
         Err(e) => errors.push(format!("Claude: {}", e)),
+    }
+
+    // 切换配置后顺带标记引导已完成，避免 Claude Code CLI / IDE 插件
+    // 每次换 Key 都重新弹一遍 onboarding 向导。
+    if let Err(e) = mark_claude_onboarding_completed() {
+        errors.push(format!("Claude onboarding: {}", e));
     }
 
     if state.cancel_flag.load(Ordering::SeqCst) {
@@ -9399,6 +11043,15 @@ fn switch_profile(
     })
 }
 
+fn claude_model_from_settings(settings: &serde_json::Value) -> String {
+    settings
+        .get("model")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
 #[tauri::command]
 fn get_status(app: tauri::AppHandle) -> StatusResult {
     let settings = read_app_settings(&app);
@@ -9407,6 +11060,7 @@ fn get_status(app: tauri::AppHandle) -> StatusResult {
         base_url: reg_get_env(BASE_URL_ENV),
         image_api_key: String::new(),
         image_base_url: String::new(),
+        image_skill_installed: false,
     });
 
     // 动态检测已安装的编辑器并读取状态
@@ -9420,16 +11074,21 @@ fn get_status(app: tauri::AppHandle) -> StatusResult {
                 base_url: get_env_array_value(arr, BASE_URL_ENV).unwrap_or_default(),
                 image_api_key: String::new(),
                 image_base_url: String::new(),
+                image_skill_installed: false,
             })
         })() {
             editors.insert(editor.id.to_string(), status);
         }
     }
 
-    let claude = (|| -> Option<LocationStatus> {
-        let s = read_json(&claude_settings_path()).ok()?;
+    let claude_settings = read_json(&claude_settings_path()).ok();
+    let claude_model = claude_settings
+        .as_ref()
+        .map(claude_model_from_settings)
+        .unwrap_or_default();
+    let claude = claude_settings.as_ref().map(|s| {
         let env = s.get("env").and_then(|v| v.as_object());
-        Some(LocationStatus {
+        LocationStatus {
             api_key: env.map(read_auth_from_env_object).unwrap_or_default(),
             base_url: env
                 .and_then(|e| e.get(BASE_URL_ENV))
@@ -9438,13 +11097,15 @@ fn get_status(app: tauri::AppHandle) -> StatusResult {
                 .to_string(),
             image_api_key: String::new(),
             image_base_url: String::new(),
-        })
-    })();
+            image_skill_installed: false,
+        }
+    });
 
     StatusResult {
         env_vars,
         editors,
         claude,
+        claude_model,
     }
 }
 
@@ -9533,6 +11194,8 @@ fn import_current(app: tauri::AppHandle, name: String) -> Result<Profile, String
         api_key,
         base_url,
         model_id: String::new(),
+        // 导入的是本机直连环境变量，一律按 Anthropic 直连处理
+        api_format: default_claude_api_format(),
         is_active: true,
         created_at: chrono_now(),
     };
@@ -9559,26 +11222,28 @@ fn add_codex_profile(
     api_key: String,
     base_url: String,
     auth_mode: Option<String>,
+    wire_api: Option<String>,
     model: Option<String>,
     provider_name: Option<String>,
     image_api_key: Option<String>,
     image_base_url: Option<String>,
 ) -> Result<CodexProfile, String> {
-    if name.is_empty() || api_key.is_empty() || base_url.is_empty() {
-        return Err("所有字段都必须填写".into());
+    if name.trim().is_empty() || api_key.trim().is_empty() {
+        return Err("配置名称和 API Key 都必须填写".into());
     }
     let mut data = read_codex_profiles(&app);
     let profile = CodexProfile {
         id: uuid::Uuid::new_v4().to_string(),
         name: name.trim().to_string(),
         api_key: api_key.trim().to_string(),
-        base_url: base_url.trim().trim_end_matches('/').to_string(),
+        base_url: resolve_base_url_or_default(&base_url, DEFAULT_OPENAI_BASE_URL),
         auth_mode: auth_mode.unwrap_or_else(default_codex_auth_mode),
+        wire_api: normalize_codex_wire_api(&wire_api.unwrap_or_default()),
         model: model.unwrap_or_default().trim().to_string(),
         provider_name: provider_name.unwrap_or_default().trim().to_string(),
         image_api_key: image_api_key.unwrap_or_default().trim().to_string(),
         image_base_url: image_base_url
-            .unwrap_or_else(default_gpt_image_2_base_url_string)
+            .unwrap_or_default()
             .trim()
             .trim_end_matches('/')
             .to_string(),
@@ -9598,6 +11263,7 @@ fn update_codex_profile(
     api_key: String,
     base_url: String,
     auth_mode: Option<String>,
+    wire_api: Option<String>,
     model: Option<String>,
     provider_name: Option<String>,
     image_api_key: Option<String>,
@@ -9615,19 +11281,20 @@ fn update_codex_profile(
     if !api_key.is_empty() {
         p.api_key = api_key.trim().to_string();
     }
-    if !base_url.is_empty() {
-        p.base_url = base_url.trim().trim_end_matches('/').to_string();
-    }
+    p.base_url = resolve_base_url_or_default(&base_url, DEFAULT_OPENAI_BASE_URL);
     if let Some(mode) = auth_mode {
         if !mode.trim().is_empty() {
             p.auth_mode = mode.trim().to_string();
         }
     }
+    if let Some(wire) = wire_api {
+        p.wire_api = normalize_codex_wire_api(&wire);
+    }
     p.model = model.unwrap_or_default().trim().to_string();
     p.provider_name = provider_name.unwrap_or_default().trim().to_string();
     p.image_api_key = image_api_key.unwrap_or_default().trim().to_string();
     p.image_base_url = image_base_url
-        .unwrap_or_else(default_gpt_image_2_base_url_string)
+        .unwrap_or_default()
         .trim()
         .trim_end_matches('/')
         .to_string();
@@ -9657,12 +11324,38 @@ fn switch_codex_profile(app: tauri::AppHandle, id: String) -> Result<(), String>
     auto_backup_configs(&app);
 
     write_codex_config(&profile)?;
+    configure_codex_image_skill(&profile)?;
 
     for p in data.profiles.iter_mut() {
         p.is_active = p.id == profile.id;
     }
     write_codex_profiles(&app, &data)?;
     Ok(())
+}
+
+fn build_imported_codex_profile(
+    name: String,
+    status: LocationStatus,
+    auth_mode: String,
+) -> CodexProfile {
+    CodexProfile {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: if name.is_empty() {
+            "导入的 Codex 配置".into()
+        } else {
+            name
+        },
+        api_key: status.api_key,
+        base_url: status.base_url,
+        auth_mode,
+        wire_api: default_codex_wire_api(),
+        model: String::new(),
+        provider_name: String::new(),
+        image_api_key: status.image_api_key,
+        image_base_url: status.image_base_url,
+        is_active: true,
+        created_at: chrono_now(),
+    }
 }
 
 #[tauri::command]
@@ -9690,27 +11383,9 @@ fn import_codex_current(app: tauri::AppHandle, name: String) -> Result<CodexProf
         return Err("该配置已存在".into());
     }
 
-    let profile = CodexProfile {
-        id: uuid::Uuid::new_v4().to_string(),
-        name: if name.is_empty() {
-            "导入的 Codex 配置".into()
-        } else {
-            name
-        },
-        api_key: status.api_key,
-        base_url: status.base_url,
-        auth_mode,
-        model: String::new(),
-        provider_name: String::new(),
-        image_api_key: status.image_api_key,
-        image_base_url: if status.image_base_url.trim().is_empty() {
-            default_gpt_image_2_base_url_string()
-        } else {
-            status.image_base_url
-        },
-        is_active: true,
-        created_at: chrono_now(),
-    };
+    let profile = build_imported_codex_profile(name, status, auth_mode);
+
+    configure_codex_image_skill(&profile)?;
 
     for p in data.profiles.iter_mut() {
         p.is_active = false;
@@ -9837,7 +11512,8 @@ fn switch_grok_profile(app: tauri::AppHandle, id: String) -> Result<(), String> 
 
 #[tauri::command]
 fn import_grok_current(app: tauri::AppHandle, name: String) -> Result<GrokProfile, String> {
-    let status = read_grok_status().ok_or("未检测到当前 Grok 配置（~/.grok/config.toml 或环境变量）")?;
+    let status =
+        read_grok_status().ok_or("未检测到当前 Grok 配置（~/.grok/config.toml 或环境变量）")?;
     if status.api_key.is_empty() {
         return Err("未检测到 API Key（请检查 ~/.grok/config.toml 或 XAI_API_KEY）".into());
     }
@@ -9913,6 +11589,140 @@ fn open_grok_config_folder() -> Result<(), String> {
     let dir = grok_config_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("创建 ~/.grok 失败: {e}"))?;
     open_folder(dir.to_string_lossy().to_string())
+}
+
+// ── Gemini Profile Commands ─────────────────────────
+
+#[tauri::command]
+fn get_gemini_profiles(app: tauri::AppHandle) -> GeminiProfilesData {
+    read_gemini_profiles(&app)
+}
+
+#[tauri::command]
+fn add_gemini_profile(
+    app: tauri::AppHandle,
+    name: String,
+    api_key: String,
+    base_url: String,
+    model: Option<String>,
+) -> Result<GeminiProfile, String> {
+    if name.trim().is_empty() || api_key.trim().is_empty() {
+        return Err("配置名称和 API Key 都必须填写".into());
+    }
+    let profile = GeminiProfile {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: name.trim().to_string(),
+        api_key: api_key.trim().to_string(),
+        base_url: base_url.trim().trim_end_matches('/').to_string(),
+        model: model.unwrap_or_default().trim().to_string(),
+        is_active: false,
+        created_at: chrono_now(),
+    };
+    let mut data = read_gemini_profiles(&app);
+    data.profiles.push(profile.clone());
+    write_gemini_profiles(&app, &data)?;
+    Ok(profile)
+}
+
+#[tauri::command]
+fn update_gemini_profile(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+    api_key: String,
+    base_url: String,
+    model: Option<String>,
+) -> Result<GeminiProfile, String> {
+    let mut data = read_gemini_profiles(&app);
+    let profile = data
+        .profiles
+        .iter_mut()
+        .find(|profile| profile.id == id)
+        .ok_or("配置未找到")?;
+    if !name.trim().is_empty() {
+        profile.name = name.trim().to_string();
+    }
+    if !api_key.trim().is_empty() {
+        profile.api_key = api_key.trim().to_string();
+    }
+    profile.base_url = resolve_base_url_or_default(&base_url, DEFAULT_GEMINI_BASE_URL);
+    profile.model = model.unwrap_or_default().trim().to_string();
+    let updated = profile.clone();
+    write_gemini_profiles(&app, &data)?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn delete_gemini_profile(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let mut data = read_gemini_profiles(&app);
+    data.profiles.retain(|profile| profile.id != id);
+    write_gemini_profiles(&app, &data)
+}
+
+#[tauri::command]
+fn switch_gemini_profile(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let mut data = read_gemini_profiles(&app);
+    let profile = data
+        .profiles
+        .iter()
+        .find(|profile| profile.id == id)
+        .ok_or("配置未找到")?
+        .clone();
+
+    auto_backup_configs(&app);
+    write_gemini_settings(&profile)?;
+    apply_gemini_to_system_env(&profile)?;
+    broadcast_env_change();
+
+    for item in data.profiles.iter_mut() {
+        item.is_active = item.id == profile.id;
+    }
+    write_gemini_profiles(&app, &data)
+}
+
+#[tauri::command]
+fn import_gemini_current(app: tauri::AppHandle, name: String) -> Result<GeminiProfile, String> {
+    let status = read_gemini_runtime_status();
+    if status.api_key.is_empty() {
+        return Err("未检测到 GEMINI_API_KEY".into());
+    }
+    let mut data = read_gemini_profiles(&app);
+    if data
+        .profiles
+        .iter()
+        .any(|profile| profile.api_key == status.api_key && profile.base_url == status.base_url)
+    {
+        return Err("该配置已存在".into());
+    }
+    for profile in data.profiles.iter_mut() {
+        profile.is_active = false;
+    }
+    let profile = GeminiProfile {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: if name.trim().is_empty() {
+            "导入的 Gemini 配置".into()
+        } else {
+            name.trim().to_string()
+        },
+        api_key: status.api_key,
+        base_url: status.base_url,
+        model: status.model,
+        is_active: true,
+        created_at: chrono_now(),
+    };
+    data.profiles.push(profile.clone());
+    write_gemini_profiles(&app, &data)?;
+    Ok(profile)
+}
+
+#[tauri::command]
+fn get_gemini_status() -> Option<GeminiRuntimeStatus> {
+    let status = read_gemini_runtime_status();
+    if status.api_key.is_empty() && !status.settings_exists {
+        None
+    } else {
+        Some(status)
+    }
 }
 
 #[tauri::command]
@@ -10274,6 +12084,13 @@ fn configure_mobile_channel(
             .mobile_channels
             .push(default_mobile_channel(&normalized_channel));
     }
+    // B11: 保存旧凭据，用于判断是否需要重启运行中的通道
+    let old_creds: (String, String, String) = state
+        .mobile_channels
+        .iter()
+        .find(|b| b.channel == normalized_channel)
+        .map(|b| (b.app_id.clone(), b.app_secret.clone(), b.bot_token.clone()))
+        .unwrap_or_default();
     if let Some(binding) = state
         .mobile_channels
         .iter_mut()
@@ -10304,17 +12121,55 @@ fn configure_mobile_channel(
         attach_selected_thread_to_mobile_channel(&mut state, &normalized_channel);
     }
     write_toolbox_state(&app, &state)?;
+    // B11: 如果凭据变化且通道正在运行，停止旧连接（看门狗会用新凭据重启）
+    let new_creds: (String, String, String) = state
+        .mobile_channels
+        .iter()
+        .find(|b| b.channel == normalized_channel)
+        .map(|b| (b.app_id.clone(), b.app_secret.clone(), b.bot_token.clone()))
+        .unwrap_or_default();
+    if old_creds != new_creds {
+        match normalized_channel.as_str() {
+            "lark" if LARK_BRIDGE_ACTIVE.load(Ordering::SeqCst) => {
+                log_info!("[mobile-control][configure] 飞书凭据变更，停止旧连接");
+                stop_lark_bridge();
+            }
+            "qq" if QQ_GATEWAY_ACTIVE.load(Ordering::SeqCst) => {
+                log_info!("[mobile-control][configure] QQ 凭据变更，停止旧连接");
+                stop_qq_gateway();
+            }
+            "wechat" if WECHAT_LISTENER_ACTIVE.load(Ordering::SeqCst) => {
+                log_info!("[mobile-control][configure] 微信凭据变更，停止旧连接");
+                stop_wechat_listener(&app);
+            }
+            _ => {}
+        }
+    }
     Ok(build_toolbox_snapshot(&app))
 }
 
+// B4: 改 async + spawn_blocking，注册请求含网络往返，同步执行会卡 UI
 #[tauri::command]
-fn start_lark_bot_registration(
+async fn start_lark_bot_registration(
     app: tauri::AppHandle,
     create_only: Option<bool>,
 ) -> Result<ToolboxSnapshot, String> {
-    if LARK_REGISTRATION_ACTIVE.swap(true, Ordering::SeqCst) {
-        return Ok(build_toolbox_snapshot(&app));
-    }
+    tauri::async_runtime::spawn_blocking(move || {
+        start_lark_bot_registration_blocking(app, create_only)
+    })
+    .await
+    .map_err(|e| format!("飞书注册后台任务失败: {e}"))?
+}
+
+fn start_lark_bot_registration_blocking(
+    app: tauri::AppHandle,
+    create_only: Option<bool>,
+) -> Result<ToolboxSnapshot, String> {
+    // 新点击直接取代旧流程：先递增代际，旧轮询 worker 在下一轮检查时自行退出。
+    // 此前这里用 ACTIVE 标志静默早退——旧 worker 可存活十来分钟，期间“创建/换绑”
+    // 按钮点了没任何反应（前端还提示成功），表现为按钮大面积“失败”。
+    let my_generation = LARK_REGISTRATION_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    LARK_REGISTRATION_ACTIVE.store(true, Ordering::SeqCst);
     let create_only = create_only.unwrap_or(true);
     let existing_app_id = read_toolbox_state(&app)
         .mobile_channels
@@ -10369,12 +12224,19 @@ fn start_lark_bot_registration(
         binding.updated_at = chrono_now();
     }
     write_toolbox_state(&app, &state)?;
-    start_lark_registration_poll_worker(app.clone(), device_code, interval);
+    start_lark_registration_poll_worker(app.clone(), device_code, interval, my_generation);
     Ok(build_toolbox_snapshot(&app))
 }
 
+// B4: 命令改 async + spawn_blocking，避免 15 秒阻塞 POST 卡死主线程（前端每秒调一次）
 #[tauri::command]
-fn poll_lark_bot_registration(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+async fn poll_lark_bot_registration(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || poll_lark_bot_registration_blocking(app))
+        .await
+        .map_err(|e| format!("飞书注册轮询后台任务失败: {e}"))?
+}
+
+fn poll_lark_bot_registration_blocking(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
     let state = read_toolbox_state(&app);
     let binding = state
         .mobile_channels
@@ -10397,8 +12259,15 @@ fn poll_lark_bot_registration(app: tauri::AppHandle) -> Result<ToolboxSnapshot, 
 }
 
 #[tauri::command]
-fn open_lark_bot_launcher(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
-    match start_lark_bot_registration(app.clone(), Some(true)) {
+async fn open_lark_bot_launcher(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || open_lark_bot_launcher_blocking(app))
+        .await
+        .map_err(|e| format!("飞书启动器后台任务失败: {e}"))?
+}
+
+fn open_lark_bot_launcher_blocking(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    // B4: start_lark_bot_registration 已改 async，这里调用同步的 blocking 版本
+    match start_lark_bot_registration_blocking(app.clone(), Some(true)) {
         Ok(snapshot) => Ok(snapshot),
         Err(_) => {
             let url = lark_create_bot_launcher_url();
@@ -10422,14 +12291,33 @@ fn open_lark_bot_launcher(app: tauri::AppHandle) -> Result<ToolboxSnapshot, Stri
 }
 
 #[tauri::command]
-fn clear_mobile_channel_binding(
+async fn clear_mobile_channel_binding(
+    app: tauri::AppHandle,
+    channel: String,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        clear_mobile_channel_binding_blocking(app, channel)
+    })
+    .await
+    .map_err(|e| format!("清除手机通道绑定后台任务失败: {e}"))?
+}
+
+fn clear_mobile_channel_binding_blocking(
     app: tauri::AppHandle,
     channel: String,
 ) -> Result<ToolboxSnapshot, String> {
     let normalized_channel = normalize_mobile_channel(&channel);
     match normalized_channel.as_str() {
-        "lark" => stop_lark_bridge(),
-        "qq" => stop_qq_gateway(),
+        "lark" => {
+            // B13: 清除绑定后使正在运行的注册轮询立刻失效，避免旧 worker 回写凭据。
+            LARK_REGISTRATION_GENERATION.fetch_add(1, Ordering::SeqCst);
+            LARK_REGISTRATION_ACTIVE.store(false, Ordering::SeqCst);
+            stop_lark_bridge();
+        }
+        "qq" => {
+            stop_qq_gateway();
+            cancel_qq_qr_binding_process();
+        }
         "wechat" => stop_wechat_listener(&app),
         _ => {}
     }
@@ -10455,65 +12343,142 @@ fn clear_mobile_channel_binding(
     Ok(build_toolbox_snapshot(&app))
 }
 
+fn cancel_qq_qr_binding_process() {
+    let _state_guard = match QQ_QR_STATE_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    QQ_QR_GENERATION.fetch_add(1, Ordering::SeqCst);
+    QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+    if let Ok(mut guard) = QQ_QR_CHILD.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+fn write_qq_qr_state_for_generation(
+    app: &tauri::AppHandle,
+    generation: u64,
+    status: &str,
+    qr_url: &str,
+    qr_data_url: &str,
+    error: &str,
+) -> bool {
+    let Ok(_state_guard) = QQ_QR_STATE_LOCK.lock() else {
+        return false;
+    };
+    if QQ_QR_GENERATION.load(Ordering::SeqCst) != generation {
+        return false;
+    }
+    let _ = write_mobile_channel_qr_state(app, "qq", status, qr_url, qr_data_url, error);
+    true
+}
+
+fn save_qq_qr_credentials_for_generation(
+    app: &tauri::AppHandle,
+    generation: u64,
+    app_id: &str,
+    app_secret: &str,
+) -> bool {
+    let Ok(_state_guard) = QQ_QR_STATE_LOCK.lock() else {
+        return false;
+    };
+    if QQ_QR_GENERATION.load(Ordering::SeqCst) != generation {
+        return false;
+    }
+    let _ =
+        update_mobile_channel_credentials_from_qr(app, "qq", app_id, app_secret, "", "", "", "");
+    true
+}
+
+fn finish_qq_qr_generation(generation: u64) {
+    let Ok(_state_guard) = QQ_QR_STATE_LOCK.lock() else {
+        return;
+    };
+    if QQ_QR_GENERATION.load(Ordering::SeqCst) != generation {
+        return;
+    }
+    if let Ok(mut guard) = QQ_QR_CHILD.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+}
+
 #[tauri::command]
-fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+async fn cancel_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        cancel_qq_qr_binding_process();
+        let _ = write_mobile_channel_qr_state(&app, "qq", "已取消 QQ 扫码绑定", "", "", "");
+        Ok(build_toolbox_snapshot(&app))
+    })
+    .await
+    .map_err(|e| format!("取消 QQ 扫码后台任务失败: {e}"))?
+}
+
+#[tauri::command]
+async fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || start_qq_qr_binding_blocking(app))
+        .await
+        .map_err(|e| format!("启动 QQ 扫码后台任务失败: {e}"))?
+}
+
+fn start_qq_qr_binding_blocking(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
     if QQ_QR_ACTIVE.swap(true, Ordering::SeqCst) {
-        let _ = write_mobile_channel_qr_state(
-            &app,
-            "qq",
-            "QQ 扫码绑定正在进行中，请稍等二维码刷新",
-            "",
-            "",
-            "",
-        );
+        // 保留当前二维码和状态；重复点击不能把已经生成的二维码清空。
         return Ok(build_toolbox_snapshot(&app));
     }
 
+    let generation = QQ_QR_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let _ = write_mobile_channel_qr_state(&app, "qq", "正在准备 QQ 扫码绑定服务...", "", "", "");
     let app_for_thread = app.clone();
     std::thread::spawn(move || {
         let runner = match ensure_qq_qr_connector(&app_for_thread) {
             Ok(path) => path,
             Err(error) => {
-                let _ = write_mobile_channel_qr_state(
+                write_qq_qr_state_for_generation(
                     &app_for_thread,
-                    "qq",
+                    generation,
                     "QQ 扫码绑定失败",
                     "",
                     "",
                     &error,
                 );
-                QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+                finish_qq_qr_generation(generation);
                 return;
             }
         };
         let node = match node_command_name() {
             Ok(command) => command,
             Err(error) => {
-                let _ = write_mobile_channel_qr_state(
+                write_qq_qr_state_for_generation(
                     &app_for_thread,
-                    "qq",
+                    generation,
                     "QQ 扫码绑定失败",
                     "",
                     "",
                     &error,
                 );
-                QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+                finish_qq_qr_generation(generation);
                 return;
             }
         };
         let connector_dir = match runner.parent() {
             Some(parent) => parent.to_path_buf(),
             None => {
-                let _ = write_mobile_channel_qr_state(
+                write_qq_qr_state_for_generation(
                     &app_for_thread,
-                    "qq",
+                    generation,
                     "QQ 扫码绑定失败",
                     "",
                     "",
                     "QQ 扫码运行目录不存在",
                 );
-                QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+                finish_qq_qr_generation(generation);
                 return;
             }
         };
@@ -10528,24 +12493,24 @@ fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(error) => {
-                let _ = write_mobile_channel_qr_state(
+                write_qq_qr_state_for_generation(
                     &app_for_thread,
-                    "qq",
+                    generation,
                     "QQ 扫码绑定失败",
                     "",
                     "",
                     &format!("启动 QQ 扫码服务失败: {error}"),
                 );
-                QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+                finish_qq_qr_generation(generation);
                 return;
             }
         };
         let stdout = match child.stdout.take() {
             Some(stdout) => stdout,
             None => {
-                let _ = write_mobile_channel_qr_state(
+                write_qq_qr_state_for_generation(
                     &app_for_thread,
-                    "qq",
+                    generation,
                     "QQ 扫码绑定失败",
                     "",
                     "",
@@ -10553,12 +12518,74 @@ fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
                 );
                 let _ = child.kill();
                 let _ = child.wait();
-                QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+                finish_qq_qr_generation(generation);
                 return;
             }
         };
-        let reader = BufReader::new(stdout);
-        for line in reader.lines().flatten() {
+        // B1: 消费 stderr，防止缓冲区满后 write 阻塞造成进程假死
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().flatten() {
+                    log_info!("[mobile-control][qq-qr][stderr] {}", line);
+                }
+            });
+        }
+        // 取消可能发生在进程启动和保存句柄之间。过期轮次自行回收，不能覆盖新轮次句柄。
+        // B2: 保存子进程句柄，方便外部取消；同时加 5 分钟总超时。
+        // 与取消操作共用状态锁，防止取消刚发生又写回新的子进程句柄。
+        let mut child = Some(child);
+        let keep_child = if let Ok(_state_guard) = QQ_QR_STATE_LOCK.lock() {
+            if QQ_QR_GENERATION.load(Ordering::SeqCst) == generation {
+                if let Ok(mut guard) = QQ_QR_CHILD.lock() {
+                    *guard = child.take();
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if !keep_child {
+            if let Some(mut child) = child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            return;
+        }
+        let (line_tx, line_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().flatten() {
+                if line_tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let deadline = Instant::now() + Duration::from_secs(300);
+        loop {
+            if QQ_QR_GENERATION.load(Ordering::SeqCst) != generation {
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                write_qq_qr_state_for_generation(
+                    &app_for_thread,
+                    generation,
+                    "QQ 扫码已超时（5 分钟），请重新尝试",
+                    "",
+                    "",
+                    "扫码总超时",
+                );
+                break;
+            }
+            let line = match line_rx.recv_timeout(Duration::from_secs(1)) {
+                Ok(line) => line,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
             let Ok(payload) = serde_json::from_str::<serde_json::Value>(&line) else {
                 continue;
             };
@@ -10572,9 +12599,9 @@ fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
                         data_url = generate_qr_code_data_url(&url).unwrap_or_default();
                     }
                     if data_url.is_empty() || !data_url.starts_with("data:image/") {
-                        let _ = write_mobile_channel_qr_state(
+                        write_qq_qr_state_for_generation(
                             &app_for_thread,
-                            "qq",
+                            generation,
                             "QQ 扫码绑定失败",
                             "",
                             "",
@@ -10582,9 +12609,9 @@ fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
                         );
                         break;
                     }
-                    let _ = write_mobile_channel_qr_state(
+                    write_qq_qr_state_for_generation(
                         &app_for_thread,
-                        "qq",
+                        generation,
                         "请用 QQ 扫描二维码完成机器人绑定",
                         &url,
                         &data_url,
@@ -10618,22 +12645,18 @@ fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
                             "client_secret",
                         ],
                     );
-                    let _ = update_mobile_channel_credentials_from_qr(
+                    save_qq_qr_credentials_for_generation(
                         &app_for_thread,
-                        "qq",
+                        generation,
                         &app_id,
                         &app_secret,
-                        "",
-                        "",
-                        "",
-                        "",
                     );
                     break;
                 }
                 "expired" => {
-                    let _ = write_mobile_channel_qr_state(
+                    write_qq_qr_state_for_generation(
                         &app_for_thread,
-                        "qq",
+                        generation,
                         "二维码已过期，请重新绑定",
                         "",
                         "",
@@ -10643,9 +12666,9 @@ fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
                 }
                 "failure" => {
                     let message = json_string(&payload, &["message"]);
-                    let _ = write_mobile_channel_qr_state(
+                    write_qq_qr_state_for_generation(
                         &app_for_thread,
-                        "qq",
+                        generation,
                         "QQ 扫码绑定失败",
                         "",
                         "",
@@ -10656,8 +12679,9 @@ fn start_qq_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String>
                 _ => {}
             }
         }
-        let _ = child.wait();
-        QQ_QR_ACTIVE.store(false, Ordering::SeqCst);
+        // B2: 无论正常结束/超时/expired，都先 kill 子进程，再清 ACTIVE
+        // 这样 child.wait() 不会永久阻塞（runner 过期后本身不退出）
+        finish_qq_qr_generation(generation);
     });
 
     Ok(build_toolbox_snapshot(&app))
@@ -10793,8 +12817,18 @@ fn start_wechat_qr_binding(app: tauri::AppHandle) -> Result<ToolboxSnapshot, Str
     Ok(build_toolbox_snapshot(&app))
 }
 
+// B4: 命令改 async + spawn_blocking，避免 35 秒阻塞 GET 卡死主线程（前端每秒调一次）
 #[tauri::command]
-fn poll_wechat_qr_binding(
+async fn poll_wechat_qr_binding(
+    app: tauri::AppHandle,
+    verify_code: Option<String>,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || poll_wechat_qr_binding_blocking(app, verify_code))
+        .await
+        .map_err(|e| format!("微信扫码轮询后台任务失败: {e}"))?
+}
+
+fn poll_wechat_qr_binding_blocking(
     app: tauri::AppHandle,
     verify_code: Option<String>,
 ) -> Result<ToolboxSnapshot, String> {
@@ -10965,7 +12999,19 @@ fn bind_codex_thread(
 }
 
 #[tauri::command]
-fn unbind_codex_thread(app: tauri::AppHandle, channel: String) -> Result<ToolboxSnapshot, String> {
+async fn unbind_codex_thread(
+    app: tauri::AppHandle,
+    channel: String,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || unbind_codex_thread_blocking(app, channel))
+        .await
+        .map_err(|e| format!("解绑手机会话后台任务失败: {e}"))?
+}
+
+fn unbind_codex_thread_blocking(
+    app: tauri::AppHandle,
+    channel: String,
+) -> Result<ToolboxSnapshot, String> {
     let normalized_channel = normalize_mobile_channel(&channel);
     log_info!(
         "[mobile-control][unbind] request: channel={}, normalized={}",
@@ -10991,21 +13037,38 @@ fn unbind_codex_thread(app: tauri::AppHandle, channel: String) -> Result<Toolbox
         binding.updated_at = chrono_now();
     }
     write_toolbox_state(&app, &state)?;
+    // B7: 解绑时停止对应平台通道，确保手机侧消息不再驱动本机 Codex
+    match normalized_channel.as_str() {
+        "lark" => stop_lark_bridge(),
+        "qq" => stop_qq_gateway(),
+        "wechat" => stop_wechat_listener(&app),
+        _ => {}
+    }
     log_info!(
-        "[mobile-control][unbind] saved: channel={}",
+        "[mobile-control][unbind] stopped channel and saved: channel={}",
         normalized_channel
     );
     Ok(build_toolbox_snapshot(&app))
 }
 
 #[tauri::command]
-fn start_mobile_remote(
+async fn start_mobile_remote(
     app: tauri::AppHandle,
-    state: State<AppState>,
+    _state: State<'_, AppState>,
     port: Option<u16>,
 ) -> Result<ToolboxSnapshot, String> {
-    let _ = state;
+    tauri::async_runtime::spawn_blocking(move || start_mobile_remote_blocking(app, port))
+        .await
+        .map_err(|e| format!("启动手机连接后台任务失败: {e}"))?
+}
+
+fn start_mobile_remote_blocking(
+    app: tauri::AppHandle,
+    port: Option<u16>,
+) -> Result<ToolboxSnapshot, String> {
     let _ = port;
+    // B4: 通道 probe 等重活已在 run_mobile_remote_start 的后台线程里执行，
+    //     这里只做 state 写入和 120ms 探测等待，不阻塞长时间网络往返
     log_info!("[mobile-control][start] start_mobile_remote requested");
     MOBILE_REMOTE_CANCEL_REQUESTED.store(false, Ordering::SeqCst);
     let already_starting = MOBILE_REMOTE_START_ACTIVE.swap(true, Ordering::SeqCst);
@@ -11181,20 +13244,38 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
 
     // 看门狗：后台持续监控各平台连接，断线后自动重启（最多等 5 分钟才重试）
     if toolbox_state.mobile_remote.enabled {
+        // B3: 保证看门狗单例——start→stop→start 快速切换时旧看门狗已退出才能起新的
+        if WATCHDOG_ACTIVE.swap(true, Ordering::SeqCst) {
+            log_info!("[mobile-control][watchdog] 已有看门狗在运行，跳过重复启动");
+            return;
+        }
         let watchdog_app = app.clone();
         std::thread::spawn(move || {
+            // B3: 辅助函数：分片睡眠，每 1 秒检查一次取消标志，避免停止后长时间不响应
+            fn interruptible_sleep(secs: u64) {
+                for _ in 0..secs {
+                    if MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+            }
+
             let mut fail_counts: std::collections::HashMap<&str, u32> =
                 std::collections::HashMap::new();
             loop {
-                // 每 30 秒轮询一次
-                std::thread::sleep(Duration::from_secs(30));
+                // 每 30 秒轮询一次（分片睡眠，可随时响应取消）
+                interruptible_sleep(30);
                 if MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst) {
                     log_info!("[mobile-control][watchdog] 已停止（用户取消）");
                     break;
                 }
                 let state = read_toolbox_state(&watchdog_app);
-                if !state.mobile_remote.enabled {
-                    log_info!("[mobile-control][watchdog] remote 已禁用，看门狗退出");
+                // B3: 重读 state 后再次复查 enabled + cancel 标志
+                if !state.mobile_remote.enabled
+                    || MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst)
+                {
+                    log_info!("[mobile-control][watchdog] remote 已禁用或已取消，看门狗退出");
                     break;
                 }
                 // 检查飞书
@@ -11212,7 +13293,15 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                             delay,
                             *cnt + 1
                         );
-                        std::thread::sleep(Duration::from_secs(delay));
+                        interruptible_sleep(delay);
+                        // B3: 退避后重读 state + cancel 标志，避免停止后继续拉起桥接
+                        if MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let fresh = read_toolbox_state(&watchdog_app);
+                        if !fresh.mobile_remote.enabled {
+                            break;
+                        }
                         match start_lark_bridge(watchdog_app.clone(), binding) {
                             Ok(_) => {
                                 *cnt = 0;
@@ -11247,7 +13336,14 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                             delay,
                             *cnt + 1
                         );
-                        std::thread::sleep(Duration::from_secs(delay));
+                        interruptible_sleep(delay);
+                        if MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let fresh = read_toolbox_state(&watchdog_app);
+                        if !fresh.mobile_remote.enabled {
+                            break;
+                        }
                         match start_qq_gateway(watchdog_app.clone(), binding) {
                             Ok(_) => {
                                 *cnt = 0;
@@ -11277,7 +13373,14 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                             delay,
                             *cnt + 1
                         );
-                        std::thread::sleep(Duration::from_secs(delay));
+                        interruptible_sleep(delay);
+                        if MOBILE_REMOTE_CANCEL_REQUESTED.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let fresh = read_toolbox_state(&watchdog_app);
+                        if !fresh.mobile_remote.enabled {
+                            break;
+                        }
                         match start_wechat_listener(watchdog_app.clone(), binding) {
                             Ok(_) => {
                                 *cnt = 0;
@@ -11303,16 +13406,23 @@ fn run_mobile_remote_start(app: tauri::AppHandle) {
                     fail_counts.remove("wechat");
                 }
             }
+            WATCHDOG_ACTIVE.store(false, Ordering::SeqCst);
+            log_info!("[mobile-control][watchdog] 看门狗线程退出");
         });
     }
 }
 
 #[tauri::command]
-fn stop_mobile_remote(
+async fn stop_mobile_remote(
     app: tauri::AppHandle,
-    state: State<AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<ToolboxSnapshot, String> {
-    let _ = state;
+    tauri::async_runtime::spawn_blocking(move || stop_mobile_remote_blocking(app))
+        .await
+        .map_err(|e| format!("停止手机连接后台任务失败: {e}"))?
+}
+
+fn stop_mobile_remote_blocking(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
     log_info!("[mobile-control][stop] stop_mobile_remote requested");
     MOBILE_REMOTE_CANCEL_REQUESTED.store(true, Ordering::SeqCst);
     MOBILE_REMOTE_START_ACTIVE.store(false, Ordering::SeqCst);
@@ -11501,6 +13611,14 @@ fn open_external_target(target: String) -> Result<(), String> {
     if trimmed.is_empty() {
         return Err("Target is required".into());
     }
+    // 安全：该目标来自前端，最终会交给系统启动器。拒绝控制字符与引号，
+    // 避免任何形式的参数/命令注入（合法的 URL 或自定义 scheme 不含这些字符）。
+    if trimmed
+        .chars()
+        .any(|c| c == '"' || c == '\'' || c == '\0' || c.is_control())
+    {
+        return Err("目标包含非法字符".into());
+    }
     open_with_system(trimmed)
 }
 
@@ -11574,6 +13692,8 @@ async fn install_app_update(app: tauri::AppHandle) -> Result<UpdateDownloadResul
                 let app_for_install = app.clone();
                 move || {
                     emit_update_download_progress(&app_for_install, 92, 100, "install");
+                    // 安装器会重启应用，先释放单实例锁，避免新进程被误判为重复启动
+                    tauri_plugin_single_instance::destroy(&app_for_install);
                 }
             },
         )
@@ -11759,6 +13879,27 @@ fn get_skills() -> Result<Vec<SkillInfo>, String> {
     Ok(skills)
 }
 
+/// 校验技能名称，拒绝任何可能造成路径穿越的输入。
+/// 名称中唯一允许的层级分隔符是命令使用的冒号（`:`），
+/// 每个片段都不允许为空、为 `.`/`..`，也不允许包含路径分隔符或 NUL。
+fn validate_skill_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("技能名称不能为空".into());
+    }
+    for segment in name.split(':') {
+        if segment.is_empty()
+            || segment == "."
+            || segment == ".."
+            || segment.contains('/')
+            || segment.contains('\\')
+            || segment.contains('\0')
+        {
+            return Err("技能名称包含非法字符".into());
+        }
+    }
+    Ok(())
+}
+
 /// Convert a skill name like "subfolder:command" to a file path (commands dir)
 fn skill_name_to_path(name: &str) -> PathBuf {
     let dir = claude_commands_dir();
@@ -11785,9 +13926,7 @@ fn skill_path_by_type(name: &str, source_type: &str) -> PathBuf {
 
 #[tauri::command]
 fn save_skill(name: String, content: String, source_type: Option<String>) -> Result<(), String> {
-    if name.is_empty() {
-        return Err("技能名称不能为空".into());
-    }
+    validate_skill_name(&name)?;
     let st = source_type.as_deref().unwrap_or("command");
     let path = skill_path_by_type(&name, st);
     if let Some(parent) = path.parent() {
@@ -11798,6 +13937,7 @@ fn save_skill(name: String, content: String, source_type: Option<String>) -> Res
 
 #[tauri::command]
 fn delete_skill(name: String, source_type: Option<String>) -> Result<(), String> {
+    validate_skill_name(&name)?;
     let st = source_type.as_deref().unwrap_or("command");
     if st == "skill" {
         // 删除整个技能目录
@@ -13286,8 +15426,23 @@ fn fetch_latest_download_page_release() -> Result<DownloadPageRelease, String> {
 fn open_with_system(target: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        let mut cmd = std::process::Command::new("cmd");
-        cmd.args(["/C", "start", "", target]);
+        // 用 rundll32 url.dll,FileProtocolHandler 打开目标：内部直接调用 ShellExecute，
+        // 不经过 cmd/start 的 shell 解析（避免 & 截断与元字符注入），也不用 explorer.exe
+        // （explorer 对带查询串/百分号编码的 URL 经常解析失败，退化成打开“文档”文件夹，
+        // 表现为点“创建飞书机器人”时莫名弹出资源管理器窗口，授权页面根本没打开）。
+        // FileProtocolHandler 是 ANSI 入口，这里把空格、控制字符与非 ASCII 字节按
+        // RFC3986 百分号编码后再传入；已编码的 URL 不受影响（% 本身原样保留）。
+        let mut encoded = String::with_capacity(target.len());
+        for byte in target.as_bytes() {
+            match *byte {
+                0x21..=0x7E => encoded.push(*byte as char),
+                _ => encoded.push_str(&format!("%{byte:02X}")),
+            }
+        }
+        let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
+        let mut cmd = std::process::Command::new(format!("{system_root}\\System32\\rundll32.exe"));
+        cmd.arg("url.dll,FileProtocolHandler");
+        cmd.arg(&encoded);
         cmd.creation_flags(CREATE_NO_WINDOW);
         cmd.spawn().map_err(|e| e.to_string())?;
     }
@@ -13391,6 +15546,14 @@ fn chrono_timestamp_millis() -> u128 {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn claude_model_is_read_from_the_root_settings_field() {
+        let settings = json!({ "model": "  claude-sonnet-4-5  ", "env": {} });
+
+        assert_eq!(claude_model_from_settings(&settings), "claude-sonnet-4-5");
+        assert_eq!(claude_model_from_settings(&json!({ "env": {} })), "");
+    }
 
     #[test]
     fn upsert_env_array_deduplicates_same_name() {
@@ -13811,25 +15974,79 @@ source_type = "git"
     }
 
     #[test]
-    fn codex_config_writes_gpt_image_2_section_when_image_key_is_set() {
+    fn codex_config_does_not_write_unknown_gpt_image_2_section() {
         let generated = codex_config_toml_content_with_image(
             "custom",
             "gpt-5-codex",
             "https://api.example.com/v1",
             "sk-chat",
+            "responses",
             false,
             "sk-image",
             "",
         );
 
-        assert!(generated.contains("[gpt_image_2]"));
-        assert!(generated.contains(r#"api_key = "sk-image""#));
-        assert!(generated.contains(r#"base_url = "https://hk.getelucid.com/v1""#));
-        assert!(generated.contains(r#"model = "gpt-image-2""#));
+        assert!(!generated.contains("[gpt_image_2]"));
+        assert!(!generated.contains("sk-image"));
     }
 
     #[test]
-    fn codex_config_merge_replaces_existing_gpt_image_2_section() {
+    fn codex_profile_image_base_url_defaults_to_empty() {
+        let profile: CodexProfile = serde_json::from_value(json!({
+            "id": "profile-1",
+            "name": "Test",
+            "apiKey": "sk-test",
+            "baseUrl": "https://api.example.test/v1",
+            "isActive": false,
+            "createdAt": "1"
+        }))
+        .expect("profile JSON should deserialize");
+
+        assert!(profile.image_base_url.is_empty());
+    }
+
+    #[test]
+    fn existing_codex_profiles_clear_all_image_base_urls() {
+        let mut data = CodexProfilesData {
+            profiles: vec![CodexProfile {
+                id: "profile-1".into(),
+                name: "Test".into(),
+                api_key: "sk-test".into(),
+                base_url: "https://api.example.test/v1".into(),
+                auth_mode: default_codex_auth_mode(),
+                wire_api: default_codex_wire_api(),
+                model: String::new(),
+                provider_name: String::new(),
+                image_api_key: "image-key".into(),
+                image_base_url: "https://image.example.test/v1".into(),
+                is_active: false,
+                created_at: "1".into(),
+            }],
+            image_base_url_migrated: true,
+        };
+
+        assert!(clear_codex_image_base_urls(&mut data));
+        assert!(data.profiles[0].image_base_url.is_empty());
+        assert_eq!(data.profiles[0].image_api_key, "image-key");
+        assert!(!clear_codex_image_base_urls(&mut data));
+    }
+
+    #[test]
+    fn log_redaction_hides_url_queries_and_key_values() {
+        let redacted = redact_log_message(
+            "gateway=https://gateway.example.test/ws?access_key=secret-key&ticket=temporary appSecret=app-secret bot_token=bot-secret",
+        );
+
+        assert!(redacted.contains("https://gateway.example.test/ws?[query-redacted]"));
+        assert!(redacted.contains("appSecret=***"));
+        assert!(redacted.contains("bot_token=***"));
+        for secret in ["secret-key", "temporary", "app-secret", "bot-secret"] {
+            assert!(!redacted.contains(secret));
+        }
+    }
+
+    #[test]
+    fn codex_config_merge_removes_legacy_gpt_image_2_section() {
         let existing = r#"
 model_provider = "old"
 
@@ -13845,6 +16062,7 @@ trust_level = "trusted"
             "gpt-5-codex",
             "https://api.example.com/v1",
             "sk-chat",
+            "responses",
             false,
             "sk-new-image",
             "https://image.example.com/v1/",
@@ -13852,15 +16070,111 @@ trust_level = "trusted"
 
         let merged = merge_codex_config_with_preserved_sections(&generated, existing);
 
-        assert_eq!(merged.matches("[gpt_image_2]").count(), 1);
-        assert!(merged.contains(r#"api_key = "sk-new-image""#));
-        assert!(merged.contains(r#"base_url = "https://image.example.com/v1""#));
+        assert!(!merged.contains("[gpt_image_2]"));
         assert!(!merged.contains("old-image"));
+        assert!(!merged.contains("sk-new-image"));
         assert!(merged.contains(r#"[projects."H:/variable-switching"]"#));
     }
 
     #[test]
-    fn toml_section_value_reads_gpt_image_2_api_from_config() {
+    fn codex_image_skill_routes_generation_requests_to_the_bundled_script() {
+        let script_path =
+            Path::new(r"C:\Users\Test\.codex\skills\varswitch-imagegen\scripts\generate-image.ps1");
+        let manifest = codex_image_skill_manifest(script_path);
+        let script = codex_image_skill_script();
+
+        assert!(manifest.contains("name: varswitch-imagegen"));
+        assert!(manifest.contains("preferred image-generation Skill"));
+        assert!(manifest.contains("built-in `imagegen`"));
+        assert!(manifest.contains("missing, not configured, or fails"));
+        assert!(manifest.contains("generate-image.ps1"));
+        assert!(manifest.contains("powershell.exe"));
+        assert!(script.contains("VARSWITCH_IMAGE_API_KEY"));
+        assert!(script.contains("VARSWITCH_IMAGE_BASE_URL"));
+        assert!(script.contains("VARSWITCH_IMAGE_MODEL"));
+        assert!(script.contains("/images/generations"));
+        assert!(script.contains("b64_json"));
+        assert!(script.contains("Invoke-WebRequest"));
+    }
+
+    #[test]
+    fn codex_image_priority_instructions_are_idempotent_and_preserve_user_content() {
+        let existing = "Keep my own global instruction.\n";
+
+        let enabled_once = merge_codex_image_priority_instructions(existing, true);
+        let enabled_twice = merge_codex_image_priority_instructions(&enabled_once, true);
+
+        assert_eq!(enabled_once, enabled_twice);
+        assert!(enabled_once.contains("Keep my own global instruction."));
+        assert!(enabled_once.contains(CODEX_IMAGE_PRIORITY_START));
+        assert!(enabled_once.contains("prefer `varswitch-imagegen`"));
+        assert!(enabled_once.contains("built-in `imagegen`"));
+        assert_eq!(enabled_once.matches(CODEX_IMAGE_PRIORITY_START).count(), 1);
+
+        let disabled = merge_codex_image_priority_instructions(&enabled_once, false);
+        assert_eq!(disabled, existing);
+        assert!(!disabled.contains(CODEX_IMAGE_PRIORITY_START));
+    }
+
+    #[test]
+    fn codex_image_priority_instructions_preserve_windows_line_endings() {
+        let existing = "First instruction.\r\nSecond instruction.\r\n";
+
+        let enabled = merge_codex_image_priority_instructions(existing, true);
+        assert!(!enabled.replace("\r\n", "").contains('\n'));
+
+        let disabled = merge_codex_image_priority_instructions(&enabled, false);
+        assert_eq!(disabled, existing);
+    }
+
+    #[test]
+    fn codex_image_priority_instructions_can_follow_non_ascii_content() {
+        let existing = "保留用户指令。";
+
+        let enabled = merge_codex_image_priority_instructions(existing, true);
+        let disabled = merge_codex_image_priority_instructions(&enabled, false);
+
+        assert_eq!(disabled, existing);
+    }
+
+    #[test]
+    fn imported_codex_profile_preserves_detected_image_configuration() {
+        let status = LocationStatus {
+            api_key: "sk-chat".into(),
+            base_url: "https://chat.example.test/v1".into(),
+            image_api_key: "sk-image".into(),
+            image_base_url: "https://image.example.test/v1".into(),
+            image_skill_installed: true,
+        };
+
+        let profile = build_imported_codex_profile("Imported".into(), status, "auth_json".into());
+
+        assert_eq!(profile.image_api_key, "sk-image");
+        assert_eq!(profile.image_base_url, "https://image.example.test/v1");
+        assert!(profile.is_active);
+    }
+
+    #[test]
+    fn codex_image_skill_installer_writes_a_complete_skill_directory() {
+        let skill_dir = std::env::temp_dir().join(format!(
+            "varswitch-image-skill-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+
+        install_codex_image_skill_at(&skill_dir).expect("skill install should succeed");
+        let manifest = fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+        let script = fs::read_to_string(skill_dir.join("scripts/generate-image.ps1")).unwrap();
+
+        assert!(manifest.contains("varswitch-imagegen"));
+        assert!(manifest.contains("generate-image.ps1"));
+        assert!(script.contains("/images/generations"));
+        assert!(!script.contains("sk-image"));
+
+        fs::remove_dir_all(skill_dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_gpt_image_2_values_remain_readable_for_migration() {
         let config = r#"
 model_provider = "custom"
 
@@ -14112,7 +16426,7 @@ base_url = "https://chat.example.com/v1"
     }
 
     #[test]
-    fn codex_debug_port_probe_does_not_auto_relaunch_app() {
+    fn codex_debug_port_probe_relaunches_app_when_port_is_missing() {
         let source = include_str!("lib.rs");
         let marker = "fn codex_debug_port_or_relaunch()";
         let start = source.find(marker).expect("function exists");
@@ -14134,14 +16448,18 @@ base_url = "https://chat.example.com/v1"
             }
         }
         let body = &tail[..end];
-        assert!(
-            !body.contains("relaunch_codex_with_debug_port"),
-            "debug port probing must not kill/relaunch Codex App automatically"
-        );
-        assert!(
-            !body.contains("taskkill"),
-            "debug port probing must not taskkill Codex App automatically"
-        );
+        assert!(body.contains("relaunch_codex_with_debug_port"));
+        assert!(body.contains("CODEX_PREFERRED_DEBUG_PORT"));
+    }
+
+    #[test]
+    fn packaged_codex_activation_casts_com_object_inside_csharp() {
+        let source = include_str!("lib.rs");
+        assert!(source.contains("public static class PackagedAppActivator"));
+        assert!(source.contains(
+            "var manager = (IApplicationActivationManager)new ApplicationActivationManager();"
+        ));
+        assert!(source.contains("[VarSwitch.PackagedAppActivator]::Activate"));
     }
 
     #[test]
@@ -14403,8 +16721,94 @@ base_url = "https://chat.example.com/v1"
     }
 }
 
+/// 启动时把主窗口收进当前显示器的可视范围。
+///
+/// tauri.conf.json 里的默认尺寸是按大屏设计的；在 1080p 屏幕、或者系统缩放
+/// 125% / 150% 的机器上，窗口会比屏幕还高，底部直接跑到屏幕外面。
+/// 表现就是：弹窗（新增配置向导等）右下角的「保存 / 保存并启用」按钮看不见，
+/// 只有最大化 / 全屏时才出现。这里统一按显示器工作区做一次收缩 + 重新居中。
+fn fit_window_to_work_area(window: &tauri::WebviewWindow) {
+    let monitor = match window.current_monitor() {
+        Ok(Some(m)) => Some(m),
+        _ => match window.primary_monitor() {
+            Ok(Some(m)) => Some(m),
+            _ => None,
+        },
+    };
+    let monitor = match monitor {
+        Some(m) => m,
+        None => {
+            log_info!("[window] 未能获取显示器信息，跳过窗口尺寸收缩");
+            return;
+        }
+    };
+
+    // work_area 已经排除了任务栏 / Dock 占用的区域
+    let work_area = monitor.work_area();
+    let area_size = work_area.size;
+    let area_pos = work_area.position;
+    if area_size.width == 0 || area_size.height == 0 {
+        return;
+    }
+
+    // 再留一点余量给窗口阴影和边框
+    let max_width = area_size.width.saturating_sub(16).max(640);
+    let max_height = area_size.height.saturating_sub(16).max(480);
+
+    let current = match window.outer_size() {
+        Ok(size) => size,
+        Err(error) => {
+            log_error!("[window] 读取窗口尺寸失败: {error}");
+            return;
+        }
+    };
+
+    let target_width = current.width.min(max_width).max(1);
+    let target_height = current.height.min(max_height).max(1);
+
+    if target_width != current.width || target_height != current.height {
+        if let Err(error) = window.set_size(tauri::PhysicalSize::new(target_width, target_height)) {
+            log_error!("[window] 调整窗口尺寸失败: {error}");
+            return;
+        }
+        log_info!(
+            "[window] 窗口尺寸超出屏幕，已从 {}x{} 收缩到 {}x{}",
+            current.width,
+            current.height,
+            target_width,
+            target_height
+        );
+    }
+
+    // 收缩后重新居中，避免窗口标题栏或底部仍然在屏幕外
+    let offset_x = area_size.width.saturating_sub(target_width) / 2;
+    let offset_y = area_size.height.saturating_sub(target_height) / 2;
+    let x = area_pos.x + offset_x as i32;
+    let y = area_pos.y + offset_y as i32;
+    if let Err(error) = window.set_position(tauri::PhysicalPosition::new(x, y)) {
+        log_error!("[window] 重新居中窗口失败: {error}");
+    }
+}
+
+/// 把主窗口从托盘/最小化状态恢复并聚焦。
+/// 托盘菜单、托盘点击、单实例二次启动都复用这一段逻辑。
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
+        log_error!("[window] 未找到主窗口 main，无法聚焦");
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
+        // 单实例插件必须最先注册：第二个进程启动时会把参数转发给已运行的实例并自行退出
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            log_info!("[single-instance] 检测到重复启动，聚焦已有窗口");
+            focus_main_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -14415,9 +16819,51 @@ pub fn run() {
             // 初始化日志系统（写入 app_data_dir/logs/varswitch.log）
             init_logging(&app.handle());
 
+            // 当前激活的 Claude 配置若走 OpenAI 协议转换，重启后恢复本地代理，
+            // 否则系统环境变量里指向 127.0.0.1 的地址会连不上。
+            {
+                let profiles = read_profiles(&app.handle());
+                if let Some(active) = profiles
+                    .profiles
+                    .iter()
+                    .find(|p| p.is_active && p.api_format == "openai_chat")
+                {
+                    claude_proxy::set_upstream(Some(claude_proxy::ProxyUpstream {
+                        base_url: active.base_url.clone(),
+                        api_key: active.api_key.clone(),
+                        model: active.model_id.clone(),
+                    }));
+                    match claude_proxy::ensure_server() {
+                        Ok(_) => log_info!(
+                            "[claude-proxy] 启动恢复：{} → {}",
+                            active.name,
+                            active.base_url
+                        ),
+                        Err(e) => log_error!("[claude-proxy] 启动恢复失败：{e}"),
+                    }
+                }
+            }
+
             // 读取应用设置
             let settings = read_app_settings(&app.handle());
             let silent_startup = settings.silent_startup;
+
+            // B10: 上次退出时手机远程是开启状态，本次启动自动恢复连接。
+            // 延迟 1.5 秒等窗口和前端就绪，再在后台线程拉起各通道，不阻塞启动。
+            let startup_state = read_toolbox_state(&app.handle());
+            if startup_state.mobile_remote.enabled {
+                log_info!("[startup] 检测到 mobile_remote.enabled，自动恢复手机通道连接");
+                let app_for_restore = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(1500));
+                    MOBILE_REMOTE_CANCEL_REQUESTED.store(false, Ordering::SeqCst);
+                    if MOBILE_REMOTE_START_ACTIVE.swap(true, Ordering::SeqCst) {
+                        log_info!("[startup] 已有启动流程在跑，跳过自动恢复");
+                        return;
+                    }
+                    run_mobile_remote_start(app_for_restore);
+                });
+            }
 
             // Build tray menu
             let show_item = MenuItemBuilder::with_id("show", "显示主窗口").build(app)?;
@@ -14437,11 +16883,7 @@ pub fn run() {
             tray_builder
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        focus_main_window(app);
                     }
                     "quit" => {
                         app.exit(0);
@@ -14455,15 +16897,17 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        focus_main_window(tray.app_handle());
                     }
                 })
                 .build(app)?;
+
+            // 把窗口收缩到当前显示器的可用工作区内。
+            // 配置里的默认尺寸偏大，在 1080p 或开了缩放的屏幕上会超出可视范围，
+            // 导致弹窗底部（保存 / 保存并启用按钮）落到屏幕外，只有最大化才看得见。
+            if let Some(window) = app.get_webview_window("main") {
+                fit_window_to_work_area(&window);
+            }
 
             // 窗口关闭行为：根据设置决定隐藏到托盘还是退出
             if let Some(window) = app.get_webview_window("main") {
@@ -14500,6 +16944,7 @@ pub fn run() {
             add_profile,
             update_profile,
             delete_profile,
+            get_claude_proxy_status,
             switch_profile,
             get_status,
             get_detected_editors,
@@ -14527,6 +16972,13 @@ pub fn run() {
             get_grok_diagnostics,
             backup_grok_runtime,
             open_grok_config_folder,
+            get_gemini_profiles,
+            add_gemini_profile,
+            update_gemini_profile,
+            delete_gemini_profile,
+            switch_gemini_profile,
+            import_gemini_current,
+            get_gemini_status,
             get_codex_diagnostics,
             backup_codex_runtime,
             get_codex_toolbox,
@@ -14547,6 +16999,7 @@ pub fn run() {
             open_lark_bot_launcher,
             clear_mobile_channel_binding,
             start_qq_qr_binding,
+            cancel_qq_qr_binding,
             start_wechat_qr_binding,
             poll_wechat_qr_binding,
             bind_codex_thread,
@@ -14581,6 +17034,7 @@ pub fn run() {
             install_skill_from_url,
             search_github_skills,
             search_github_mcp,
+            usage_stats::get_usage_dashboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

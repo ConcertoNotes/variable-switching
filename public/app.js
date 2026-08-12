@@ -23,6 +23,41 @@ function on(id, event, handler) {
   return el;
 }
 
+/**
+ * 绑定「点击遮罩空白处关闭弹窗」。
+ *
+ * 只监听 click 会有一个经典缺陷：在输入框里按下鼠标、拖到框外（比如从右往左选中文本）
+ * 再松开时，浏览器会把 click 派发到 mousedown / mouseup 两个节点的最近公共祖先，
+ * 也就是遮罩本身，于是 event.target === overlay 成立，弹窗被误关闭。
+ *
+ * 这里要求「按下」和「松开」都发生在遮罩自身，才算一次真正的空白点击。
+ */
+function bindOverlayDismiss(overlayId, closeFn) {
+  const overlay = $(overlayId);
+  if (!overlay) return null;
+  let pressedOnOverlay = false;
+
+  const markPress = (event) => {
+    // 只认鼠标左键 / 触摸 / 笔的主按键
+    pressedOnOverlay = event.button === 0 && event.target === overlay;
+  };
+
+  overlay.addEventListener("pointerdown", markPress);
+  // 老 WebView 没有 pointer 事件时的兜底
+  overlay.addEventListener("mousedown", (event) => {
+    if (window.PointerEvent) return;
+    markPress(event);
+  });
+
+  overlay.addEventListener("click", (event) => {
+    const shouldClose = pressedOnOverlay && event.target === overlay;
+    pressedOnOverlay = false;
+    if (shouldClose) closeFn(event);
+  });
+
+  return overlay;
+}
+
 const tauriApi = window.__TAURI__;
 const helpers = window.VarSwitchHelpers || {};
 
@@ -40,34 +75,92 @@ if (!tauriApi?.core?.invoke || !tauriApi?.event?.listen) {
 const invoke = tauriApi.core.invoke;
 const { listen } = tauriApi.event;
 
+// B5: 打印调试日志前过滤凭据字段，避免 secret 出现在 devtools console
+const SECRET_KEYS = new Set(["appSecret", "app_secret", "botToken", "bot_token", "apiKey", "api_key", "accessKey", "ticket", "authorization"]);
+function sanitizeLogText(value) {
+  return String(value || "")
+    .replace(/([?&](?:access_key|ticket|token|secret|authorization|app_secret|bot_token|api[_-]?key)=)[^&#\s]*/gi, "$1***")
+    .replace(/\b(access_key|ticket|token|secret|authorization|app_secret|bot_token|api[_-]?key)\s*[=:]\s*([^\s,&;\]\}"']+)/gi, "$1=***");
+}
+function sanitizeForLog(value) {
+  if (typeof value === "string") return sanitizeLogText(value);
+  if (value instanceof Error) return { name: value.name, message: sanitizeLogText(value.message) };
+  if (Array.isArray(value)) return value.map((item) => sanitizeForLog(item));
+  if (!value || typeof value !== "object") return value;
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    out[k] = SECRET_KEYS.has(k) && typeof v === "string" && v.length > 0 ? "***" : sanitizeForLog(v);
+  }
+  return out;
+}
+
 function mobileDebug(label, payload = {}) {
-  console.log(`[mobile-control] ${label}`, {
+  console.log(`[mobile-control] ${label}`, sanitizeForLog({
     selectedMobileChannel,
     selectedCodexThreadId,
     ...payload,
-  });
+  }));
 }
 
 function mobileDebugError(label, error, payload = {}) {
-  console.error(`[mobile-control] ${label}`, {
+  console.error(`[mobile-control] ${label}`, sanitizeForLog({
     selectedMobileChannel,
     selectedCodexThreadId,
     error,
     ...payload,
-  });
+  }));
 }
 
 const LANG_STORAGE_KEY = "varswitch.lang";
+// 记录用户是否在设置里手动选过语言;没有手动选择时,进入软件一律默认中文
+const LANG_USER_SET_KEY = "varswitch.lang.userSet";
 const THEME_STORAGE_KEY = "varswitch.theme";
 const APP_REPOSITORY_URL = "https://github.com/ConcertoNotes/variable-switching";
 const APP_DOWNLOAD_PAGE_URL = "https://download.varswitch.strova.top/";
+// ── cc-switch 式供应商预设 ──────────────────────────────
+// 选择预设即自动填入官方地址与默认模型；Base URL 留空时后端回退到各官方端点。
+// Codex 的 wire 表示上游协议：responses = OpenAI Responses（官方），chat = OpenAI Chat Completions（DeepSeek 等第三方）。
+const CLAUDE_PRESETS = [
+  {
+    id: "anthropic",
+    name: "Anthropic 官方",
+    baseUrl: "https://api.anthropic.com",
+    model: "",
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    baseUrl: "https://api.deepseek.com/anthropic",
+    model: "deepseek-v4-flash",
+  },
+  {
+    id: "kimi",
+    name: "Kimi (Moonshot)",
+    baseUrl: "https://api.moonshot.cn/anthropic",
+    model: "kimi-k2.6",
+  },
+  {
+    id: "zhipu_glm",
+    name: "智谱 GLM",
+    baseUrl: "https://open.bigmodel.cn/api/anthropic",
+    model: "glm-5.1",
+  },
+  {
+    id: "minimax",
+    name: "MiniMax",
+    baseUrl: "https://api.minimaxi.com/anthropic",
+    model: "MiniMax-M2.7",
+  },
+];
+
 const CODEX_PRESETS = [
   {
     id: "openai",
-    name: "OpenAI Responses",
+    name: "OpenAI 官方",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-5.5",
     providerName: "custom",
+    wire: "responses",
   },
   {
     id: "deepseek",
@@ -75,20 +168,23 @@ const CODEX_PRESETS = [
     baseUrl: "https://api.deepseek.com",
     model: "deepseek-v4-flash",
     providerName: "deepseek",
+    wire: "chat",
   },
   {
     id: "kimi",
-    name: "Kimi",
+    name: "Kimi (Moonshot)",
     baseUrl: "https://api.moonshot.cn/v1",
     model: "kimi-k2.6",
     providerName: "kimi",
+    wire: "chat",
   },
   {
     id: "zhipu_glm",
-    name: "Zhipu GLM",
+    name: "智谱 GLM",
     baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
     model: "glm-5.1",
     providerName: "zhipu_glm",
+    wire: "chat",
   },
   {
     id: "minimax",
@@ -96,6 +192,7 @@ const CODEX_PRESETS = [
     baseUrl: "https://api.minimaxi.com/v1",
     model: "MiniMax-M2.7",
     providerName: "minimax",
+    wire: "chat",
   },
   {
     id: "siliconflow",
@@ -103,6 +200,7 @@ const CODEX_PRESETS = [
     baseUrl: "https://api.siliconflow.cn/v1",
     model: "Pro/MiniMaxAI/MiniMax-M2.7",
     providerName: "siliconflow",
+    wire: "chat",
   },
   {
     id: "openrouter",
@@ -110,8 +208,17 @@ const CODEX_PRESETS = [
     baseUrl: "https://openrouter.ai/api/v1",
     model: "openai/gpt-5.3-codex",
     providerName: "openrouter",
+    wire: "chat",
   },
 ];
+
+// Base URL 留空时前端验证 / 后端保存都会回退到官方地址
+const OFFICIAL_BASE_URLS = {
+  claude: "https://api.anthropic.com",
+  codex: "https://api.openai.com/v1",
+  grok: "https://api.x.ai/v1",
+  gemini: "https://generativelanguage.googleapis.com",
+};
 
 const GROK_PRESETS = [
   {
@@ -128,15 +235,33 @@ const GROK_PRESETS = [
   },
 ];
 
+const UNIVERSAL_PROVIDER_PRESETS = [
+  {
+    id: "newapi",
+    name: "NewAPI",
+    description: "支持 Anthropic、OpenAI 与多种兼容协议的统一 API 网关",
+    models: { claude: "claude-sonnet-5", codex: "gpt-5.5", grok: "grok-4", gemini: "gemini-2.5-pro" },
+    providerName: "custom",
+  },
+  {
+    id: "custom_gateway",
+    name: "自定义网关",
+    description: "使用同一组 API 地址和密钥同步到多个应用",
+    models: { claude: "", codex: "", grok: "", gemini: "" },
+    providerName: "custom",
+  },
+];
+
 const I18N = {
   en: {
     appTitle: "VarSwitch",
     appSubtitle: "Environment Sync Manager",
     importBtn: "Import Current",
     addBtn: "+ Add Config",
-    statusTitle: "Current Status",
-    statusHint: "Restart terminal and editor after switching to apply environment variables.",
+    statusTitle: "Claude Status",
+    statusHint: "Restart the terminal after switching to apply environment variables.",
     profilesTitle: "Config List",
+    activeProfileLabel: "Current active",
     addConfig: "Add Config",
     editConfig: "Edit Config",
     nameLabel: "Config Name",
@@ -159,7 +284,7 @@ const I18N = {
     progressCancelling: "Cancelling...",
     statusSystemEnv: "System Environment",
     statusClaude: "Claude Settings",
-    codexPageTab: "Codex CLI",
+    codexPageTab: "Codex",
     codexStatusTitle: "Codex Status",
     codexProfilesTitle: "Codex Config List",
     codexAddConfig: "Add Codex Config",
@@ -172,10 +297,12 @@ const I18N = {
     codexBaseUrlLabel: "Codex Base URL",
     codexModelLabel: "Codex Model",
     codexProviderLabel: "Codex Provider",
-    codexImageSectionTitle: "GPT Image 2",
-    codexImageSectionHint: "Optional image-only API. It is written to the same ~/.codex/config.toml used by Codex.",
+    codexImageSectionTitle: "Codex Image Skill",
+    codexImageSectionHint: "Optional. Enabling this profile installs a local image-generation Skill and configures its API. Restart Codex after switching.",
     codexImageApiKeyLabel: "Image API Key",
     codexImageBaseUrlLabel: "Image Base URL",
+    codexImageSkillReady: "Installed · restart Codex to refresh",
+    codexImageSkillNeedsSwitch: "Not installed · enable this profile",
     codexAuthModeLabel: "Write Mode",
     codexAuthModeDefaultTitle: "Default write",
     codexAuthModeDefaultHint: "~/.codex/auth.json + ~/.codex/config.toml",
@@ -183,7 +310,6 @@ const I18N = {
     codexAuthModeOfficialHint: "Only write ~/.codex/config.toml",
     codexOfficialConfigLabel: "Official account API quota config",
     copy: "Copy",
-    codexActiveConfigLabel: "Active Codex Config",
     codexSwitching: "Writing Codex configuration...",
     codexSwitchedTo: "Codex switched to {name}",
     codexImportPrompt: "Name for the imported Codex config:",
@@ -193,7 +319,7 @@ const I18N = {
     codexToastUpdated: "Codex config updated",
     codexToastDeleted: "Codex config deleted",
     codexNoConfigsTitle: "No Codex configs yet",
-    codexNoConfigsDesc: "Create a config to sync Codex CLI settings in one click.",
+    codexNoConfigsDesc: "Create a config to sync Codex settings in one click.",
     codexAddFirstConfig: "Add your first Codex config",
     grokPageTab: "Grok / xAI",
     grokStatusTitle: "Grok Status",
@@ -225,24 +351,13 @@ const I18N = {
     grokToastDeleted: "Grok config deleted",
     grokNoConfigsTitle: "No Grok configs yet",
     grokNoConfigsDesc: "Create a config to switch ~/.grok/config.toml (and env vars) in one click.",
+    geminiNoConfigsTitle: "No Gemini configs yet",
+    geminiNoConfigsDesc: "Create a config to switch the Gemini CLI gateway and model in one click.",
     grokAddFirstConfig: "Add your first Grok config",
     codexToolbox: "Toolbox",
     codexToolboxTitle: "Codex Toolbox",
-    toolboxTabMarket: "Plugin Market",
     toolboxTabSession: "Session Sync",
     toolboxTabRemote: "Mobile Control",
-    toolboxMarketHint: "Choose a plugin marketplace and install it into Codex. Other marketplace entries are removed when applying.",
-    toolboxMarketInputLabel: "Plugin Marketplace",
-    toolboxMarketApply: "Install to Codex",
-    toolboxMarketplaceInstalling: "Installing plugin marketplace...",
-    toolboxMarketplaceProgressPrepare: "Preparing Codex config...",
-    toolboxMarketplaceProgressInstall: "Installing marketplace with Codex CLI...",
-    toolboxMarketplaceProgressVerify: "Verifying marketplace...",
-    toolboxMarketplaceProgressDone: "Installation complete",
-    toolboxCurrentMarket: "Current",
-    toolboxMarketType: "Type",
-    toolboxMarketSource: "Source",
-    toolboxMarketRemove: "Remove",
     toolboxSessionHint: "Click sync to import local Codex history into VarSwitch. Mobile bindings are managed only in Mobile Control.",
     toolboxSessionSummaryEmpty: "Not synced yet",
     toolboxSessionSummary: "Synced {count} conversations · {time}",
@@ -300,8 +415,6 @@ const I18N = {
     toolboxLastError: "Last Error",
     toolboxChannelSaved: "Mobile channel saved",
     toolboxDraftSaved: "Toolbox draft saved",
-    toolboxMarketplaceApplied: "Plugin marketplace installed",
-    toolboxMarketplaceRemoved: "Plugin marketplace removed",
     toolboxBindingSaved: "Session binding saved",
     toolboxBindingRemoved: "Session binding removed",
     toolboxBindingSynced: "Session binding synced",
@@ -344,6 +457,7 @@ const I18N = {
     delete: "Delete",
     toastUpdated: "Config updated",
     toastAdded: "Config added",
+    toastSaving: "Saving...",
     toastDeleted: "Config deleted",
     toastImported: "Current config imported",
     toastCopied: "Copied to clipboard",
@@ -364,20 +478,33 @@ const I18N = {
     switchToLight: "Light",
     placeholderName: "e.g. Production",
     placeholderApiKey: "sk-...",
-    placeholderBaseUrl: "https://api.example.com",
+    placeholderBaseUrl: "Leave empty for official https://api.anthropic.com",
     modelIdLabel: "Model ID",
     placeholderModelId: "e.g. opus, sonnet",
     modelIdHint: "Optional. Sets model in editor and Claude settings.",
-    endpointTest: "Test Speed",
-    endpointTesting: "Testing...",
+    endpointTest: "Verify",
+    endpointTesting: "Verifying...",
     endpointUse: "Use",
-    endpointEmpty: "Enter a Base URL first.",
-    endpointFailed: "Failed",
-    endpointNoResults: "No endpoint results",
-    endpointSelected: "Endpoint selected",
     modelFetch: "Fetch Models",
     modelFetching: "Fetching...",
-    modelFetchMissing: "Enter Base URL and API Key first.",
+    modelFetchMissing: "Enter an API Key first.",
+    providerPresetLabel: "Provider Preset",
+    providerPresetCustom: "Custom",
+    claudePresetHintDefault: "Pick a provider to auto-fill its endpoint and default model. Leave Base URL empty for the official API.",
+    claudeApiFormatLabel: "API Format",
+    claudeApiFormatHint: "Pick OpenAI format when the upstream only exposes an OpenAI API: requests go through the local proxy at 127.0.0.1:25789, so keep VarSwitch running.",
+    claudeApiFormatOptionAnthropic: "Anthropic Messages (direct, default)",
+    claudeApiFormatOptionOpenAiChat: "OpenAI Chat Completions (via local proxy)",
+    claudeApiFormatNeedsBaseUrl: "OpenAI format requires an upstream Base URL.",
+    claudeApiFormatNeedsModel: "OpenAI format needs a Model ID (upstream model name, e.g. deepseek-chat).",
+    codexWireApiLabel: "Upstream Protocol",
+    codexWireApiHint: "Written to wire_api in ~/.codex/config.toml. Presets set this automatically.",
+    codexAdvancedTitle: "Advanced options",
+    verifyOkLabel: "Verified",
+    verifyModelsSuffix: "models",
+    verifyOkToast: "Connection verified: key and endpoint are working.",
+    verifyAuthFailed: "Authentication failed (401/403). Check your API Key.",
+    verifyNoModelsEndpoint: "This endpoint does not expose /models (404/405), so it cannot be auto-verified.",
     modelFetchNoResults: "No models returned",
     modelSelected: "Model selected",
     skillsManage: "Skills",
@@ -479,6 +606,7 @@ const I18N = {
     settingsLogs: "Runtime logs",
     settingsLogsDesc: "Open the logs folder to view or report issues",
     settingsOpen: "Open",
+    settingsCopyPath: "Copy path",
     settingsBrowse: "Browse",
     settingsSavePath: "Save Path",
     settingsReset: "Reset",
@@ -495,6 +623,8 @@ const I18N = {
     settingsDefaultPath: "Default: {path}",
     settingsExport: "Export Profiles",
     settingsImport: "Import Profiles",
+    settingsManualBackup: "Manual config backup",
+    settingsManualBackupDesc: "Import or export all current profiles",
     settingsAutoBackup: "Auto backup",
     settingsAutoBackupDesc: "Snapshots are taken before every switch; you can roll back mistakes",
     settingsViewBackups: "Roll back",
@@ -520,13 +650,13 @@ const I18N = {
     githubRepoBtn: "GitHub Repo",
     usageGuideKicker: "Usage Guide",
     usageGuideTitle: "How to use VarSwitch",
-    usageGuideIntro: "VarSwitch centralizes Claude Code, Codex CLI, plugins, prompts, MCP servers, mobile control, settings, and backups.",
+    usageGuideIntro: "VarSwitch centralizes Claude Code, Codex, prompts, MCP servers, mobile control, settings, and backups.",
     usageGuideStep1Title: "Claude Code configs",
-    usageGuideStep1Desc: "Add or import Token/Base URL configs, test endpoint speed, then switch to sync system env, supported editors, and ~/.claude/settings.json.",
-    usageGuideStep2Title: "Codex CLI configs",
-    usageGuideStep2Desc: "Manage Codex API Key, Base URL, model, provider, auth mode, diagnostics, and backups for ~/.codex/config.toml and auth.json.",
+    usageGuideStep1Desc: "Add or import Token/Base URL configs and verify connectivity with your key, then switch to sync system env, supported editors, and ~/.claude/settings.json.",
+    usageGuideStep2Title: "Codex configs",
+    usageGuideStep2Desc: "Manage Codex API Key, Base URL, model, provider, and auth mode, then sync ~/.codex/config.toml and auth.json.",
     usageGuideStep3Title: "Codex Toolbox",
-    usageGuideStep3Desc: "Install plugin marketplaces, repair bundled plugins, enable important plugins, sync Codex sessions, and bind mobile control.",
+    usageGuideStep3Desc: "Sync Codex sessions and bind mobile control.",
     usageGuideStep4Title: "Skills, prompts, and MCP",
     usageGuideStep4Desc: "Use toolbar entries to edit Claude Skills/Commands, manage CLAUDE.md templates, and edit MCP server JSON in ~/.claude.json.",
     usageGuideStep5Title: "Settings and backups",
@@ -553,9 +683,10 @@ const I18N = {
     appSubtitle: "环境变量同步工具",
     importBtn: "导入当前配置",
     addBtn: "+ 添加配置",
-    statusTitle: "当前配置状态",
-    statusHint: "切换后请重启终端和编辑器，使环境变量生效。",
+    statusTitle: "Claude 状态",
+    statusHint: "切换后请重启终端，使环境变量生效。",
     profilesTitle: "配置列表",
+    activeProfileLabel: "当前生效",
     addConfig: "添加配置",
     editConfig: "编辑配置",
     nameLabel: "配置名称",
@@ -578,7 +709,7 @@ const I18N = {
     progressCancelling: "正在取消...",
     statusSystemEnv: "系统环境变量",
     statusClaude: "Claude 设置",
-    codexPageTab: "Codex CLI",
+    codexPageTab: "Codex",
     codexStatusTitle: "Codex 状态",
     codexProfilesTitle: "Codex 配置列表",
     codexAddConfig: "添加 Codex 配置",
@@ -591,10 +722,12 @@ const I18N = {
     codexBaseUrlLabel: "Codex Base URL",
     codexModelLabel: "Codex 模型",
     codexProviderLabel: "Codex 供应商",
-    codexImageSectionTitle: "GPT Image 2",
-    codexImageSectionHint: "可选的图片专用 API，会写入 Codex 使用的同一份 ~/.codex/config.toml。",
+    codexImageSectionTitle: "Codex 图片生成 Skill",
+    codexImageSectionHint: "可选。启用此配置时会自动安装本地图片生成 Skill 并同步 API；切换后请重启 Codex。",
     codexImageApiKeyLabel: "图片 API Key",
     codexImageBaseUrlLabel: "图片 Base URL",
+    codexImageSkillReady: "已安装 · 重启 Codex 后刷新",
+    codexImageSkillNeedsSwitch: "尚未安装 · 请启用此配置",
     codexAuthModeLabel: "写入方式",
     codexAuthModeDefaultTitle: "默认写入",
     codexAuthModeDefaultHint: "~/.codex/auth.json + ~/.codex/config.toml",
@@ -602,7 +735,6 @@ const I18N = {
     codexAuthModeOfficialHint: "只写 ~/.codex/config.toml",
     codexOfficialConfigLabel: "官方账号登录，api额度消耗配置",
     copy: "复制",
-    codexActiveConfigLabel: "当前 Codex 配置",
     codexSwitching: "正在写入 Codex 配置...",
     codexSwitchedTo: "Codex 已切换到 {name}",
     codexImportPrompt: "请输入导入的 Codex 配置名称：",
@@ -612,7 +744,7 @@ const I18N = {
     codexToastUpdated: "Codex 配置已更新",
     codexToastDeleted: "Codex 配置已删除",
     codexNoConfigsTitle: "暂无 Codex 配置",
-    codexNoConfigsDesc: "创建一个配置，一键同步 Codex CLI 设置。",
+    codexNoConfigsDesc: "创建一个配置，一键同步 Codex 设置。",
     codexAddFirstConfig: "添加第一个 Codex 配置",
     grokPageTab: "Grok / xAI",
     grokStatusTitle: "Grok 状态",
@@ -644,24 +776,13 @@ const I18N = {
     grokToastDeleted: "Grok 配置已删除",
     grokNoConfigsTitle: "暂无 Grok 配置",
     grokNoConfigsDesc: "创建一个配置，一键切换 ~/.grok/config.toml（并同步环境变量）。",
+    geminiNoConfigsTitle: "暂无 Gemini 配置",
+    geminiNoConfigsDesc: "创建一个配置，一键切换 Gemini CLI 的网关与模型。",
     grokAddFirstConfig: "添加第一个 Grok 配置",
     codexToolbox: "工具箱",
     codexToolboxTitle: "Codex 工具箱",
-    toolboxTabMarket: "插件市场",
     toolboxTabSession: "会话同步",
     toolboxTabRemote: "手机控制",
-    toolboxMarketHint: "选择一个插件市场并安装到 Codex；安装时会移除其它插件市场源。",
-    toolboxMarketInputLabel: "插件市场",
-    toolboxMarketApply: "安装到 Codex",
-    toolboxMarketplaceInstalling: "正在安装插件市场...",
-    toolboxMarketplaceProgressPrepare: "正在准备 Codex 配置...",
-    toolboxMarketplaceProgressInstall: "正在通过 Codex CLI 安装插件市场...",
-    toolboxMarketplaceProgressVerify: "正在校验插件市场...",
-    toolboxMarketplaceProgressDone: "安装完成",
-    toolboxCurrentMarket: "当前",
-    toolboxMarketType: "类型",
-    toolboxMarketSource: "地址",
-    toolboxMarketRemove: "移除",
     toolboxSessionHint: "点击同步即可把本地 Codex 历史记录同步到这个软件里；飞书/微信/QQ 绑定只在手机控制里管理。",
     toolboxSessionSummaryEmpty: "尚未同步",
     toolboxSessionSummary: "已同步 {count} 个对话 · {time}",
@@ -719,8 +840,6 @@ const I18N = {
     toolboxLastError: "最近错误",
     toolboxChannelSaved: "手机通道已保存",
     toolboxDraftSaved: "工具箱草稿已保存",
-    toolboxMarketplaceApplied: "插件市场已安装",
-    toolboxMarketplaceRemoved: "插件市场已移除",
     toolboxBindingSaved: "会话绑定已保存",
     toolboxBindingRemoved: "会话绑定已解除",
     toolboxBindingSynced: "会话绑定已同步",
@@ -763,6 +882,7 @@ const I18N = {
     delete: "删除",
     toastUpdated: "配置已更新",
     toastAdded: "配置已添加",
+    toastSaving: "保存中...",
     toastDeleted: "配置已删除",
     toastImported: "当前配置已导入",
     toastCopied: "已复制到剪贴板",
@@ -783,20 +903,33 @@ const I18N = {
     switchToLight: "白天",
     placeholderName: "例如：生产环境",
     placeholderApiKey: "sk-...",
-    placeholderBaseUrl: "https://api.example.com",
+    placeholderBaseUrl: "留空使用官方地址 https://api.anthropic.com",
     modelIdLabel: "模型 ID",
     placeholderModelId: "如 opus, sonnet",
     modelIdHint: "可选。设置编辑器和 Claude 系统设置中的模型。",
-    endpointTest: "测速",
-    endpointTesting: "测速中...",
+    endpointTest: "验证连接",
+    endpointTesting: "验证中...",
     endpointUse: "使用",
-    endpointEmpty: "请先输入 Base URL。",
-    endpointFailed: "失败",
-    endpointNoResults: "暂无测速结果",
-    endpointSelected: "已选择端点",
     modelFetch: "获取模型",
     modelFetching: "获取中...",
-    modelFetchMissing: "请先填写 Base URL 和 API Key。",
+    modelFetchMissing: "请先填写 API Key。",
+    providerPresetLabel: "供应商预设",
+    providerPresetCustom: "自定义",
+    claudePresetHintDefault: "选择供应商自动填充官方地址与默认模型；Base URL 留空即使用官方 API。",
+    claudeApiFormatLabel: "API 格式",
+    claudeApiFormatHint: "上游仅提供 OpenAI 接口时选第二项：请求经 127.0.0.1:25789 本地代理转换协议，需保持 VarSwitch 运行。",
+    claudeApiFormatOptionAnthropic: "Anthropic Messages（默认直连）",
+    claudeApiFormatOptionOpenAiChat: "OpenAI Chat Completions（经本地代理转换）",
+    claudeApiFormatNeedsBaseUrl: "OpenAI 格式必须填写上游 Base URL。",
+    claudeApiFormatNeedsModel: "OpenAI 格式需要填写 Model ID（上游真实模型名，例如 deepseek-chat）。",
+    codexWireApiLabel: "上游协议",
+    codexWireApiHint: "写入 ~/.codex/config.toml 的 wire_api 字段；选择预设时自动匹配。",
+    codexAdvancedTitle: "高级选项",
+    verifyOkLabel: "验证通过",
+    verifyModelsSuffix: "个模型",
+    verifyOkToast: "连接验证通过：API Key 与端点均可用。",
+    verifyAuthFailed: "鉴权失败（401/403），请检查 API Key 是否有效。",
+    verifyNoModelsEndpoint: "该端点不支持 /models 接口（404/405），无法自动验证。",
     modelFetchNoResults: "没有返回模型",
     modelSelected: "已选择模型",
     skillsManage: "技能",
@@ -896,6 +1029,7 @@ const I18N = {
     settingsLogs: "运行日志",
     settingsLogsDesc: "出现问题时可打开日志文件夹查看或反馈",
     settingsOpen: "打开",
+    settingsCopyPath: "复制路径",
     settingsBrowse: "浏览",
     settingsSavePath: "保存路径",
     settingsReset: "重置",
@@ -912,6 +1046,8 @@ const I18N = {
     settingsDefaultPath: "默认路径：{path}",
     settingsExport: "导出配置",
     settingsImport: "导入配置",
+    settingsManualBackup: "手动配置备份",
+    settingsManualBackupDesc: "导入与导出当前的所有配置",
     settingsAutoBackup: "自动备份",
     settingsAutoBackupDesc: "每次切换配置前自动快照，误操作可回滚",
     settingsViewBackups: "回滚",
@@ -937,13 +1073,13 @@ const I18N = {
     githubRepoBtn: "GitHub 仓库",
     usageGuideKicker: "使用说明",
     usageGuideTitle: "VarSwitch 使用说明",
-    usageGuideIntro: "VarSwitch 可集中管理 Claude Code、Codex CLI、插件市场、提示词、MCP Server、移动端控制、设置与备份。",
+    usageGuideIntro: "VarSwitch 可集中管理 Claude Code、Codex、提示词、MCP Server、移动端控制、设置与备份。",
     usageGuideStep1Title: "Claude Code 配置",
-    usageGuideStep1Desc: "添加或导入 Token/Base URL 配置，可测试接口速度；切换后会同步系统环境变量、已支持编辑器和 ~/.claude/settings.json。",
-    usageGuideStep2Title: "Codex CLI 配置",
-    usageGuideStep2Desc: "管理 Codex API Key、Base URL、模型、Provider 和写入方式，并提供诊断与 ~/.codex/config.toml、auth.json 备份。",
+    usageGuideStep1Desc: "添加或导入 Token/Base URL 配置，可带 Key 验证接口连通性；切换后会同步系统环境变量、已支持编辑器和 ~/.claude/settings.json。",
+    usageGuideStep2Title: "Codex 配置",
+    usageGuideStep2Desc: "管理 Codex API Key、Base URL、模型、Provider 和写入方式，并同步 ~/.codex/config.toml 与 auth.json。",
     usageGuideStep3Title: "Codex Toolbox",
-    usageGuideStep3Desc: "安装插件市场、修复内置插件、启用关键插件、同步 Codex 会话，并绑定飞书/Lark、QQ、微信移动端控制。",
+    usageGuideStep3Desc: "同步 Codex 会话，并绑定飞书/Lark、QQ、微信移动端控制。",
     usageGuideStep4Title: "Skills、Prompts 与 MCP",
     usageGuideStep4Desc: "顶部工具栏可编辑 Claude Skills/Commands、维护 CLAUDE.md 模板，并管理 ~/.claude.json 中的 MCP Server。",
     usageGuideStep5Title: "设置与备份",
@@ -967,9 +1103,14 @@ const I18N = {
   }
 };
 
-let currentLang = localStorage.getItem(LANG_STORAGE_KEY) || "en";
+let currentLang = localStorage.getItem(LANG_STORAGE_KEY) || "zh";
 if (!I18N[currentLang]) {
-  currentLang = "en";
+  currentLang = "zh";
+}
+// 用户没有手动切换过语言时,忽略历史遗留的存储值,进入软件默认中文
+if (!localStorage.getItem(LANG_USER_SET_KEY)) {
+  currentLang = "zh";
+  localStorage.setItem(LANG_STORAGE_KEY, "zh");
 }
 
 let currentTheme = localStorage.getItem(THEME_STORAGE_KEY) || "light";
@@ -980,39 +1121,45 @@ if (currentTheme !== "light" && currentTheme !== "dark") {
 let profiles = [];
 let codexProfiles = [];
 let grokProfiles = [];
+let geminiProfiles = [];
 let grokDiagnostics = null;
 let codexToolbox = null;
 let codexDiagnostics = null;
-let currentPage = "overview";
-let activeConsolePage = "overview";
-let codexWizardStep = 1;
-let codexWizardEnableAfterSave = false;
-let overviewEvents = [];
+let currentPage = "add-provider";
+let activeConsolePage = "add-provider";
+let selectedUniversalProviderPreset = "newapi";
+let universalProviderSaving = false;
+let codexEnableAfterSave = false;
 let configurationFilter = "all";
 let configurationSearch = "";
-let pluginFilter = "all";
-let pluginSearch = "";
-let codexDiagExpanded = false;
 let lastClaudeStatus = null;
 let lastCodexStatus = null;
 let lastGrokStatus = null;
+let lastGeminiStatus = null;
 let editingGrokId = null;
+let editingGeminiId = null;
 let detectedEditors = {}; // { id: displayName }
 let editingId = null;
+let profileSaving = false;
+let grokProfileSaving = false;
+let geminiProfileSaving = false;
 let switchingSnapshot = null;
 let progressUnlisten = null;
+let mobileChannelStatusUnlisten = null;
 let isSwitchingProfile = false;
 let skillsData = [];
 let editingSkillName = null;
+let skillSaving = false;
 let mcpServers = {};
 let editingMcpName = null;
+let mcpSaving = false;
 let discoverSkills = [];
 let skillRepos = [];
+let repoAdding = false;
 let activeSkillsTab = "installed";
 let discoverSearchQuery = "";
 let discoverRepoFilter = "all";
 let discoverStatusFilter = "all";
-let editorCarouselIndex = 0;
 let isDiscovering = false;
 let promptTemplates = [];
 let activePromptTab = "editor";
@@ -1026,15 +1173,15 @@ let updateDownloadUnlisten = null;
 let appSettings = null;
 let appPaths = null;
 let usageGuideAutoHandled = false;
-let activeToolboxTab = "market";
+let activeToolboxTab = "session";
+let activeDeveloperTool = "skills";
 let selectedCodexThreadId = "";
 let selectedMobileChannel = "wechat";
 let toolboxRefreshTimer = null;
 let toolboxRefreshBusy = false;
+let pendingApprovalIds = new Set(); // 正在提交的审批 requestId，防止同一卡片双重提交
 let larkCredentialSaveTimer = null;
 let toolboxRemoteBusy = false;
-let marketplaceInstallBusy = false;
-let marketplaceProgressUnlisten = null;
 let toolboxSessionSyncBusy = false;
 let toolboxSessionProgressTimer = null;
 let toolboxSessionProgressValue = 0;
@@ -1044,6 +1191,72 @@ let toolboxSelectedTrashSessionIds = new Set();
 let toolboxSessionTrashOpen = false;
 let toolboxCopiedSessionId = "";
 let mobileBindBusyAction = "";
+
+/**
+ * A10: 容器级事件委托，替代「innerHTML 全量重建后逐个卡片 addEventListener」。
+ *
+ * 为什么要这么做：
+ * 1. 逐卡片绑定要求每次重渲染都重新绑一遍，一旦将来做局部更新（只替换某张卡片），
+ *    极易出现同一个按钮被绑定两次、点一次触发两次的 bug。
+ * 2. 委托只在容器上绑一次，重建 innerHTML 不影响监听器，也不会随卡片数量线性增长。
+ *
+ * 用 dataset 标记保证同一个容器只绑定一次（容器本身是 index.html 里的静态节点，
+ * 不会被 innerHTML 替换掉，所以标记不会丢）。
+ *
+ * @param {HTMLElement|null} container 静态容器节点
+ * @param {string} flag 该容器的绑定标记名，同一容器上多种用途请用不同 flag
+ * @param {(action: string, target: HTMLElement, event: MouseEvent) => void} dispatch 分派函数
+ */
+function bindDelegatedActions(container, flag, dispatch) {
+  if (!container) return;
+  const key = `bound${flag}`;
+  if (container.dataset[key] === "1") return;
+  container.dataset[key] = "1";
+  container.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-action]");
+    // 只处理落在本容器内的按钮，避免嵌套容器互相截胡
+    if (!target || !container.contains(target)) return;
+    const action = target.getAttribute("data-action");
+    if (!action) return;
+    dispatch(action, target, event);
+  });
+}
+
+/**
+ * A10: 状态卡片里「复制」按钮的容器级委托。
+ * 这些按钮用 data-copy 携带待复制文本，语义单一，单独给一个绑定入口。
+ */
+function bindDelegatedCopyButtons(container, flag) {
+  if (!container) return;
+  const key = `bound${flag}`;
+  if (container.dataset[key] === "1") return;
+  container.dataset[key] = "1";
+  container.addEventListener("click", (event) => {
+    const btn = event.target.closest(".copy-btn");
+    if (!btn || !container.contains(btn)) return;
+    event.stopPropagation();
+    const text = btn.getAttribute("data-copy");
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => showToast(t("toastCopied"), "success"));
+  });
+}
+
+/**
+ * A10: profile 卡片网格的公共委托绑定。
+ * 四个 provider 的卡片按钮语义完全一致（switch / edit / delete + data-id），
+ * 差异只有 provider 类型，所以共用一份分派逻辑。
+ */
+function bindProfileGridActions(grid, flag, type) {
+  bindDelegatedActions(grid, flag, (action, target) => {
+    const id = target.getAttribute("data-id");
+    if (!id) return;
+    // data-action 允许带 provider 前缀（如 codex-switch），统一去前缀后分派
+    const kind = action.replace(/^(?:claude|codex|grok|gemini)-/, "");
+    if (kind === "switch") switchAnyProviderProfile(type, id);
+    else if (kind === "edit") editProviderProfile(type, id);
+    else if (kind === "delete") deleteProviderProfile(type, id);
+  });
+}
 
 function t(key, params) {
   const dict = I18N[currentLang] || I18N.en;
@@ -1087,23 +1300,22 @@ function setButtonBusy(button, busy, label) {
 function productIcon(kind) {
   if (kind === "anthropic") {
     return `<span class="product-icon product-icon-anthropic" aria-hidden="true">
-      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M38.7 10h-8.9L13 54h8.5l3.6-9.7h18.1L46.9 54H56L38.7 10Zm-11 27.2 6.4-17.1 6.5 17.1H27.7Z" fill="currentColor"/>
-      </svg>
+      <img src="anthropic-color.svg" alt="">
     </span>`;
   }
   if (kind === "codex") {
     return `<span class="product-icon product-icon-codex" aria-hidden="true">
-      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M32 6 54.5 19v26L32 58 9.5 45V19L32 6Z" stroke="currentColor" stroke-width="5" stroke-linejoin="round"/>
-        <path d="M22 25.5 32 19l10 6.5v13L32 45l-10-6.5v-13Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
-        <path d="M32 19v26M22 25.5l20 13M42 25.5l-20 13" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-      </svg>
+      <img src="OpenAI-black-monoblossom.svg" alt="">
     </span>`;
   }
   if (kind === "grok") {
     return `<span class="product-icon product-icon-grok" aria-hidden="true">
       <img src="grok-color.svg" width="16" height="16" alt="">
+    </span>`;
+  }
+  if (kind === "gemini") {
+    return `<span class="product-icon product-icon-gemini" aria-hidden="true">
+      <img src="gemini-color.svg" width="16" height="16" alt="">
     </span>`;
   }
   return "";
@@ -1417,10 +1629,6 @@ async function installAppUpdate() {
   }
 }
 
-async function downloadAndOpenUpdate() {
-  return installAppUpdate();
-}
-
 async function handleUpdateButton() {
   const mode = getUpdateActionMode();
   if (mode === "busy") return;
@@ -1443,7 +1651,23 @@ async function openGitHubRepo() {
   }
 }
 
+function updateSettingsSegControls() {
+  const states = [
+    ["settingsLangZh", currentLang === "zh"],
+    ["settingsLangEn", currentLang === "en"],
+    ["settingsThemeLight", currentTheme === "light"],
+    ["settingsThemeDark", currentTheme === "dark"],
+  ];
+  states.forEach(([id, active]) => {
+    const button = $(id);
+    if (!button) return;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
 function updateThemeSegControl() {
+  updateSettingsSegControls();
   const lightBtn = $("themeLightBtn");
   const darkBtn = $("themeDarkBtn");
   if (!lightBtn || !darkBtn) return;
@@ -1459,6 +1683,7 @@ function updateThemeSegControl() {
 }
 
 function updateLangSegControl() {
+  updateSettingsSegControls();
   const zhBtn = $("langZhBtn");
   const enBtn = $("langEnBtn");
   if (!zhBtn || !enBtn) return;
@@ -1489,9 +1714,9 @@ function applyLanguage() {
   const downloadSiteBtnText = $("downloadSiteBtnText");
   if (downloadSiteBtnText) downloadSiteBtnText.textContent = t("downloadSiteBtn");
   setText("githubRepoBtnText", t("githubRepoBtn"));
-  setText("statusSectionTitle", t("statusTitle"));
+  updateClaudeStatusTitle();
   setText("statusHint", t("statusHint"));
-  setText("profilesSectionTitle", t("profilesTitle"));
+  setText("profilesSectionTitle", currentLang === "zh" ? "Claude 配置列表" : "Claude Config List");
   setText("profileNameLabel", t("nameLabel"));
   setText("profileApiKeyLabel", t("tokenLabel"));
   setText("profileBaseUrlLabel", t("urlLabel"));
@@ -1526,20 +1751,44 @@ function applyLanguage() {
   setText("usageGuideCloseBtn", t("usageGuideClose"));
   setText("usageGuideNeverBtn", t("usageGuideNever"));
 
+  applyUsagePanelLanguage();
+
   setPlaceholder("profileName", t("placeholderName"));
   setPlaceholder("profileApiKey", t("placeholderApiKey"));
   setPlaceholder("profileBaseUrl", t("placeholderBaseUrl"));
   setText("profileModelIdLabel", t("modelIdLabel"));
   setPlaceholder("profileModelId", t("placeholderModelId"));
   setText("profileModelIdHint", t("modelIdHint"));
+  setText("profilePresetLabel", t("providerPresetLabel"));
+  setText("profilePresetHint", t("claudePresetHintDefault"));
+  setText("profileApiFormatLabel", t("claudeApiFormatLabel"));
+  setText("profileApiFormatHint", t("claudeApiFormatHint"));
+  const claudeApiFormatSelect = $("profileApiFormat");
+  if (claudeApiFormatSelect && claudeApiFormatSelect.options.length >= 2) {
+    claudeApiFormatSelect.options[0].textContent = t("claudeApiFormatOptionAnthropic");
+    claudeApiFormatSelect.options[1].textContent = t("claudeApiFormatOptionOpenAiChat");
+  }
+  renderClaudePresetOptions();
 
   // Codex page labels
-  setText("codexStatusSectionTitle", t("codexStatusTitle"));
+  updateCodexStatusTitle();
   setText("codexProfilesSectionTitle", t("codexProfilesTitle"));
-  setText("codexActiveConfigLabel", t("codexActiveConfigLabel"));
-  setText("codexCardSyncBtn", t("syncNow"));
+  setText("codexSyncBtn", t("syncNow"));
   setText("codexPageImportBtn", t("importBtn"));
-  setText("codexPresetLabel", t("codexPresetLabel"));
+  setText("codexPresetLabel", t("providerPresetLabel"));
+  setText("codexWireApiLabel", t("codexWireApiLabel"));
+  setText("codexWireApiHint", t("codexWireApiHint"));
+  const codexWireSelect = $("codexWireApi");
+  if (codexWireSelect && codexWireSelect.options.length >= 2) {
+    codexWireSelect.options[0].textContent = currentLang === "zh"
+      ? "OpenAI Responses（官方 / 兼容网关）"
+      : "OpenAI Responses (official / compatible gateways)";
+    codexWireSelect.options[1].textContent = currentLang === "zh"
+      ? "OpenAI Chat Completions（DeepSeek、Kimi 等）"
+      : "OpenAI Chat Completions (DeepSeek, Kimi, etc.)";
+  }
+  setText("codexAdvancedTitle", t("codexAdvancedTitle"));
+  setPlaceholder("codexBaseUrl", currentLang === "zh" ? "留空使用官方地址 https://api.openai.com/v1" : "Leave empty for official https://api.openai.com/v1");
   setText("codexNameLabel", t("codexNameLabel"));
   setText("codexApiKeyLabel", t("codexApiKeyLabel"));
   setText("codexBaseUrlLabel", t("codexBaseUrlLabel"));
@@ -1561,11 +1810,8 @@ function applyLanguage() {
   setText("codexCancelBtn", t("cancel"));
   setText("codexSubmitBtn", t("save"));
   // Grok page labels
-  if ($("grokStatusSectionTitle")) setText("grokStatusSectionTitle", t("grokStatusTitle"));
+  updateGrokActiveConfigBar();
   if ($("grokProfilesSectionTitle")) setText("grokProfilesSectionTitle", t("grokProfilesTitle"));
-  if ($("grokActiveConfigLabel")) setText("grokActiveConfigLabel", t("grokActiveConfigLabel"));
-  if ($("grokSyncNowBtnText")) setText("grokSyncNowBtnText", t("syncNow"));
-  if ($("grokStatusHint")) setText("grokStatusHint", t("grokStatusHint"));
   if ($("grokPresetLabel")) setText("grokPresetLabel", t("grokPresetLabel"));
   if ($("grokNameLabel")) setText("grokNameLabel", t("grokNameLabel"));
   if ($("grokApiKeyLabel")) setText("grokApiKeyLabel", t("grokApiKeyLabel"));
@@ -1579,24 +1825,18 @@ function applyLanguage() {
   if ($("grokCancelBtn")) setText("grokCancelBtn", t("cancel"));
   if ($("grokSubmitBtn")) setText("grokSubmitBtn", t("save"));
   if ($("grokPageAddBtn")) setText("grokPageAddBtn", t("grokAddConfig"));
-  if ($("grokRefreshBtn")) setText("grokRefreshBtn", currentLang === "zh" ? "刷新状态" : "Refresh");
-  if ($("grokOpenFolderBtn")) setText("grokOpenFolderBtn", t("grokOpenFolder"));
-  if ($("grokBackupRuntimeBtn")) setText("grokBackupRuntimeBtn", t("grokBackupRuntime"));
+  if ($("grokRefreshBtn")) setText("grokRefreshBtn", currentLang === "zh" ? "立即同步" : "Sync now");
   if ($("grokPageImportBtn")) setText("grokPageImportBtn", t("grokImportCurrent"));
   if ($("grokProfileName")) setPlaceholder("grokProfileName", t("placeholderName"));
   if ($("grokApiKey")) setPlaceholder("grokApiKey", "xai-...");
-  if ($("grokBaseUrl")) setPlaceholder("grokBaseUrl", "https://api.x.ai/v1");
+  if ($("grokBaseUrl")) setPlaceholder("grokBaseUrl", currentLang === "zh" ? "留空使用官方地址 https://api.x.ai/v1" : "Leave empty for official https://api.x.ai/v1");
   if ($("grokModel")) setPlaceholder("grokModel", "e.g. grok-4");
   renderGrokPresetOptions();
   const codexToolboxBtn = $("codexToolboxBtn");
   if (codexToolboxBtn) codexToolboxBtn.textContent = t("codexToolbox");
   setText("codexToolboxTitle", t("codexToolboxTitle"));
-  setText("toolboxTabMarket", t("toolboxTabMarket"));
   setText("toolboxTabSession", t("toolboxTabSession"));
   setText("toolboxTabRemote", t("toolboxTabRemote"));
-  setText("toolboxMarketHint", t("toolboxMarketHint"));
-  setText("toolboxMarketInputLabel", t("toolboxMarketInputLabel"));
-  setText("toolboxMarketApplyBtn", t("toolboxMarketApply"));
   setText("toolboxSessionHint", t("toolboxSessionHint"));
   setText("sessionPageSyncBtn", t("toolboxSyncNow"));
   setText("toolboxSyncedThreadsTitle", t("toolboxSyncedThreadsTitle"));
@@ -1691,6 +1931,14 @@ function applyLanguage() {
   setText("settingsOpenConfigDir", t("settingsOpen"));
   setText("settingsOpenClaudeDir", t("settingsOpen"));
   setText("settingsOpenCodexDir", t("settingsOpen"));
+  setText("settingsOpenLogsDir", t("settingsOpen"));
+  setText("settingsOpenBackupsBtn", t("settingsOpen"));
+  document.querySelectorAll("[data-settings-copy-path]").forEach((button) => {
+    button.title = t("settingsCopyPath");
+    button.setAttribute("aria-label", t("settingsCopyPath"));
+  });
+  setText("settingsManualBackupLabel", t("settingsManualBackup"));
+  setText("settingsManualBackupDesc", t("settingsManualBackupDesc"));
   setText("settingsExportBtn", t("settingsExport"));
   setText("settingsImportBtn", t("settingsImport"));
   setText("settingsAutoBackupLabel", t("settingsAutoBackup"));
@@ -1717,6 +1965,7 @@ function applyLanguage() {
 function setLanguage(lang) {
   currentLang = lang;
   localStorage.setItem(LANG_STORAGE_KEY, currentLang);
+  localStorage.setItem(LANG_USER_SET_KEY, "1");
   syncAppSettingsAppearance();
   applyLanguage();
   renderProfiles();
@@ -1730,8 +1979,15 @@ function setLanguage(lang) {
     loadGrokStatus();
     loadGrokDiagnostics();
   }
+  if (currentPage === "gemini") {
+    renderGeminiProfiles();
+    loadGeminiStatus();
+  }
   if (codexToolbox) {
     renderCodexToolbox();
+  }
+  if (activeConsolePage === "usage") {
+    loadUsageDashboard();
   }
 }
 
@@ -1747,11 +2003,32 @@ async function loadCodexToolbox() {
     codexToolbox = await invoke("get_codex_toolbox");
     await loadSmartControlDebug(false);
     renderCodexToolbox();
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
-    if (typeof applyPluginFilters === "function") applyPluginFilters();
+    renderNavigationStatus();
   } catch (error) {
     console.error("loadCodexToolbox failed:", error);
     if (typeof showToast === "function") showToast(String(error), "error");
+  }
+}
+
+/**
+ * B15: 订阅后端推送的手机通道状态。
+ *
+ * 后端在通道状态发生变化时 emit("mobile-channel-status", <ToolboxSnapshot>)，
+ * payload 与 get_codex_toolbox 返回值同结构，这里直接整体替换本地缓存。
+ * 只在工具箱页可见时重渲染，其他页面留给下次进入时统一渲染，避免无谓开销。
+ */
+async function bindMobileChannelStatusListener() {
+  if (mobileChannelStatusUnlisten) return;
+  try {
+    mobileChannelStatusUnlisten = await listen("mobile-channel-status", (event) => {
+      if (!event?.payload) return;
+      codexToolbox = event.payload;
+      if (activeConsolePage === "toolbox") renderCodexToolbox();
+      // 侧边栏绑定状态指示灯不依赖当前页面，始终同步
+      renderNavigationStatus();
+    });
+  } catch (error) {
+    console.error("bindMobileChannelStatusListener failed:", error);
   }
 }
 
@@ -1767,33 +2044,26 @@ async function loadSmartControlDebug(showError = false) {
 
 function switchToolboxTab(tab) {
   activeToolboxTab = tab;
-  $("toolboxTabMarket")?.classList.toggle("active", tab === "market");
-  $("toolboxTabSession")?.classList.toggle("active", tab === "session");
-  $("toolboxTabRemote")?.classList.toggle("active", tab === "remote");
-  // 控制台一级页面会把内容挂到 host 中，始终显示对应区块
-  const market = $("toolboxMarketContent");
+  const sessionTab = $("toolboxTabSession");
+  const remoteTab = $("toolboxTabRemote");
+  sessionTab?.classList.toggle("active", tab === "session");
+  remoteTab?.classList.toggle("active", tab === "remote");
+  sessionTab?.setAttribute("aria-selected", String(tab === "session"));
+  remoteTab?.setAttribute("aria-selected", String(tab === "remote"));
   const session = $("toolboxSessionContent");
   const remote = $("toolboxRemoteContent");
-  if (market) market.style.display = tab === "market" || activeConsolePage === "plugins" ? "" : "none";
-  if (session) session.style.display = tab === "session" || activeConsolePage === "sessions" ? "" : "none";
-  if (remote) remote.style.display = tab === "remote" || activeConsolePage === "mobile" ? "" : "none";
-  // 在独立页面中强制显示
-  if (activeConsolePage === "plugins" && market) market.style.display = "";
-  if (activeConsolePage === "sessions" && session) session.style.display = "";
-  if (activeConsolePage === "mobile" && remote) remote.style.display = "";
+  if (session) session.style.display = tab === "session" ? "" : "none";
+  if (remote) remote.style.display = tab === "remote" ? "" : "none";
 }
 
 function openCodexToolbox() {
-  // Toolbox 已拆分为一级导航页面，默认进入插件市场
-  const tab = activeToolboxTab || "market";
-  if (tab === "session") switchConsolePage("sessions");
-  else if (tab === "remote") switchConsolePage("mobile");
-  else switchConsolePage("plugins");
+  switchConsolePage("toolbox");
+  switchToolboxTab("session");
   loadCodexToolbox();
 }
 
 function closeCodexToolbox() {
-  $("codexToolboxOverlay").classList.remove("open");
+  $("codexToolboxOverlay")?.classList.remove("open");
   stopToolboxRefresh();
 }
 
@@ -1802,18 +2072,20 @@ function startToolboxRefresh(ticks = 8) {
   let remaining = ticks;
   toolboxRefreshTimer = setInterval(async () => {
     if (toolboxRefreshBusy) return;
-    if (!$("codexToolboxOverlay").classList.contains("open") || remaining <= 0) {
+    // Toolbox 已改为内联页面，存活条件按当前页面判定（旧 overlay 不再加 open class）
+    if (activeConsolePage !== "toolbox" || remaining <= 0) {
       stopToolboxRefresh();
       return;
     }
     remaining -= 1;
     toolboxRefreshBusy = true;
     try {
-      const lark = codexToolbox?.mobileChannels?.find((binding) => binding.channel === "lark");
+      // B13: 飞书注册轮询已由后端 worker 按服务端下发的 interval 单点执行，
+      // 前端这里不再并行调 poll_lark_bot_registration，避免双重轮询打爆接口频率限制。
+      // 飞书状态只读后端缓存（get_codex_toolbox / mobile-channel-status 事件推送）。
+      // 微信暂时仍只有前端在轮询，删掉会导致扫码绑定卡住，因此保留。
       const wechat = codexToolbox?.mobileChannels?.find((binding) => binding.channel === "wechat");
-      if (lark?.qrDeviceCode && (!lark?.appId || !lark?.appSecret)) {
-        codexToolbox = await invoke("poll_lark_bot_registration", {});
-      } else if (wechat?.qrDeviceCode && !wechat?.botToken) {
+      if (wechat?.qrDeviceCode && !wechat?.botToken) {
         codexToolbox = await invoke("poll_wechat_qr_binding", { verifyCode: "" });
       } else {
         codexToolbox = await invoke("get_codex_toolbox");
@@ -1840,131 +2112,10 @@ function stopToolboxRefresh() {
 
 function renderCodexToolbox() {
   if (!codexToolbox) return;
-  const marketplaceValue =
-    helpers.normalizeCodexPluginMarketplaceInput?.(codexToolbox.pluginMarketplaceInput) ||
-    helpers.CODEX_PLUGIN_MARKETPLACE_URL ||
-    "https://gitcode.com/2301_79703673/codex-plugins.git";
-  const marketplaceSelect = $("toolboxMarketplaceInput");
-  const marketplaces = helpers.CODEX_PLUGIN_MARKETPLACES || [
-    {
-      name: "VarSwitch 插件合集",
-      url: marketplaceValue,
-      count: 189,
-      zh: "覆盖官方常用服务和桌面能力，适合默认安装。",
-      en: "Broad official-style service and desktop coverage; best default choice.",
-    },
-  ];
-  marketplaceSelect.innerHTML = marketplaces
-    .map((item) => {
-      const label = `${item.name} · ${item.count || "--"} plugins`;
-      return `<option value="${esc(item.url)}">${esc(label)}</option>`;
-    })
-    .join("");
-  marketplaceSelect.value = marketplaceValue;
-  const option =
-    helpers.getCodexPluginMarketplaceOption?.(marketplaceValue) ||
-    marketplaces.find((item) => item.url === marketplaceValue) ||
-    marketplaces[0];
-  $("toolboxMarketplaceDesc").textContent =
-    currentLang === "zh" ? option.zh || "" : option.en || option.zh || "";
-  renderBuiltinPlugins();
   renderToolboxSessionSync();
   renderToolboxSyncedThreads();
   renderToolboxMobileControl();
   renderToolboxRemote();
-  applyPluginFilters();
-}
-
-function builtinPluginStatusText(status) {
-  if (!status?.available) {
-    return status?.lastError || "未找到 Codex App 自带插件目录";
-  }
-  const market = status.marketplaceConfigured ? "已挂载 openai-bundled" : "未挂载 openai-bundled";
-  const important = `${status.importantEnabledCount || 0}/${status.importantTotalCount || 0} 个关键插件已启用`;
-  const total = `${status.enabledCount || 0}/${status.totalCount || 0} 个内置插件已启用`;
-  return `${market} · ${important} · ${total}`;
-}
-
-function renderBuiltinPlugins() {
-  const summary = $("builtinPluginSummary");
-  const list = $("builtinPluginList");
-  if (!summary || !list) return;
-  const status = codexToolbox?.builtinPlugins || {};
-  summary.textContent = builtinPluginStatusText(status);
-  if (!status.available) {
-    list.innerHTML = `<div class="builtin-plugin-empty">${esc(status.lastError || "未发现 Codex App 内置插件")}</div>`;
-    return;
-  }
-  const plugins = status.plugins || [];
-  if (plugins.length === 0) {
-    list.innerHTML = `<div class="builtin-plugin-empty">没有可展示的内置插件</div>`;
-    return;
-  }
-  list.innerHTML = plugins.map((plugin) => {
-    const skills = (plugin.skills || []).slice(0, 4).map((skill) => `<span>${esc(skill.name)}</span>`).join("");
-    return `<div class="builtin-plugin-card ${plugin.important ? "important" : ""}">
-      <div class="builtin-plugin-card-main">
-        <div class="builtin-plugin-title-row">
-          <strong>${esc(plugin.displayName || plugin.name)}</strong>
-          ${plugin.important ? `<span class="builtin-plugin-badge">关键</span>` : ""}
-          ${plugin.enabled ? `<span class="builtin-plugin-badge enabled">已启用</span>` : ""}
-        </div>
-        <div class="builtin-plugin-desc">${esc(plugin.description || plugin.id)}</div>
-        <div class="builtin-plugin-skills">${skills}</div>
-      </div>
-      <div class="builtin-plugin-card-actions">
-        <button class="btn ${plugin.enabled ? "btn-secondary" : "btn-primary"} btn-sm" data-enable-builtin-plugin="${esc(plugin.id)}" ${plugin.enabled ? "disabled" : ""} type="button">
-          ${plugin.enabled ? "已启用" : "启用"}
-        </button>
-      </div>
-    </div>`;
-  }).join("");
-  list.querySelectorAll("[data-enable-builtin-plugin]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const pluginId = btn.getAttribute("data-enable-builtin-plugin");
-      if (!pluginId) return;
-      btn.disabled = true;
-      try {
-        codexToolbox = await invoke("enable_codex_builtin_plugin", { pluginId });
-        showToast("Codex 内置插件已启用", "success");
-        renderCodexToolbox();
-        await loadCodexDiagnostics();
-      } catch (error) {
-        showToast(String(error), "error");
-        btn.disabled = false;
-      }
-    });
-  });
-}
-
-async function handleRepairOpenAiBundledPlugins() {
-  const btn = $("builtinPluginRepairBtn");
-  if (btn) btn.disabled = true;
-  try {
-    codexToolbox = await invoke("repair_openai_bundled_plugins");
-    showToast("已修复 Codex 内置插件市场", "success");
-    renderCodexToolbox();
-    await loadCodexDiagnostics();
-  } catch (error) {
-    showToast(String(error), "error");
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-async function handleEnableImportantBuiltinPlugins() {
-  const btn = $("builtinPluginEnableImportantBtn");
-  if (btn) btn.disabled = true;
-  try {
-    codexToolbox = await invoke("enable_important_codex_builtin_plugins");
-    showToast("Computer Use / Chrome 等关键插件已启用", "success");
-    renderCodexToolbox();
-    await loadCodexDiagnostics();
-  } catch (error) {
-    showToast(String(error), "error");
-  } finally {
-    if (btn) btn.disabled = false;
-  }
 }
 
 function renderToolboxSessionSync() {
@@ -2370,45 +2521,68 @@ function renderToolboxMobileControl() {
   const threadSelect = $("toolboxMobileThreadSelect");
   const threads = codexToolbox?.syncedCodexThreads || [];
 
-  appSelect.innerHTML = [
+  const appOptionsHtml = [
     `<option value="wechat">${channelLabel("wechat")}</option>`,
     `<option value="qq">${channelLabel("qq")}</option>`,
     `<option value="lark">${channelLabel("lark")}</option>`,
   ].join("");
-  appSelect.value = selectedMobileChannel;
+  // 仅在内容变化时重建，避免每秒轮询时下拉被强行关闭
+  if (appSelect.innerHTML !== appOptionsHtml) appSelect.innerHTML = appOptionsHtml;
+  if (appSelect.value !== selectedMobileChannel) appSelect.value = selectedMobileChannel;
 
   if (codexToolbox?.selectedMobileThreadId) {
     selectedCodexThreadId = codexToolbox.selectedMobileThreadId;
   } else if (!selectedCodexThreadId && threads[0]) {
     selectedCodexThreadId = threads[0].id;
   }
-  threadSelect.innerHTML = threads.length
+  const threadOptionsHtml = threads.length
     ? threads.map((thread) => `<option value="${esc(thread.id)}">${esc(thread.threadName || thread.lastUserMessage || thread.id)}</option>`).join("")
     : `<option value="">${t("toolboxMobileNoThreadOption")}</option>`;
-  threadSelect.value = threads.some((thread) => thread.id === selectedCodexThreadId) ? selectedCodexThreadId : "";
+  if (threadSelect.innerHTML !== threadOptionsHtml) threadSelect.innerHTML = threadOptionsHtml;
+  const nextThreadValue = threads.some((thread) => thread.id === selectedCodexThreadId) ? selectedCodexThreadId : "";
+  if (threadSelect.value !== nextThreadValue) threadSelect.value = nextThreadValue;
 
-  $("toolboxMobileBindPanel").innerHTML = renderSelectedMobileBinding(getSelectedMobileBinding());
-  bindMobileControlEvents();
+  bindMobileControlSelectEvents();
+
+  const panel = $("toolboxMobileBindPanel");
+  if (!panel) return;
+  const nextPanelHtml = renderSelectedMobileBinding(getSelectedMobileBinding());
+  // 用户正在填写凭据输入框时跳过重建，否则每秒轮询会销毁输入框、丢焦点丢内容
+  const active = document.activeElement;
+  const typingInPanel =
+    active && active !== document.body && panel.contains(active) && active.hasAttribute?.("data-channel-field");
+  if (typingInPanel) return;
+  if (panel.innerHTML === nextPanelHtml) return;
+  panel.innerHTML = nextPanelHtml;
+  bindMobileControlPanelEvents();
 }
 
-function bindMobileControlEvents() {
-  $("toolboxMobileAppSelect").onchange = () => {
-    selectedMobileChannel = $("toolboxMobileAppSelect").value || "wechat";
-    renderCodexToolbox();
-  };
-
-  $("toolboxMobileThreadSelect").onchange = async () => {
-    selectedCodexThreadId = $("toolboxMobileThreadSelect").value || "";
-    if (!selectedCodexThreadId) return;
-    try {
-      await bindCurrentMobileSelection();
-      showToast(t("toolboxThreadSelected"), "success");
+function bindMobileControlSelectEvents() {
+  const appSelect = $("toolboxMobileAppSelect");
+  if (appSelect) {
+    appSelect.onchange = () => {
+      selectedMobileChannel = appSelect.value || "wechat";
       renderCodexToolbox();
-    } catch (error) {
-      showToast(String(error), "error");
-    }
-  };
+    };
+  }
 
+  const threadSelect = $("toolboxMobileThreadSelect");
+  if (threadSelect) {
+    threadSelect.onchange = async () => {
+      selectedCodexThreadId = threadSelect.value || "";
+      if (!selectedCodexThreadId) return;
+      try {
+        await bindCurrentMobileSelection();
+        showToast(t("toolboxThreadSelected"), "success");
+        renderCodexToolbox();
+      } catch (error) {
+        showToast(String(error), "error");
+      }
+    };
+  }
+}
+
+function bindMobileControlPanelEvents() {
   $("toolboxMobileBindPanel").querySelectorAll("button[data-action]").forEach((btn) => {
     btn.addEventListener("click", handleMobileBindAction);
   });
@@ -2492,8 +2666,11 @@ async function saveSelectedMobileChannelDraft({ render = false } = {}) {
 async function handleMobileBindAction(event) {
   const btn = event.currentTarget;
   const action = btn.getAttribute("data-action");
+  // 已有绑定操作在执行时直接忽略，避免重复调用后端命令
+  if (mobileBindBusyAction && action !== "toolbox-cancel-qq-qr") return;
   mobileBindBusyAction = action || "";
-  setButtonBusy(btn, true, getMobileBindingLoadingText(selectedMobileChannel, mobileBindBusyAction));
+  // 注意：renderCodexToolbox() 会重建整个面板，btn 随即变成游离节点，
+  // 因此这里不再对 btn 设 busy，改由模板按 mobileBindBusyAction 输出 disabled。
   renderCodexToolbox();
   try {
     if (action === "toolbox-open-lark-create") {
@@ -2543,17 +2720,14 @@ async function handleMobileBindAction(event) {
       qqBinding.qrStatus = "正在生成 QQ 扫码二维码，请稍等...";
       qqBinding.status = "正在生成 QQ 扫码二维码，请稍等...";
       renderCodexToolbox();
-      invoke("start_qq_qr_binding", {})
-        .then((snapshot) => {
-          codexToolbox = snapshot;
-          renderCodexToolbox();
-          startToolboxRefresh(120);
-        })
-        .catch((error) => {
-          mobileDebugError("start_qq_qr_binding invoke:failed", error);
-          showToast(String(error), "error");
-          loadCodexToolbox();
-        });
+      // 必须 await：否则 finally 会在二维码生成前清空 busy，导致可以连点重复绑定
+      codexToolbox = await invoke("start_qq_qr_binding", {});
+      startToolboxRefresh(120);
+    } else if (action === "toolbox-cancel-qq-qr") {
+      mobileDebug("cancel_qq_qr_binding invoke:start");
+      codexToolbox = await invoke("cancel_qq_qr_binding", {});
+      mobileDebug("cancel_qq_qr_binding invoke:success");
+      showToast(currentLang === "zh" ? "已取消 QQ 扫码绑定" : "QQ QR binding cancelled", "success");
     } else if (action === "toolbox-start-wechat-qr") {
       selectedMobileChannel = "wechat";
       startToolboxRefresh(120);
@@ -2569,9 +2743,9 @@ async function handleMobileBindAction(event) {
   } catch (error) {
     mobileDebugError("mobile bind action failed", error, { action });
     showToast(String(error), "error");
+    if (action === "toolbox-start-qq-qr") loadCodexToolbox();
   } finally {
     mobileBindBusyAction = "";
-    setButtonBusy(btn, false);
     renderCodexToolbox();
   }
 }
@@ -2591,20 +2765,29 @@ function renderSelectedMobileBinding(binding) {
     ? `<div class="toolbox-loading-line"><span class="inline-spinner" aria-hidden="true"></span><span>${esc(getMobileBindingLoadingText(channel, mobileBindBusyAction))}</span></div>`
     : "";
   const stateBadge = `<span class="toolbox-binding-state toolbox-binding-state-${esc(uiState.kind)}">${esc(getMobileBindingStateLabel(uiState.kind))}</span>`;
+  // 有绑定操作在进行中就禁用全部动作按钮，避免重复调用后端命令
+  const dis = mobileBindBusyAction ? " disabled" : "";
   let body = "";
   let actions = "";
 
   if (channel === "wechat") {
     body = `${qr}${loading}<div class="mgmt-item-desc">${esc(status.detail || "点击绑定微信后，用手机微信扫码并确认绑定。")}</div>`;
     actions = `
-      <button class="btn btn-primary btn-sm" data-action="toolbox-start-wechat-qr">${t("toolboxStartWechatQr")}</button>
-      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-wechat-binding">清除绑定</button>
+      <button class="btn btn-primary btn-sm" data-action="toolbox-start-wechat-qr"${dis}>${t("toolboxStartWechatQr")}</button>
+      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-wechat-binding"${dis}>清除绑定</button>
     `;
   } else if (channel === "qq") {
+    const qqQrPending = Boolean(
+      binding.qrStartedAt &&
+      !binding.appId &&
+      !binding.appSecret &&
+      /扫码|二维码|正在|等待/i.test(`${binding.status || ""} ${binding.qrStatus || ""}`)
+    );
     body = `${qr}${loading}<div class="mgmt-item-desc">${esc(status.detail || "点击 QQ 扫码绑定后，用 QQ 扫描二维码即可保存机器人凭据。")}</div>`;
     actions = `
-      <button class="btn btn-primary btn-sm" data-action="toolbox-start-qq-qr">${t("toolboxStartQqQr")}</button>
-      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-qq-binding">清除绑定</button>
+      <button class="btn btn-primary btn-sm" data-action="toolbox-start-qq-qr"${dis}>${t("toolboxStartQqQr")}</button>
+      ${qqQrPending ? `<button class="btn btn-secondary btn-sm" data-action="toolbox-cancel-qq-qr"${mobileBindBusyAction && mobileBindBusyAction !== "toolbox-start-qq-qr" ? " disabled" : ""}>取消扫码</button>` : ""}
+      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-qq-binding"${dis}>清除绑定</button>
     `;
   } else {
     body = `
@@ -2618,16 +2801,16 @@ function renderSelectedMobileBinding(binding) {
         </label>
         <label class="toolbox-channel-field">
           <span>${t("toolboxAppSecret")}</span>
-          <input type="password" data-channel-field="appSecret" autocomplete="off" value="${esc(binding.appSecret || "")}">
+          <input type="password" data-channel-field="appSecret" autocomplete="off" placeholder="${binding.appSecret === '*' ? '(已保存)' : ''}" value="">
         </label>
       </div>
     `;
     actions = `
-      <button class="btn btn-success btn-sm" data-action="toolbox-open-lark-existing">${t("toolboxRebindLarkBot")}</button>
-      <button class="btn btn-secondary btn-sm" data-action="toolbox-open-lark-create">${t("toolboxCreateLarkBot")}</button>
-      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-unbind-lark-session">${t("toolboxUnbindLarkSession")}</button>
-      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-stop-lark-listen">${t("toolboxStopLarkListen")}</button>
-      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-lark-binding">${t("toolboxClearLarkBinding")}</button>
+      <button class="btn btn-success btn-sm" data-action="toolbox-open-lark-existing"${dis}>${t("toolboxRebindLarkBot")}</button>
+      <button class="btn btn-secondary btn-sm" data-action="toolbox-open-lark-create"${dis}>${t("toolboxCreateLarkBot")}</button>
+      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-unbind-lark-session"${dis}>${t("toolboxUnbindLarkSession")}</button>
+      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-stop-lark-listen"${dis}>${t("toolboxStopLarkListen")}</button>
+      <button class="btn btn-secondary btn-sm danger-text" data-action="toolbox-clear-lark-binding"${dis}>${t("toolboxClearLarkBinding")}</button>
     `;
   }
 
@@ -2812,11 +2995,14 @@ function renderSmartControlApprovals() {
   panel.innerHTML = `<div class="smart-control-approval-title">${esc(t("toolboxSmartControlApprovalTitle"))}</div>
     ${approvals.slice(-3).reverse().map((approval) => {
       const options = approval.options?.length ? approval.options : ["approve", "deny"];
+      // 整卡片 disabled — 只要这张卡正在提交，所有按钮都禁用
+      const pending = pendingApprovalIds.has(approval.requestId || "");
+      const dis = pending ? " disabled" : "";
       return `<div class="smart-control-approval-card">
         <div class="smart-control-approval-card-title">${esc(approval.title || approval.method || "Approval")}</div>
         <div class="smart-control-approval-card-body">${esc(approval.body || approval.rawPreview || "")}</div>
         <div class="smart-control-approval-actions">
-          ${options.map((option) => `<button class="btn btn-secondary btn-sm" type="button" data-approval-id="${esc(approval.requestId || "")}" data-approval-decision="${esc(option)}">${esc(option)}</button>`).join("")}
+          ${options.map((option) => `<button class="btn btn-secondary btn-sm" type="button" data-approval-id="${esc(approval.requestId || "")}" data-approval-decision="${esc(option)}"${dis}>${esc(option)}</button>`).join("")}
         </div>
       </div>`;
     }).join("")}`;
@@ -2825,7 +3011,10 @@ function renderSmartControlApprovals() {
       const requestId = btn.getAttribute("data-approval-id");
       const decision = btn.getAttribute("data-approval-decision");
       if (!requestId || !decision) return;
-      btn.disabled = true;
+      // 整卡片加入 pending 集合，下次渲染时所有按钮都 disabled
+      if (pendingApprovalIds.has(requestId)) return;
+      pendingApprovalIds.add(requestId);
+      renderSmartControlApprovals();
       try {
         await invoke("submit_smart_control_approval", { requestId, decision });
         showToast(t("toolboxSmartControlApprovalSubmitted"), "success");
@@ -2833,7 +3022,8 @@ function renderSmartControlApprovals() {
         renderSmartControlApprovals();
       } catch (error) {
         showToast(String(error), "error");
-        btn.disabled = false;
+        pendingApprovalIds.delete(requestId);
+        renderSmartControlApprovals();
       }
     });
   });
@@ -2943,226 +3133,70 @@ function updateSwitchProgress(payload) {
   }
 }
 
-function marketplaceProgressLabel(label, step) {
-  const labelMap = {
-    prepare: t("toolboxMarketplaceProgressPrepare"),
-    install: t("toolboxMarketplaceProgressInstall"),
-    verify: t("toolboxMarketplaceProgressVerify"),
-    done: t("toolboxMarketplaceProgressDone"),
-  };
-  if (label && labelMap[label]) return labelMap[label];
-  if (step <= 1) return t("toolboxMarketplaceProgressPrepare");
-  if (step === 2) return t("toolboxMarketplaceProgressInstall");
-  if (step === 3) return t("toolboxMarketplaceProgressVerify");
-  return t("toolboxMarketplaceProgressDone");
+function updateClaudeStatusTitle() {
+  const active = profiles.find((profile) => profile.isActive);
+  const activeContext = active
+    ? (currentLang === "zh" ? ` (当前: ${active.name})` : ` (Current: ${active.name})`)
+    : "";
+  setText("statusSectionTitle", `${t("statusTitle")}${activeContext}`);
 }
 
-function showMarketplaceProgress() {
-  const progress = $("toolboxMarketProgress");
-  progress.hidden = false;
-  $("toolboxMarketProgressBar").style.width = "0%";
-  $("toolboxMarketProgressPercent").textContent = "0%";
-  $("toolboxMarketProgressLabel").textContent = t("toolboxMarketplaceProgressPrepare");
-}
+function renderClaudeStatus(status) {
+  const grid = $("statusGrid");
+  if (!grid) return;
 
-function updateMarketplaceProgress(payload) {
-  const step = Math.max(1, Number(payload?.step || 1));
-  const total = Math.max(1, Number(payload?.total || 4));
-  const pct = Math.min(100, Math.round((step / total) * 100));
-  $("toolboxMarketProgressBar").style.width = `${pct}%`;
-  $("toolboxMarketProgressPercent").textContent = `${pct}%`;
-  $("toolboxMarketProgressLabel").textContent = marketplaceProgressLabel(payload?.label, step);
-}
+  const item = status?.claude || {};
+  const model = status?.claudeModel || "--";
+  const apiKeyLabel = "Claude API Key";
+  const baseUrlLabel = "Claude Base URL";
+  const modelLabel = currentLang === "zh" ? "Claude 模型" : "Claude Model";
+  updateClaudeStatusTitle();
+  const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 
-function setMarketplaceInstallBusy(isBusy) {
-  marketplaceInstallBusy = isBusy;
-  $("toolboxMarketApplyBtn").disabled = isBusy;
-  $("toolboxMarketplaceInput").disabled = isBusy;
-  $("toolboxMarketApplyBtn").textContent = isBusy
-    ? t("toolboxMarketplaceInstalling")
-    : t("toolboxMarketApply");
+  grid.innerHTML = `
+    <div class="status-card">
+      <div class="status-card-title">
+        <span class="status-card-title-text">${productIcon("anthropic")}Claude</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">${apiKeyLabel}</span>
+        <div class="status-value-wrapper">
+          <span class="status-value" title="${esc(item.apiKey || "--")}">${esc(maskKey(item.apiKey))}</span>
+          ${item.apiKey ? `<button class="copy-btn" type="button" data-copy="${esc(item.apiKey)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
+        </div>
+      </div>
+      <div class="status-item">
+        <span class="status-label">${baseUrlLabel}</span>
+        <div class="status-value-wrapper">
+          <span class="status-value" title="${esc(item.baseUrl || "--")}">${esc(item.baseUrl || "--")}</span>
+          ${item.baseUrl ? `<button class="copy-btn" type="button" data-copy="${esc(item.baseUrl)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
+        </div>
+      </div>
+      <div class="status-item">
+        <span class="status-label">${modelLabel}</span>
+        <div class="status-value-wrapper">
+          <span class="status-value" title="${esc(model)}">${esc(model)}</span>
+          ${model !== "--" ? `<button class="copy-btn" type="button" data-copy="${esc(model)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
+        </div>
+      </div>
+    </div>`;
+
+  bindDelegatedCopyButtons(grid, "ClaudeStatusCopy");
 }
 
 async function loadStatus() {
   try {
-    // 同时获取状态和检测到的编辑器列表
     const [status, editors] = await Promise.all([
       invoke("get_status"),
       invoke("get_detected_editors"),
     ]);
     detectedEditors = editors || {};
     lastClaudeStatus = status;
-    const grid = $("statusGrid");
-
-    // 构建编辑器列表
-    const editorLocations = [];
-    for (const [editorId, displayName] of Object.entries(detectedEditors)) {
-      editorLocations.push({
-        key: `editor_${editorId}`,
-        title: `${displayName} ${t("settingsOpen") === "打开" ? "设置" : "Settings"}`,
-        data: (status.editors || {})[editorId] || null
-      });
-    }
-
-    // 固定三列：系统环境变量、编辑器轮播、Claude
-    const systemLoc = { key: "envVars", title: t("statusSystemEnv"), data: status.envVars };
-    const claudeLoc = { key: "claude", title: t("statusClaude"), data: status.claude, icon: "anthropic" };
-
-    // 计算同步状态
-    const allLocations = [systemLoc, ...editorLocations, claudeLoc];
-    const allKeys = allLocations.map((l) => l.data?.apiKey).filter(Boolean);
-    const allUrls = allLocations.map((l) => l.data?.baseUrl).filter(Boolean);
-    const synced = allKeys.length > 0 && new Set(allKeys).size <= 1 && new Set(allUrls).size <= 1;
-
-    const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
-
-    // 渲染单张状态卡片
-    function renderCard(loc, extraClass) {
-      const item = loc.data;
-      if (!item) {
-        return `
-          <div class="status-card error-card ${extraClass || ""}">
-            <div class="status-card-title">
-              <span class="status-card-title-text">${productIcon(loc.icon)}${loc.title}</span>
-              <span class="status-badge-console error">${currentLang === "zh" ? "读取失败" : "Failed"}</span>
-            </div>
-            <div style="font-size:13px;color:var(--console-muted)">${t("readFailed")}</div>
-            <div style="margin-top:10px;display:flex;gap:8px;">
-              <button class="btn btn-secondary btn-sm" type="button" data-action="claude-fix">${currentLang === "zh" ? "修复" : "Fix"}</button>
-              <button class="btn btn-ghost btn-sm" type="button" data-action="claude-detail">${currentLang === "zh" ? "查看详情" : "Details"}</button>
-            </div>
-          </div>`;
-      }
-      const badgeClass = synced ? "synced" : "unsynced";
-      const badgeText = synced ? t("synced") : t("unsynced");
-      const dotColor = synced ? "var(--success-text)" : "var(--warning-text)";
-      return `
-        <div class="status-card ${extraClass || ""}">
-          <div class="status-card-title">
-            <span class="status-card-title-text">${loc.title}</span>
-            <span class="status-badge ${badgeClass}">
-              <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0;"></span>
-              ${badgeText}
-            </span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">${t("tokenLabel")}</span>
-            <div class="status-value-wrapper">
-              <span class="status-value">${maskKey(item.apiKey)}</span>
-              <button class="copy-btn" type="button" data-copy="${esc(item.apiKey || "")}" title="Copy">${COPY_ICON}</button>
-            </div>
-          </div>
-          <div class="status-item">
-            <span class="status-label">${t("urlLabel")}</span>
-            <div class="status-value-wrapper">
-              <span class="status-value has-tooltip" data-tooltip="${esc(item.baseUrl || "")}">${truncUrl(item.baseUrl)}</span>
-              <button class="copy-btn" type="button" data-copy="${esc(item.baseUrl || "")}" title="Copy">${COPY_ICON}</button>
-            </div>
-          </div>
-        </div>`;
-    }
-
-    // 列1：系统环境变量
-    let html = renderCard(systemLoc);
-
-    // 列2：编辑器轮播
-    if (editorLocations.length === 0) {
-      html += `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">${t("stepEditors")}: --</div>`;
-    } else if (editorLocations.length === 1) {
-      html += `<div class="editor-carousel single">${renderCard(editorLocations[0])}</div>`;
-    } else {
-      if (editorCarouselIndex >= editorLocations.length) editorCarouselIndex = 0;
-      const cards = editorLocations.map((loc, i) => {
-        let cls = "carousel-hidden";
-        if (i === editorCarouselIndex) cls = "carousel-active";
-        else if (i === (editorCarouselIndex + 1) % editorLocations.length) cls = "carousel-next";
-        return renderCard(loc, cls);
-      }).join("");
-      const dots = editorLocations.map((_, i) =>
-        `<span class="carousel-dot ${i === editorCarouselIndex ? "active" : ""}"></span>`
-      ).join("");
-      html += `<div class="editor-carousel" id="editorCarousel">${cards}<div class="carousel-indicator">${dots}</div></div>`;
-    }
-
-    // 列3：Claude
-    html += renderCard(claudeLoc);
-
-    grid.innerHTML = html;
-
-    // 绑定轮播点击
-    const carousel = $("editorCarousel");
-    if (carousel && editorLocations.length > 1) {
-      carousel.addEventListener("click", () => {
-        editorCarouselIndex = (editorCarouselIndex + 1) % editorLocations.length;
-        const cards = carousel.querySelectorAll(".status-card");
-        const dots = carousel.querySelectorAll(".carousel-dot");
-        cards.forEach((card, i) => {
-          card.classList.remove("carousel-active", "carousel-next", "carousel-hidden");
-          if (i === editorCarouselIndex) card.classList.add("carousel-active");
-          else if (i === (editorCarouselIndex + 1) % editorLocations.length) card.classList.add("carousel-next");
-          else card.classList.add("carousel-hidden");
-        });
-        dots.forEach((dot, i) => {
-          dot.classList.toggle("active", i === editorCarouselIndex);
-        });
-      });
-    }
-
-    // 绑定复制按钮
-    grid.querySelectorAll(".copy-btn").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const text = btn.getAttribute("data-copy");
-        if (text) {
-          navigator.clipboard.writeText(text).then(() => {
-            showToast(t("toastCopied"), "success");
-          });
-        }
-      });
-    });
-
-    // 错误卡片：修复 / 查看详情
-    grid.querySelectorAll("button[data-action='claude-fix']").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        switchConsolePage("settings");
-        showToast(currentLang === "zh" ? "请在设置中检查编辑器路径后重试同步" : "Check editor paths in Settings, then sync again", "warning");
-      });
-    });
-    grid.querySelectorAll("button[data-action='claude-detail']").forEach((btn) => {
-      btn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        await appConfirm(
-          currentLang === "zh"
-            ? "错误原因：配置文件读取失败。\n建议：确认 Cursor / 编辑器已安装，或在设置中手动指定配置路径。"
-            : "Reason: failed to read editor settings.\nSuggestion: confirm the editor is installed or set a custom path in Settings.",
-          {
-            title: currentLang === "zh" ? "读取失败详情" : "Read failure details",
-            confirmText: currentLang === "zh" ? "知道了" : "OK",
-            cancelText: currentLang === "zh" ? "关闭" : "Close",
-          }
-        );
-      });
-    });
-
-    // 环境状态矩阵（精简版）
-    const matrix = $("claudeEnvMatrix");
-    if (matrix) {
-      const items = [
-        { title: currentLang === "zh" ? "系统环境变量" : "System Env", ok: !!status.envVars, detail: status.envVars ? (currentLang === "zh" ? "已同步" : "Synced") : (currentLang === "zh" ? "读取失败" : "Failed") },
-        { title: currentLang === "zh" ? "编辑器配置" : "Editor Config", ok: editorLocations.some((l) => l.data), detail: editorLocations.some((l) => l.data) ? (currentLang === "zh" ? "可读取" : "Readable") : (currentLang === "zh" ? "读取失败" : "Failed") },
-        { title: currentLang === "zh" ? "Claude 设置" : "Claude Settings", ok: !!status.claude, detail: status.claude ? (currentLang === "zh" ? "已同步" : "Synced") : (currentLang === "zh" ? "读取失败" : "Failed") },
-      ];
-      matrix.innerHTML = items
-        .map((item) => `<div class="env-matrix-item"><span class="status-badge-console ${item.ok ? "healthy" : "error"}">${item.ok ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "异常" : "Error")}</span><strong>${esc(item.title)}</strong><small>${esc(item.detail)}</small></div>`)
-        .join("");
-    }
-
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+    renderClaudeStatus(status);
+    renderNavigationStatus();
   } catch (error) {
     console.error("loadStatus failed:", error);
     showToast(t("loadStatusFailed", { error: String(error) }), "error");
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
   }
 }
 
@@ -3171,7 +3205,8 @@ async function loadProfiles() {
     const data = await invoke("get_profiles");
     profiles = data.profiles || [];
     renderProfiles();
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+    if (lastClaudeStatus) renderClaudeStatus(lastClaudeStatus);
+    renderNavigationStatus();
   } catch (error) {
     console.error(error);
     showToast(t("loadProfilesFailed", { error: String(error) }), "error");
@@ -3206,15 +3241,19 @@ function renderProfiles() {
       </div>
       <div class="profile-body">
         <div class="profile-field">
-          <span class="field-label">${t("tokenLabel")}</span>
-          <span class="field-value">${maskKey(profile.apiKey)}</span>
+          <span class="field-label">Claude API Key</span>
+          <span class="field-value">${esc(maskKey(profile.apiKey))}</span>
         </div>
         <div class="profile-field">
-          <span class="field-label">${t("urlLabel")}</span>
-          <span class="field-value">${truncUrl(profile.baseUrl, 50)}</span>
+          <span class="field-label">Claude Base URL</span>
+          <span class="field-value">${esc(truncUrl(profile.baseUrl, 50))}</span>
         </div>
+        ${profile.apiFormat === "openai_chat" ? `<div class="profile-field">
+          <span class="field-label">${currentLang === "zh" ? "API 格式" : "API Format"}</span>
+          <span class="field-value">${currentLang === "zh" ? "OpenAI Chat（经本地代理）" : "OpenAI Chat (via local proxy)"}</span>
+        </div>` : ""}
         ${profile.modelId ? `<div class="profile-field">
-          <span class="field-label">${t("modelIdLabel")}</span>
+          <span class="field-label">${currentLang === "zh" ? "Claude 模型" : "Claude Model"}</span>
           <span class="field-value">${esc(profile.modelId)}</span>
         </div>` : ""}
       </div>
@@ -3226,38 +3265,21 @@ function renderProfiles() {
     </div>
   `).join("");
 
-  grid.querySelectorAll("button[data-action]").forEach((btn) => {
-    const action = btn.getAttribute("data-action");
-    const id = btn.getAttribute("data-id");
-    if (!id) return;
-
-    btn.addEventListener("click", () => {
-      if (action === "switch") handleSwitch(id);
-      if (action === "edit") handleEdit(id);
-      if (action === "delete") handleDelete(id);
-    });
-  });
-
+  bindProfileGridActions(grid, "ClaudeProfiles", "claude");
   updateActiveConfigBar();
 }
 
 function updateActiveConfigBar() {
-  const section = $("activeConfigSection");
-  const nameEl = $("activeConfigName");
-  const activeProfile = profiles.find((p) => p.isActive);
-
-  if (activeProfile) {
-    nameEl.textContent = activeProfile.name;
-    section.style.display = "";
-  } else {
-    section.style.display = "none";
-  }
+  updateClaudeStatusTitle();
 }
 
 function handleSyncNow() {
   const activeProfile = profiles.find((p) => p.isActive);
   if (activeProfile) {
     handleSwitch(activeProfile.id);
+  } else {
+    // A9: 无活动配置时给用户明确提示，而非静默无反应
+    showToast(currentLang === "zh" ? "没有活动配置，请先切换到一个配置" : "No active config. Please switch to one first.", "warning");
   }
 }
 
@@ -3275,22 +3297,6 @@ async function tryClipboardAutoFill(field, targetId) {
       if (!/^https?:\/\//i.test(text) && text.length >= 8) target.value = text;
     }
   } catch (_) { /* 剪贴板不可用时静默忽略 */ }
-}
-
-function normalizeEndpointCandidate(url) {
-  return String(url || "").trim().replace(/\/+$/, "");
-}
-
-function uniqueEndpointCandidates(values) {
-  const seen = new Set();
-  const result = [];
-  for (const value of values) {
-    const normalized = normalizeEndpointCandidate(value);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    result.push(normalized);
-  }
-  return result;
 }
 
 function productFieldMap(kind) {
@@ -3316,6 +3322,17 @@ function productFieldMap(kind) {
       endpointTestBtn: "grokEndpointTestBtn",
     };
   }
+  if (kind === "gemini") {
+    return {
+      baseUrl: "geminiBaseUrl",
+      apiKey: "geminiApiKey",
+      model: "geminiModel",
+      endpointResults: "geminiEndpointResults",
+      modelResults: "geminiModelResults",
+      modelFetchBtn: "geminiModelFetchBtn",
+      endpointTestBtn: "geminiEndpointTestBtn",
+    };
+  }
   return {
     baseUrl: "profileBaseUrl",
     apiKey: "profileApiKey",
@@ -3327,69 +3344,18 @@ function productFieldMap(kind) {
   };
 }
 
-function getEndpointCandidates(kind) {
-  const inputId = productFieldMap(kind).baseUrl;
-  return uniqueEndpointCandidates([$(inputId)?.value]);
-}
-
-function endpointLatencyClass(result) {
-  if (typeof result.latency !== "number") return "failed";
-  if (result.latency < 400) return "fast";
-  if (result.latency >= 1000) return "slow";
-  return "";
-}
-
-function endpointMetaText(result) {
-  if (typeof result.latency === "number") {
-    return `${Math.round(result.latency)}ms${result.status ? ` · ${result.status}` : ""}`;
-  }
-  return result.error || t("endpointFailed");
-}
-
-function renderEndpointResults(kind, results) {
-  const fields = productFieldMap(kind);
-  const inputId = fields.baseUrl;
-  const resultsId = fields.endpointResults;
-  const container = $(resultsId);
-  if (!container) return;
-
-  const sorted = results.slice().sort((a, b) => {
-    const left = typeof a.latency === "number" ? a.latency : Number.POSITIVE_INFINITY;
-    const right = typeof b.latency === "number" ? b.latency : Number.POSITIVE_INFINITY;
-    return left === right ? a.url.localeCompare(b.url) : left - right;
-  });
-
-  if (sorted.length === 0) {
-    container.innerHTML = `<div class="endpoint-row"><span class="endpoint-url">${t("endpointNoResults")}</span></div>`;
-    container.classList.add("open");
-    return;
-  }
-
-  container.innerHTML = sorted.map((result) => `
-    <div class="endpoint-row">
-      <span class="endpoint-url" title="${esc(result.url)}">${esc(result.url)}</span>
-      <span class="endpoint-meta ${endpointLatencyClass(result)}">${esc(endpointMetaText(result))}</span>
-      <button class="btn btn-secondary btn-sm endpoint-use-btn" data-url="${esc(result.url)}" type="button">${t("endpointUse")}</button>
-    </div>
-  `).join("");
-  container.classList.add("open");
-
-  container.querySelectorAll(".endpoint-use-btn").forEach((button) => {
-    button.addEventListener("click", () => {
-      const url = button.getAttribute("data-url");
-      if (!url) return;
-      $(inputId).value = url;
-      showToast(t("endpointSelected"), "success");
-    });
-  });
-}
-
 function clearEndpointResults(kind) {
   const resultsId = productFieldMap(kind).endpointResults;
   const container = $(resultsId);
   if (!container) return;
   container.innerHTML = "";
   container.classList.remove("open");
+}
+
+// Claude 配置选了 OpenAI 格式时，验证/取模型也要按 OpenAI 方式带 Bearer 头
+function productProtocol(kind) {
+  if (kind === "claude" && $("profileApiFormat")?.value === "openai_chat") return "codex";
+  return kind;
 }
 
 function modelInputId(kind) {
@@ -3419,20 +3385,23 @@ function renderModelResults(kind, models) {
   }
 
   container.innerHTML = normalizedModels.map((model) => `
-    <button class="model-row model-use-btn" data-model="${esc(model)}" type="button" title="${esc(model)}">
+    <button class="model-row model-use-btn" data-action="use-model" data-model="${esc(model)}" type="button" title="${esc(model)}">
       <span class="model-id">${esc(model)}</span>
       <span class="model-use">${t("endpointUse")}</span>
     </button>
   `).join("");
   container.classList.add("open");
-  container.querySelectorAll(".model-use-btn").forEach((button) => {
-    button.addEventListener("click", () => {
-      const model = button.getAttribute("data-model");
-      if (!model) return;
-      $(modelInputId(kind)).value = model;
-      updateCodexOfficialConfigPreview();
-      showToast(t("modelSelected"), "success");
-    });
+  // A10: 容器级委托，kind 存在容器 dataset 上按需回读
+  container.dataset.modelKind = kind;
+  bindDelegatedActions(container, "ModelResults", (action, target) => {
+    if (action !== "use-model") return;
+    const model = target.getAttribute("data-model");
+    if (!model) return;
+    const input = $(modelInputId(container.dataset.modelKind));
+    if (!input) return;
+    input.value = model;
+    updateCodexOfficialConfigPreview();
+    showToast(t("modelSelected"), "success");
   });
 }
 
@@ -3442,9 +3411,9 @@ async function handleModelFetch(kind) {
   const baseUrlId = fields.baseUrl;
   const apiKeyId = fields.apiKey;
   const button = $(buttonId);
-  const baseUrl = $(baseUrlId).value.trim();
+  const baseUrl = $(baseUrlId).value.trim() || OFFICIAL_BASE_URLS[kind] || "";
   const apiKey = $(apiKeyId).value.trim();
-  if (!baseUrl || !apiKey) {
+  if (!apiKey) {
     showToast(t("modelFetchMissing"), "warning");
     return;
   }
@@ -3453,47 +3422,102 @@ async function handleModelFetch(kind) {
   button.disabled = true;
   button.textContent = t("modelFetching");
   try {
-    const models = await invoke("fetch_available_models", { baseUrl, apiKey, timeoutSecs: 12 });
+    const models = await invoke("fetch_available_models", { baseUrl, apiKey, timeoutSecs: 12, protocol: productProtocol(kind) });
     renderModelResults(kind, models || []);
   } catch (error) {
-    showToast(String(error), "error");
+    showToast(describeVerifyError(String(error)), "error");
   } finally {
     button.disabled = false;
     button.textContent = previousText || t("modelFetch");
   }
 }
 
+// 把后端返回的原始错误翻译成用户可理解的验证结论
+function describeVerifyError(raw) {
+  if (/HTTP 40[13]\b/.test(raw)) return t("verifyAuthFailed");
+  if (/HTTP 40[45]\b/.test(raw)) return t("verifyNoModelsEndpoint");
+  return raw;
+}
+
+// 真实连通性验证：带 API Key 请求 /models 端点（后端会按协议自动补 /v1 等路径），
+// 能同时验证端点可达性与 Key 有效性，并顺带展示可用模型列表。
 async function handleEndpointTest(kind) {
-  const buttonId = productFieldMap(kind).endpointTestBtn;
-  const button = $(buttonId);
-  const urls = getEndpointCandidates(kind);
-  if (urls.length === 0) {
-    showToast(t("endpointEmpty"), "warning");
+  const fields = productFieldMap(kind);
+  const button = $(fields.endpointTestBtn);
+  const baseUrl = $(fields.baseUrl).value.trim() || OFFICIAL_BASE_URLS[kind] || "";
+  const apiKey = $(fields.apiKey).value.trim();
+  const container = $(fields.endpointResults);
+  if (!apiKey) {
+    showToast(t("modelFetchMissing"), "warning");
     return;
   }
 
   const previousText = button.textContent;
   button.disabled = true;
   button.textContent = t("endpointTesting");
+  const startedAt = performance.now();
   try {
-    const results = await invoke("test_api_endpoints", { urls, timeoutSecs: 8 });
-    renderEndpointResults(kind, results || []);
+    const models = await invoke("fetch_available_models", { baseUrl, apiKey, timeoutSecs: 12, protocol: productProtocol(kind) });
+    const elapsed = Math.round(performance.now() - startedAt);
+    const count = (models || []).length;
+    if (container) {
+      container.innerHTML = `<div class="endpoint-row"><span class="endpoint-url" title="${esc(baseUrl)}">${esc(baseUrl)}</span><span class="endpoint-meta fast">${t("verifyOkLabel")} · ${count} ${t("verifyModelsSuffix")} · ${elapsed}ms</span></div>`;
+      container.classList.add("open");
+    }
+    renderModelResults(kind, models || []);
+    showToast(t("verifyOkToast"), "success");
   } catch (error) {
-    showToast(String(error), "error");
+    const message = describeVerifyError(String(error));
+    if (container) {
+      container.innerHTML = `<div class="endpoint-row"><span class="endpoint-url" title="${esc(baseUrl)}">${esc(baseUrl)}</span><span class="endpoint-meta failed">${esc(message)}</span></div>`;
+      container.classList.add("open");
+    }
+    showToast(message, "error");
   } finally {
     button.disabled = false;
     button.textContent = previousText || t("endpointTest");
   }
 }
 
+function getSelectedClaudePreset() {
+  const presetId = $("profilePresetSelect")?.value || "";
+  return CLAUDE_PRESETS.find((preset) => preset.id === presetId) || null;
+}
+
+function renderClaudePresetOptions() {
+  const select = $("profilePresetSelect");
+  if (!select) return;
+  const currentValue = select.value;
+  select.innerHTML = [
+    `<option value="">${t("providerPresetCustom")}</option>`,
+    ...CLAUDE_PRESETS.map((preset) => `<option value="${esc(preset.id)}">${esc(preset.name)}</option>`),
+  ].join("");
+  select.value = CLAUDE_PRESETS.some((preset) => preset.id === currentValue) ? currentValue : "";
+}
+
+function applyClaudePreset(preset) {
+  if (!preset) return;
+  if (!$("profileName").value.trim()) {
+    $("profileName").value = preset.name;
+  }
+  $("profileBaseUrl").value = preset.baseUrl;
+  $("profileModelId").value = preset.model || "";
+  // 内置预设均为 Anthropic 兼容端点，重置为直连
+  if ($("profileApiFormat")) $("profileApiFormat").value = "anthropic";
+  clearEndpointResults("claude");
+  clearModelResults("claude");
+}
+
 function openModal(profile) {
   editingId = profile ? profile.id : null;
   $("modalTitle").textContent = profile ? t("editConfig") : t("addConfig");
   $("profileId").value = editingId || "";
+  if ($("profilePresetSelect")) $("profilePresetSelect").value = "";
   $("profileName").value = profile ? profile.name : "";
   $("profileApiKey").value = profile ? profile.apiKey : "";
   $("profileBaseUrl").value = profile ? profile.baseUrl : "";
   $("profileModelId").value = profile ? (profile.modelId || "") : "";
+  if ($("profileApiFormat")) $("profileApiFormat").value = profile ? (profile.apiFormat || "anthropic") : "anthropic";
   clearEndpointResults("claude");
   clearModelResults("claude");
   $("modalOverlay").classList.add("open");
@@ -3507,26 +3531,47 @@ function closeModal() {
 
 async function handleSubmit(event) {
   event.preventDefault();
+  if (profileSaving) return;
+  const isNewProfile = !editingId;
 
   const name = $("profileName").value.trim();
   const apiKey = $("profileApiKey").value.trim();
   const baseUrl = $("profileBaseUrl").value.trim();
   const modelId = $("profileModelId").value.trim();
+  const apiFormat = $("profileApiFormat")?.value || "anthropic";
+  if (apiFormat === "openai_chat") {
+    // OpenAI 格式没有官方地址可回退；模型名必填（Claude Code 发来的 claude-* 上游不认识）
+    if (!baseUrl) {
+      showToast(t("claudeApiFormatNeedsBaseUrl"), "warning");
+      return;
+    }
+    if (!modelId) {
+      showToast(t("claudeApiFormatNeedsModel"), "warning");
+      return;
+    }
+  }
 
+  profileSaving = true;
+  const submitButton = $("submitBtn");
+  setButtonBusy(submitButton, true, t("toastSaving") || "保存中...");
   try {
     if (editingId) {
-      await invoke("update_profile", { id: editingId, name, apiKey, baseUrl, modelId });
+      await invoke("update_profile", { id: editingId, name, apiKey, baseUrl, modelId, apiFormat });
       showToast(t("toastUpdated"), "success");
     } else {
-      await invoke("add_profile", { name, apiKey, baseUrl, modelId: modelId || null });
+      await invoke("add_profile", { name, apiKey, baseUrl, modelId: modelId || null, apiFormat });
       showToast(t("toastAdded"), "success");
     }
 
     closeModal();
     await loadProfiles();
     await loadStatus();
+    if (isNewProfile) switchConsolePage("claude");
   } catch (error) {
     showToast(String(error), "error");
+  } finally {
+    profileSaving = false;
+    setButtonBusy(submitButton, false);
   }
 }
 
@@ -3609,32 +3654,13 @@ async function handleCancelSwitch() {
   }
 }
 
+// A10: 编辑/删除逻辑统一走 PROVIDER_CONFIG 驱动的公共实现
 function handleEdit(id) {
-  const profile = profiles.find((item) => item.id === id);
-  if (profile) {
-    openModal(profile);
-  }
+  editProviderProfile("claude", id);
 }
 
 async function handleDelete(id) {
-  const profile = profiles.find((item) => item.id === id);
-  if (!profile) return;
-
-  const confirmed = await appConfirm(t("confirmDelete", { name: profile.name }), {
-    title: t("delete"),
-    confirmText: currentLang === "zh" ? "删除配置" : "Delete",
-    danger: true,
-  });
-  if (!confirmed) return;
-
-  try {
-    await invoke("delete_profile", { id });
-    showToast(t("toastDeleted"), "success");
-    await loadProfiles();
-    await loadStatus();
-  } catch (error) {
-    showToast(String(error), "error");
-  }
+  return deleteProviderProfile("claude", id);
 }
 
 async function handleImport() {
@@ -3667,7 +3693,7 @@ async function handleImport() {
 function switchPage(page) {
   // 兼容旧横向 Tab：统一走控制台导航
   const map = { claude: "claude", codex: "codex", grok: "grok" };
-  switchConsolePage(map[page] || page || "overview");
+  switchConsolePage(map[page] || page || "claude");
 }
 
 // ── Grok Profile Management ─────────────────────────
@@ -3709,14 +3735,15 @@ function applyGrokPreset(preset) {
   updateGrokPresetHint();
 }
 
-async function loadGrokProfiles() {
+async function loadGrokProfiles({ rethrow = false } = {}) {
   try {
     const data = await invoke("get_grok_profiles");
     grokProfiles = data.profiles || [];
     renderGrokProfiles();
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+    renderNavigationStatus();
   } catch (error) {
     showToast(String(error), "error");
+    if (rethrow) throw error;
   }
 }
 
@@ -3749,11 +3776,11 @@ function renderGrokProfiles() {
       <div class="profile-body">
         <div class="profile-field">
           <span class="field-label">${t("grokApiKeyLabel")}</span>
-          <span class="field-value">${maskKey(profile.apiKey)}</span>
+          <span class="field-value">${esc(maskKey(profile.apiKey))}</span>
         </div>
         <div class="profile-field">
           <span class="field-label">${t("grokBaseUrlLabel")}</span>
-          <span class="field-value">${truncUrl(profile.baseUrl, 50)}</span>
+          <span class="field-value">${esc(truncUrl(profile.baseUrl, 50))}</span>
         </div>
         ${profile.model ? `<div class="profile-field">
           <span class="field-label">${t("grokModelLabel")}</span>
@@ -3772,107 +3799,76 @@ function renderGrokProfiles() {
     </div>
   `).join("");
 
-  grid.querySelectorAll("button[data-action]").forEach((btn) => {
-    const action = btn.getAttribute("data-action");
-    const id = btn.getAttribute("data-id");
-    if (!id) return;
-    btn.addEventListener("click", () => {
-      if (action === "grok-switch") handleGrokSwitch(id);
-      if (action === "grok-edit") {
-        const p = grokProfiles.find((x) => x.id === id);
-        if (p) openGrokModal(p);
-      }
-      if (action === "grok-delete") handleGrokDelete(id);
-    });
-  });
-
+  bindProfileGridActions(grid, "GrokProfiles", "grok");
   updateGrokActiveConfigBar();
 }
 
 function updateGrokActiveConfigBar() {
-  const section = $("grokActiveConfigSection");
-  const nameEl = $("grokActiveConfigName");
-  if (!section || !nameEl) return;
+  // 与 Claude 保持一致:当前配置名直接显示在状态区标题中
+  if (!$("grokStatusSectionTitle")) return;
   const active = grokProfiles.find((p) => p.isActive);
-  if (active) {
-    nameEl.textContent = active.name;
-    section.style.display = "";
-  } else {
-    section.style.display = "none";
-  }
+  const activeContext = active
+    ? (currentLang === "zh" ? ` (当前: ${active.name})` : ` (Current: ${active.name})`)
+    : "";
+  setText("grokStatusSectionTitle", `${t("grokStatusTitle")}${activeContext}`);
 }
 
-async function loadGrokStatus() {
+async function loadGrokStatus({ rethrow = false } = {}) {
   try {
     const status = await invoke("get_grok_status");
     lastGrokStatus = status;
     const grid = $("grokStatusGrid");
     if (!grid) {
-      if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+      renderNavigationStatus();
       return;
     }
     if (!status || (!status.apiKey && !status.configExists)) {
-      grid.innerHTML = `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">Grok (~/.grok/config.toml): --</div>`;
-      if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+      grid.innerHTML = `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">Grok: --</div>`;
+      renderNavigationStatus();
       return;
     }
     const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
     grid.innerHTML = `
       <div class="status-card">
         <div class="status-card-title">
-          <span class="status-card-title-text">${productIcon("grok")}Grok CLI · ~/.grok/config.toml</span>
+          <span class="status-card-title-text">${productIcon("grok")}Grok</span>
         </div>
         <div class="status-item">
           <span class="status-label">${t("grokApiKeyLabel")}</span>
           <div class="status-value-wrapper">
-            <span class="status-value">${maskKey(status.apiKey)}</span>
-            <button class="copy-btn" type="button" data-copy="${esc(status.apiKey || "")}" title="Copy">${COPY_ICON}</button>
+            <span class="status-value" title="${esc(status.apiKey || "--")}">${esc(maskKey(status.apiKey))}</span>
+            ${status.apiKey ? `<button class="copy-btn" type="button" data-copy="${esc(status.apiKey)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
           </div>
         </div>
         <div class="status-item">
           <span class="status-label">${t("grokBaseUrlLabel")}</span>
           <div class="status-value-wrapper">
-            <span class="status-value has-tooltip" data-tooltip="${esc(status.baseUrl || "")}">${truncUrl(status.baseUrl)}</span>
-            <button class="copy-btn" type="button" data-copy="${esc(status.baseUrl || "")}" title="Copy">${COPY_ICON}</button>
+            <span class="status-value" title="${esc(status.baseUrl || "--")}">${esc(status.baseUrl || "--")}</span>
+            ${status.baseUrl ? `<button class="copy-btn" type="button" data-copy="${esc(status.baseUrl)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
           </div>
         </div>
-        ${status.model ? `<div class="status-item">
+        <div class="status-item">
           <span class="status-label">${t("grokModelLabel")}</span>
           <div class="status-value-wrapper">
-            <span class="status-value">${esc(status.model)}</span>
-            <button class="copy-btn" type="button" data-copy="${esc(status.model || "")}" title="Copy">${COPY_ICON}</button>
-          </div>
-        </div>` : ""}
-        ${status.defaultModelId ? `<div class="status-item">
-          <span class="status-label">default</span>
-          <div class="status-value-wrapper">
-            <span class="status-value">${esc(status.defaultModelId)}</span>
-          </div>
-        </div>` : ""}
-        ${status.apiBackend ? `<div class="status-item">
-          <span class="status-label">${t("grokApiBackendLabel")}</span>
-          <div class="status-value-wrapper">
-            <span class="status-value">${esc(status.apiBackend)}</span>
-          </div>
-        </div>` : ""}
-        <div class="status-item">
-          <span class="status-label">source</span>
-          <div class="status-value-wrapper">
-            <span class="status-value">${esc(status.source || "--")}</span>
+            <span class="status-value" title="${esc(status.model || "--")}">${esc(status.model || "--")}</span>
+            ${status.model ? `<button class="copy-btn" type="button" data-copy="${esc(status.model)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
           </div>
         </div>
+        ${status.defaultModelId ? `<div class="status-item">
+          <span class="status-label">${currentLang === "zh" ? "默认模型" : "Default Model"}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value" title="${esc(status.defaultModelId)}">${esc(status.defaultModelId)}</span>
+            <button class="copy-btn" type="button" data-copy="${esc(status.defaultModelId)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>
+          </div>
+        </div>` : ""}
       </div>`;
-    grid.querySelectorAll(".copy-btn").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const text = btn.getAttribute("data-copy");
-        if (text) navigator.clipboard.writeText(text).then(() => showToast(t("toastCopied"), "success"));
-      });
-    });
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+    bindDelegatedCopyButtons(grid, "GrokStatusCopy");
+    renderNavigationStatus();
   } catch (error) {
+    // 与 loadStatus 保持一致，失败时弹 toast 让用户感知
+    showToast(`Grok 状态加载失败: ${error}`, "error");
     console.error("Failed to load grok status:", error);
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+    if (rethrow) throw error;
   }
 }
 
@@ -3912,7 +3908,7 @@ function renderGrokDiagnostics() {
     </div>`;
 }
 
-async function loadGrokDiagnostics() {
+async function loadGrokDiagnostics({ rethrow = false } = {}) {
   try {
     grokDiagnostics = await invoke("get_grok_diagnostics");
     renderGrokDiagnostics();
@@ -3921,6 +3917,7 @@ async function loadGrokDiagnostics() {
     if (panel) {
       panel.innerHTML = `<div class="diagnostics-card warning">${currentLang === "zh" ? "诊断加载失败" : "Diagnostics failed"}：${esc(String(error))}</div>`;
     }
+    if (rethrow) throw error;
   }
 }
 
@@ -3949,7 +3946,7 @@ function openGrokModal(profile) {
   $("grokPresetSelect").value = "";
   $("grokProfileName").value = profile ? profile.name : "";
   $("grokApiKey").value = profile ? profile.apiKey : "";
-  $("grokBaseUrl").value = profile ? profile.baseUrl : "https://api.x.ai/v1";
+  $("grokBaseUrl").value = profile ? profile.baseUrl : "";
   $("grokModel").value = profile ? (profile.model || "") : "";
   if ($("grokApiBackend")) {
     $("grokApiBackend").value = profile?.apiBackend || "chat_completions";
@@ -3970,12 +3967,17 @@ function closeGrokModal() {
 
 async function handleGrokSubmit(event) {
   event.preventDefault();
+  if (grokProfileSaving) return;
+  const isNewProfile = !editingGrokId;
   const name = $("grokProfileName").value.trim();
   const apiKey = $("grokApiKey").value.trim();
   const baseUrl = $("grokBaseUrl").value.trim() || "https://api.x.ai/v1";
   const model = $("grokModel").value.trim();
   const apiBackend = $("grokApiBackend")?.value || "chat_completions";
 
+  grokProfileSaving = true;
+  const submitButton = $("grokSubmitBtn");
+  setButtonBusy(submitButton, true, t("toastSaving"));
   try {
     if (editingGrokId) {
       await invoke("update_grok_profile", {
@@ -3999,49 +4001,22 @@ async function handleGrokSubmit(event) {
     }
     closeGrokModal();
     await Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]);
-  } catch (error) {
-    showToast(String(error), "error");
-  }
-}
-
-async function handleGrokSwitch(id) {
-  if (isSwitchingProfile) return;
-  const profile = grokProfiles.find((item) => item.id === id);
-  if (!profile) return;
-
-  isSwitchingProfile = true;
-  showSwitchOverlay(profile.name, "grok");
-  try {
-    await waitForNextPaint();
-    await invoke("switch_grok_profile", { id });
-    completeSwitchOverlay();
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    showToast(t("grokSwitchedTo", { name: profile?.name || "" }), "success");
+    if (isNewProfile) switchConsolePage("grok");
   } catch (error) {
     showToast(String(error), "error");
   } finally {
-    hideSwitchOverlay();
-    isSwitchingProfile = false;
-    await Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]);
+    grokProfileSaving = false;
+    setButtonBusy(submitButton, false);
   }
 }
 
+// A10: 切换/删除逻辑统一走 PROVIDER_CONFIG 驱动的公共实现
+async function handleGrokSwitch(id) {
+  return switchProviderProfile("grok", id);
+}
+
 async function handleGrokDelete(id) {
-  const profile = grokProfiles.find((x) => x.id === id);
-  if (!profile) return;
-  const confirmed = await appConfirm(t("confirmDelete", { name: profile.name }), {
-    title: t("delete"),
-    confirmText: currentLang === "zh" ? "删除配置" : "Delete",
-    danger: true,
-  });
-  if (!confirmed) return;
-  try {
-    await invoke("delete_grok_profile", { id });
-    showToast(t("grokToastDeleted"), "success");
-    await Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]);
-  } catch (error) {
-    showToast(String(error), "error");
-  }
+  return deleteProviderProfile("grok", id);
 }
 
 async function handleGrokImport() {
@@ -4067,9 +4042,205 @@ async function handleGrokImport() {
   }
 }
 
+// ── Gemini Profile Management ──────────────────────
+
+async function loadGeminiProfiles({ rethrow = false } = {}) {
+  try {
+    const data = await invoke("get_gemini_profiles");
+    geminiProfiles = data.profiles || [];
+    renderGeminiProfiles();
+    renderNavigationStatus();
+  } catch (error) {
+    showToast(String(error), "error");
+    if (rethrow) throw error;
+  }
+}
+
+function updateGeminiStatusTitle() {
+  // 与 Claude 保持一致:当前配置名直接显示在状态区标题中
+  if (!$("geminiStatusSectionTitle")) return;
+  const base = currentLang === "zh" ? "Gemini 状态" : "Gemini Status";
+  const active = geminiProfiles.find((p) => p.isActive);
+  const activeContext = active
+    ? (currentLang === "zh" ? ` (当前: ${active.name})` : ` (Current: ${active.name})`)
+    : "";
+  setText("geminiStatusSectionTitle", `${base}${activeContext}`);
+}
+
+function renderGeminiProfiles() {
+  const grid = $("geminiProfilesGrid");
+  if (!grid) return;
+  updateGeminiStatusTitle();
+  if (geminiProfiles.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="18" x2="12" y2="12"/>
+          <line x1="9" y1="15" x2="15" y2="15"/>
+        </svg>
+        <div class="empty-state-title">${t("geminiNoConfigsTitle")}</div>
+        <p>${t("geminiNoConfigsDesc")}</p>
+      </div>`;
+    return;
+  }
+  grid.innerHTML = geminiProfiles.map((profile) => `
+    <div class="profile-card ${profile.isActive ? "active" : ""}">
+      <div class="profile-header">
+        <span class="profile-name">${esc(profile.name)}</span>
+        ${profile.isActive ? `<span class="active-badge">${t("inUse")}</span>` : ""}
+      </div>
+      <div class="profile-body">
+        <div class="profile-field">
+          <span class="field-label">Gemini API Key</span>
+          <span class="field-value">${esc(maskKey(profile.apiKey))}</span>
+        </div>
+        <div class="profile-field">
+          <span class="field-label">Gemini Base URL</span>
+          <span class="field-value">${esc(truncUrl(profile.baseUrl, 50))}</span>
+        </div>
+        ${profile.model ? `<div class="profile-field">
+          <span class="field-label">${currentLang === "zh" ? "Gemini 模型" : "Gemini Model"}</span>
+          <span class="field-value">${esc(profile.model)}</span>
+        </div>` : ""}
+      </div>
+      <div class="profile-actions">
+        ${profile.isActive ? "" : `<button class="btn btn-switch btn-sm" data-action="gemini-switch" data-id="${profile.id}" type="button">${t("switchUse")}</button>`}
+        <button class="btn btn-secondary btn-sm" data-action="gemini-edit" data-id="${profile.id}" type="button">${t("edit")}</button>
+        <button class="btn btn-danger btn-sm" data-action="gemini-delete" data-id="${profile.id}" type="button">${t("delete")}</button>
+      </div>
+    </div>
+  `).join("");
+  bindProfileGridActions(grid, "GeminiProfiles", "gemini");
+}
+
+async function loadGeminiStatus({ rethrow = false } = {}) {
+  try {
+    const status = await invoke("get_gemini_status");
+    lastGeminiStatus = status;
+    const grid = $("geminiStatusGrid");
+    if (!grid) return;
+    if (!status) {
+      grid.innerHTML = `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">Gemini: --</div>`;
+      renderNavigationStatus();
+      return;
+    }
+    const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+    grid.innerHTML = `
+      <div class="status-card">
+        <div class="status-card-title">
+          <span class="status-card-title-text">${productIcon("gemini")}Gemini</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Gemini API Key</span>
+          <div class="status-value-wrapper">
+            <span class="status-value" title="${esc(status.apiKey || "--")}">${esc(maskKey(status.apiKey))}</span>
+            ${status.apiKey ? `<button class="copy-btn" type="button" data-copy="${esc(status.apiKey)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Gemini Base URL</span>
+          <div class="status-value-wrapper">
+            <span class="status-value" title="${esc(status.baseUrl || "--")}">${esc(status.baseUrl || "--")}</span>
+            ${status.baseUrl ? `<button class="copy-btn" type="button" data-copy="${esc(status.baseUrl)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${currentLang === "zh" ? "Gemini 模型" : "Gemini Model"}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value" title="${esc(status.model || "--")}">${esc(status.model || "--")}</span>
+            ${status.model ? `<button class="copy-btn" type="button" data-copy="${esc(status.model)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Auth</span>
+          <div class="status-value-wrapper">
+            <span class="status-value" title="${esc(status.authType || "--")}">${esc(status.authType || "--")}</span>
+          </div>
+        </div>
+      </div>`;
+    bindDelegatedCopyButtons(grid, "GeminiStatusCopy");
+    renderNavigationStatus();
+  } catch (error) {
+    showToast(String(error), "error");
+    if (rethrow) throw error;
+  }
+}
+
+function openGeminiModal(profile) {
+  editingGeminiId = profile?.id || null;
+  $("geminiModalTitle").textContent = profile ? "编辑 Gemini 配置" : "添加 Gemini 配置";
+  $("geminiProfileId").value = editingGeminiId || "";
+  $("geminiProfileName").value = profile?.name || "";
+  $("geminiApiKey").value = profile?.apiKey || "";
+  $("geminiBaseUrl").value = profile?.baseUrl || "";
+  $("geminiModel").value = profile?.model || "gemini-2.5-pro";
+  clearEndpointResults("gemini");
+  clearModelResults("gemini");
+  $("geminiModalOverlay").classList.add("open");
+  document.body.classList.add("modal-open");
+  $("geminiProfileName").focus();
+}
+
+function closeGeminiModal() {
+  $("geminiModalOverlay").classList.remove("open");
+  document.body.classList.remove("modal-open");
+  editingGeminiId = null;
+}
+
+async function handleGeminiSubmit(event) {
+  event.preventDefault();
+  if (geminiProfileSaving) return;
+  const payload = {
+    name: $("geminiProfileName").value.trim(),
+    apiKey: $("geminiApiKey").value.trim(),
+    baseUrl: $("geminiBaseUrl").value.trim(),
+    model: $("geminiModel").value.trim() || null,
+  };
+  geminiProfileSaving = true;
+  const submitButton = $("geminiSubmitBtn");
+  setButtonBusy(submitButton, true, t("toastSaving"));
+  try {
+    if (editingGeminiId) await invoke("update_gemini_profile", { id: editingGeminiId, ...payload });
+    else await invoke("add_gemini_profile", payload);
+    showToast(editingGeminiId ? "Gemini 配置已更新" : "Gemini 配置已添加", "success");
+    closeGeminiModal();
+    await Promise.all([loadGeminiProfiles(), loadGeminiStatus()]);
+    switchConsolePage("gemini");
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    geminiProfileSaving = false;
+    setButtonBusy(submitButton, false);
+  }
+}
+
+// A10: 切换/删除逻辑统一走 PROVIDER_CONFIG 驱动的公共实现
+async function handleGeminiSwitch(id) {
+  return switchProviderProfile("gemini", id);
+}
+
+async function handleGeminiDelete(id) {
+  return deleteProviderProfile("gemini", id);
+}
+
+async function handleGeminiImport() {
+  const input = await appPrompt("从 Gemini CLI 当前环境变量与 settings.json 导入配置。", "当前 Gemini 配置", { title: "导入 Gemini 配置", inputLabel: "配置名称", confirmText: "导入配置" });
+  if (input === null) return;
+  try {
+    await invoke("import_gemini_current", { name: String(input).trim() || "当前 Gemini 配置" });
+    showToast("当前 Gemini 配置已导入", "success");
+    await Promise.all([loadGeminiProfiles(), loadGeminiStatus()]);
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
 // ── Codex Profile Management ────────────────────────
 
 let editingCodexId = null;
+let codexProfileSaving = false;
 
 function getSelectedCodexPreset() {
   const presetId = $("codexPresetSelect")?.value || "";
@@ -4105,6 +4276,7 @@ function applyCodexPreset(preset) {
   $("codexBaseUrl").value = preset.baseUrl;
   $("codexModel").value = preset.model;
   $("codexProvider").value = preset.providerName;
+  if ($("codexWireApi")) $("codexWireApi").value = preset.wire || "responses";
   clearEndpointResults("codex");
   clearModelResults("codex");
   updateCodexPresetHint();
@@ -4129,14 +4301,6 @@ function setCodexAuthMode(mode) {
 function buildCodexOfficialConfig() {
   const baseUrl = $("codexBaseUrl").value.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const apiKey = $("codexApiKey").value.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const imageApiKey = $("codexImageApiKey").value.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const imageBaseUrl = ($("codexImageBaseUrl").value.trim() || "https://hk.getelucid.com/v1").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const imageConfig = imageApiKey ? `
-
-[gpt_image_2]
-api_key = "${imageApiKey}"
-base_url = "${imageBaseUrl}"
-model = "gpt-image-2"` : "";
   return `model_provider = "customer"
 model = "gpt-5.5"
 review_model = "gpt-5.5"
@@ -4149,7 +4313,7 @@ name = "customer"
 wire_api = "responses"
 requires_openai_auth = true
 base_url = "${baseUrl}"
-experimental_bearer_token = "${apiKey}"${imageConfig}`;
+experimental_bearer_token = "${apiKey}"`;
 }
 
 function updateCodexOfficialConfigPreview() {
@@ -4158,15 +4322,9 @@ function updateCodexOfficialConfigPreview() {
 }
 
 function updateCodexAuthModeUi() {
-  const mode = getCodexAuthMode();
-  const isOfficialMode = mode === "official_account_api_quota";
-  const saveOnly = mode === "save_only";
+  const isOfficialMode = getCodexAuthMode() === "official_account_api_quota";
   if ($("codexOfficialConfigGroup")) {
     $("codexOfficialConfigGroup").style.display = isOfficialMode ? "block" : "none";
-  }
-  // 官方账号模式 / 仅保存：API Key 可不填
-  if ($("codexApiKey")) {
-    $("codexApiKey").required = !(isOfficialMode || saveOnly);
   }
   updateCodexOfficialConfigPreview();
 }
@@ -4186,7 +4344,7 @@ async function loadCodexProfiles() {
     const data = await invoke("get_codex_profiles");
     codexProfiles = data.profiles || [];
     renderCodexProfiles();
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+    renderNavigationStatus();
   } catch (error) {
     showToast(String(error), "error");
   }
@@ -4208,7 +4366,7 @@ function renderCodexProfiles() {
         <div class="empty-state-title">${t("codexNoConfigsTitle")}</div>
         <p>${t("codexNoConfigsDesc")}</p>
       </div>`;
-    updateCodexActiveConfigBar();
+    updateCodexStatusTitle();
     return;
   }
 
@@ -4221,11 +4379,11 @@ function renderCodexProfiles() {
       <div class="profile-body">
         <div class="profile-field">
           <span class="field-label">${t("codexApiKeyLabel")}</span>
-          <span class="field-value">${maskKey(profile.apiKey)}</span>
+          <span class="field-value">${esc(maskKey(profile.apiKey))}</span>
         </div>
         <div class="profile-field">
           <span class="field-label">${t("codexBaseUrlLabel")}</span>
-          <span class="field-value">${truncUrl(profile.baseUrl, 50)}</span>
+          <span class="field-value">${esc(truncUrl(profile.baseUrl, 50))}</span>
         </div>
         ${profile.model ? `<div class="profile-field">
           <span class="field-label">${t("codexModelLabel")}</span>
@@ -4235,13 +4393,17 @@ function renderCodexProfiles() {
           <span class="field-label">${t("codexProviderLabel")}</span>
           <span class="field-value">${esc(profile.providerName)}</span>
         </div>` : ""}
+        ${profile.wireApi === "chat" ? `<div class="profile-field">
+          <span class="field-label">${t("codexWireApiLabel")}</span>
+          <span class="field-value">Chat Completions</span>
+        </div>` : ""}
         ${profile.imageApiKey ? `<div class="profile-field">
           <span class="field-label">${t("codexImageApiKeyLabel")}</span>
-          <span class="field-value">${maskKey(profile.imageApiKey)}</span>
+          <span class="field-value">${esc(maskKey(profile.imageApiKey))}</span>
         </div>` : ""}
         ${profile.imageApiKey && profile.imageBaseUrl ? `<div class="profile-field">
           <span class="field-label">${t("codexImageBaseUrlLabel")}</span>
-          <span class="field-value">${truncUrl(profile.imageBaseUrl, 50)}</span>
+          <span class="field-value">${esc(truncUrl(profile.imageBaseUrl, 50))}</span>
         </div>` : ""}
       </div>
       <div class="profile-actions">
@@ -4252,96 +4414,16 @@ function renderCodexProfiles() {
     </div>
   `).join("");
 
-  grid.querySelectorAll("button[data-action]").forEach((btn) => {
-    const action = btn.getAttribute("data-action");
-    const id = btn.getAttribute("data-id");
-    if (!id) return;
-    btn.addEventListener("click", () => {
-      if (action === "codex-switch") handleCodexSwitch(id);
-      if (action === "codex-edit") {
-        const p = codexProfiles.find((x) => x.id === id);
-        if (p) openCodexModal(p);
-      }
-      if (action === "codex-delete") handleCodexDelete(id);
-    });
-  });
-
-  updateCodexActiveConfigBar();
+  bindProfileGridActions(grid, "CodexProfiles", "codex");
+  updateCodexStatusTitle();
 }
 
-function updateCodexActiveConfigBar() {
-  const section = $("codexActiveConfigSection");
-  const nameEl = $("codexActiveConfigName");
+function updateCodexStatusTitle() {
   const active = codexProfiles.find((p) => p.isActive);
-  if (active) {
-    nameEl.textContent = active.name;
-    section.style.display = "";
-  } else {
-    section.style.display = "none";
-  }
-}
-
-function renderCodexDiagnostics() {
-  const panel = $("codexDiagnosticsPanel");
-  if (!panel) return;
-  const d = codexDiagnostics;
-  if (!d) {
-    panel.innerHTML = `<div class="diagnostics-card muted">Codex diagnostics: --</div>`;
-    return;
-  }
-  const healthy = Array.isArray(d.issues) && d.issues.length === 0;
-  const issueItems = (d.issues || []).map((item) => `<li>${esc(item)}</li>`).join("");
-  const suggestionItems = (d.suggestions || []).map((item) => `<li>${esc(item)}</li>`).join("");
-  const markets = (d.pluginMarketplaces || []).length
-    ? d.pluginMarketplaces.map((item) => `<span class="diagnostics-pill">${esc(truncUrl(item, 34))}</span>`).join("")
-    : `<span class="diagnostics-pill muted">未安装插件市场</span>`;
-  panel.innerHTML = `
-    <div class="diagnostics-card ${healthy ? "healthy" : "warning"}">
-      <div class="diagnostics-head">
-        <div>
-          <div class="diagnostics-kicker">Codex Health</div>
-          <div class="diagnostics-title">${healthy ? "配置健康" : "需要处理"}</div>
-        </div>
-        <span class="diagnostics-state ${healthy ? "ok" : "warn"}">${healthy ? "OK" : `${d.issues.length} issues`}</span>
-      </div>
-      <div class="diagnostics-grid">
-        <div><span>Active</span><strong>${esc(d.activeProfileName || "--")}</strong></div>
-        <div><span>Provider</span><strong>${esc(d.providerName || "--")}</strong></div>
-        <div><span>Model</span><strong>${esc(d.model || "--")}</strong></div>
-        <div><span>Auth</span><strong>${esc(d.authMode || "--")}</strong></div>
-      </div>
-      <div class="diagnostics-paths">
-        <div title="${esc(d.configPath || "")}">config: ${esc(d.configExists ? d.configPath : "未找到")}</div>
-        <div title="${esc(d.authPath || "")}">auth: ${esc(d.authExists ? d.authPath : "未找到")}</div>
-      </div>
-      <div class="diagnostics-marketplaces">${markets}</div>
-      ${issueItems ? `<div class="diagnostics-list"><strong>问题</strong><ul>${issueItems}</ul></div>` : ""}
-      ${suggestionItems ? `<div class="diagnostics-list"><strong>建议</strong><ul>${suggestionItems}</ul></div>` : ""}
-      <div class="diagnostics-footer">Last checked: ${esc(d.lastCheckedAt || "--")}</div>
-    </div>`;
-}
-
-async function loadCodexDiagnostics() {
-  try {
-    codexDiagnostics = await invoke("get_codex_diagnostics");
-    renderCodexDiagnostics();
-  } catch (error) {
-    const panel = $("codexDiagnosticsPanel");
-    if (panel) {
-      panel.innerHTML = `<div class="diagnostics-card warning">诊断加载失败：${esc(String(error))}</div>`;
-    }
-  }
-}
-
-async function handleCodexRuntimeBackup() {
-  try {
-    const result = await invoke("backup_codex_runtime");
-    const files = [result.configBackup, result.authBackup].filter(Boolean).length;
-    showToast(files ? `已备份 ${files} 个 Codex 文件` : "没有可备份的 Codex 文件", files ? "success" : "warning");
-    await loadCodexDiagnostics();
-  } catch (error) {
-    showToast(String(error), "error");
-  }
+  const activeContext = active
+    ? (currentLang === "zh" ? ` (当前: ${active.name})` : ` (Current: ${active.name})`)
+    : "";
+  setText("codexStatusSectionTitle", `${t("codexStatusTitle")}${activeContext}`);
 }
 
 async function loadCodexStatus() {
@@ -4353,20 +4435,19 @@ async function loadCodexStatus() {
       if (grid) {
         grid.innerHTML = `<div class="status-card" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">Codex: --</div>`;
       }
-      if (typeof renderCodexCurrentCard === "function") renderCodexCurrentCard();
-      if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+      renderNavigationStatus();
       return;
     }
     const COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
     grid.innerHTML = `
       <div class="status-card">
         <div class="status-card-title">
-          <span class="status-card-title-text">${productIcon("codex")}Codex CLI</span>
+          <span class="status-card-title-text">${productIcon("codex")}Codex</span>
         </div>
         <div class="status-item">
           <span class="status-label">${t("codexApiKeyLabel")}</span>
           <div class="status-value-wrapper">
-            <span class="status-value">${maskKey(status.apiKey)}</span>
+            <span class="status-value">${esc(maskKey(status.apiKey))}</span>
             <button class="copy-btn" type="button" data-copy="${esc(status.apiKey || "")}" title="Copy">${COPY_ICON}</button>
           </div>
         </div>
@@ -4377,10 +4458,17 @@ async function loadCodexStatus() {
             <button class="copy-btn" type="button" data-copy="${esc(status.baseUrl || "")}" title="Copy">${COPY_ICON}</button>
           </div>
         </div>
+        <div class="status-item">
+          <span class="status-label">${currentLang === "zh" ? "Codex 模型" : "Codex Model"}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value" title="${esc(status.model || "--")}">${esc(status.model || "--")}</span>
+            ${status.model ? `<button class="copy-btn" type="button" data-copy="${esc(status.model)}" title="${t("copy")}" aria-label="${t("copy")}">${COPY_ICON}</button>` : ""}
+          </div>
+        </div>
         ${status.imageApiKey ? `<div class="status-item">
           <span class="status-label">${t("codexImageApiKeyLabel")}</span>
           <div class="status-value-wrapper">
-            <span class="status-value">${maskKey(status.imageApiKey)}</span>
+            <span class="status-value">${esc(maskKey(status.imageApiKey))}</span>
             <button class="copy-btn" type="button" data-copy="${esc(status.imageApiKey || "")}" title="Copy">${COPY_ICON}</button>
           </div>
         </div>
@@ -4390,28 +4478,26 @@ async function loadCodexStatus() {
             <span class="status-value has-tooltip" data-tooltip="${esc(status.imageBaseUrl || "")}" title="${esc(status.imageBaseUrl || "")}">${esc(status.imageBaseUrl || "--")}</span>
             <button class="copy-btn" type="button" data-copy="${esc(status.imageBaseUrl || "")}" title="Copy">${COPY_ICON}</button>
           </div>
+        </div>
+        <div class="status-item">
+          <span class="status-label">${t("codexImageSectionTitle")}</span>
+          <div class="status-value-wrapper">
+            <span class="status-value">${t(status.imageSkillInstalled ? "codexImageSkillReady" : "codexImageSkillNeedsSwitch")}</span>
+          </div>
         </div>` : ""}
       </div>`;
     if (grid) {
-      grid.querySelectorAll(".copy-btn").forEach((btn) => {
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const text = btn.getAttribute("data-copy");
-          if (text) navigator.clipboard.writeText(text).then(() => showToast(t("toastCopied"), "success"));
-        });
-      });
+      bindDelegatedCopyButtons(grid, "CodexStatusCopy");
     }
-    if (typeof renderCodexCurrentCard === "function") renderCodexCurrentCard();
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+    renderNavigationStatus();
   } catch (error) {
     console.error("Failed to load codex status:", error);
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
   }
 }
 
 function openCodexModal(profile) {
   editingCodexId = profile ? profile.id : null;
-  codexWizardEnableAfterSave = false;
+  codexEnableAfterSave = false;
   $("codexModalTitle").textContent = profile ? t("codexEditConfig") : t("codexAddConfig");
   $("codexProfileId").value = editingCodexId || "";
   if ($("codexPresetSelect")) $("codexPresetSelect").value = "";
@@ -4423,14 +4509,24 @@ function openCodexModal(profile) {
   if ($("codexApiKeyToggle")) $("codexApiKeyToggle").textContent = currentLang === "zh" ? "显示" : "Show";
   if ($("codexBaseUrl")) $("codexBaseUrl").value = profile ? profile.baseUrl : "";
   if ($("codexModel")) $("codexModel").value = profile ? (profile.model || "") : "";
+  if ($("codexWireApi")) $("codexWireApi").value = profile ? (profile.wireApi || "responses") : "responses";
   if ($("codexProvider")) $("codexProvider").value = profile ? (profile.providerName || "") : "";
   if ($("codexImageApiKey")) $("codexImageApiKey").value = profile ? (profile.imageApiKey || "") : "";
-  if ($("codexImageBaseUrl")) $("codexImageBaseUrl").value = profile ? (profile.imageBaseUrl || "https://hk.getelucid.com/v1") : "https://hk.getelucid.com/v1";
+  if ($("codexImageBaseUrl")) $("codexImageBaseUrl").value = profile ? (profile.imageBaseUrl || "") : "";
   setCodexAuthMode(profile ? (profile.authMode || "auth_json") : "auth_json");
+  // 有高级字段时自动展开高级选项，避免用户找不到已保存的内容
+  const advanced = $("codexAdvancedSection");
+  if (advanced) {
+    advanced.open = !!(profile && (
+      (profile.authMode && profile.authMode !== "auth_json")
+      || profile.providerName
+      || profile.imageApiKey
+      || profile.imageBaseUrl
+    ));
+  }
   updateCodexPresetHint();
   clearEndpointResults("codex");
   clearModelResults("codex");
-  setCodexWizardStep(profile ? 3 : 1);
   $("codexModalOverlay").classList.add("open");
   document.body.classList.add("modal-open");
   setTimeout(() => {
@@ -4447,31 +4543,42 @@ function closeCodexModal() {
 
 async function handleCodexSubmit(event) {
   event.preventDefault();
-  if (!validateCodexWizardStep(3)) {
-    setCodexWizardStep(3);
-    return;
-  }
+  if (codexProfileSaving) return;
+  const isNewProfile = !editingCodexId;
+  const editingActiveProfile = codexProfiles.some((profile) => profile.id === editingCodexId && profile.isActive);
   const name = $("codexProfileName").value.trim();
   const apiKey = $("codexApiKey").value.trim();
   const baseUrl = $("codexBaseUrl").value.trim();
   const model = $("codexModel").value.trim();
+  const wireApi = $("codexWireApi")?.value === "chat" ? "chat" : "responses";
   const providerName = $("codexProvider").value.trim();
   const imageApiKey = $("codexImageApiKey").value.trim();
   const imageBaseUrl = $("codexImageBaseUrl").value.trim();
+  if (!name) {
+    showToast(currentLang === "zh" ? "请填写配置名称" : "Config name is required", "warning");
+    return;
+  }
+  if (!apiKey) {
+    showToast(currentLang === "zh" ? "请填写 API Key" : "API Key is required", "warning");
+    return;
+  }
   let authMode = getCodexAuthMode();
   // save_only：前端仅保存配置，后端仍用 auth_json 字段存储，不自动切换
   const saveOnly = authMode === "save_only";
   if (saveOnly) authMode = "auth_json";
-  const enableAfter = codexWizardEnableAfterSave && !saveOnly;
-  codexWizardEnableAfterSave = false;
+  const enableAfter = (codexEnableAfterSave || editingActiveProfile) && !saveOnly;
+  codexEnableAfterSave = false;
 
+  codexProfileSaving = true;
+  const submitButton = $("codexSubmitBtn");
+  setButtonBusy(submitButton, true, t("toastSaving"));
   try {
     let savedId = editingCodexId;
     if (editingCodexId) {
-      await invoke("update_codex_profile", { id: editingCodexId, name, apiKey, baseUrl, model: model || null, providerName: providerName || null, authMode, imageApiKey: imageApiKey || null, imageBaseUrl: imageBaseUrl || null });
+      await invoke("update_codex_profile", { id: editingCodexId, name, apiKey, baseUrl, model: model || null, providerName: providerName || null, authMode, wireApi, imageApiKey: imageApiKey || null, imageBaseUrl: imageBaseUrl || null });
       showToast(t("codexToastUpdated"), "success");
     } else {
-      const created = await invoke("add_codex_profile", { name, apiKey, baseUrl, model: model || null, providerName: providerName || null, authMode, imageApiKey: imageApiKey || null, imageBaseUrl: imageBaseUrl || null });
+      const created = await invoke("add_codex_profile", { name, apiKey, baseUrl, model: model || null, providerName: providerName || null, authMode, wireApi, imageApiKey: imageApiKey || null, imageBaseUrl: imageBaseUrl || null });
       savedId = created?.id || created?.profile?.id || null;
       showToast(t("codexToastAdded"), "success");
     }
@@ -4485,58 +4592,23 @@ async function handleCodexSubmit(event) {
       await handleCodexSwitch(savedId);
     } else {
       await loadCodexStatus();
-      await loadCodexDiagnostics();
     }
-    renderOverviewDashboard();
-  } catch (error) {
-    showToast(String(error), "error");
-  }
-}
-
-async function handleCodexSwitch(id) {
-  if (isSwitchingProfile) return;
-  const profile = codexProfiles.find((item) => item.id === id);
-  if (!profile) return;
-
-  isSwitchingProfile = true;
-  showSwitchOverlay(profile.name, "codex");
-  try {
-    await waitForNextPaint();
-    await invoke("switch_codex_profile", { id });
-    completeSwitchOverlay();
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    showToast(t("codexSwitchedTo", { name: profile?.name || "" }), "success");
+    if (isNewProfile) switchConsolePage("codex");
   } catch (error) {
     showToast(String(error), "error");
   } finally {
-    hideSwitchOverlay();
-    isSwitchingProfile = false;
-    await Promise.all([loadCodexProfiles(), loadCodexStatus(), loadCodexDiagnostics()]);
+    codexProfileSaving = false;
+    setButtonBusy(submitButton, false);
   }
 }
 
+// A10: 切换/删除逻辑统一走 PROVIDER_CONFIG 驱动的公共实现
+async function handleCodexSwitch(id) {
+  return switchProviderProfile("codex", id);
+}
+
 async function handleCodexDelete(id) {
-  const profile = codexProfiles.find((x) => x.id === id);
-  if (!profile) return;
-  const confirmed = await appConfirm(
-    currentLang === "zh"
-      ? `删除配置 “${profile.name}”？\n\n删除后将无法从 VarSwitch 中恢复，但不会自动删除远程 API 服务。`
-      : t("confirmDelete", { name: profile.name }),
-    {
-      title: t("delete"),
-      confirmText: currentLang === "zh" ? "删除配置" : "Delete",
-      danger: true,
-    }
-  );
-  if (!confirmed) return;
-  try {
-    await invoke("delete_codex_profile", { id });
-    showToast(t("codexToastDeleted"), "success");
-    await loadCodexProfiles();
-    await loadCodexStatus();
-  } catch (error) {
-    showToast(String(error), "error");
-  }
+  return deleteProviderProfile("codex", id);
 }
 
 async function handleCodexImport() {
@@ -4566,10 +4638,7 @@ async function handleCodexImport() {
 // ── Skills Management ───────────────────────────────
 
 function openSkillsPanel() {
-  $("skillsOverlay").classList.add("open");
-  hideSkillsEdit();
-  switchSkillsTab("installed");
-  loadSkills();
+  openDeveloperTools("skills");
 }
 
 function closeSkillsPanel() {
@@ -4627,14 +4696,12 @@ function renderSkills() {
     `;
   }).join("");
 
-  list.querySelectorAll("button[data-action]").forEach((btn) => {
-    const action = btn.getAttribute("data-action");
-    const name = btn.getAttribute("data-name");
-    const sourceType = btn.getAttribute("data-source-type") || "command";
-    btn.addEventListener("click", () => {
-      if (action === "edit-skill") showSkillsEdit(name, sourceType);
-      if (action === "delete-skill") handleDeleteSkill(name, sourceType);
-    });
+  // A10: 容器级委托，避免每次重建列表都逐个按钮绑定
+  bindDelegatedActions(list, "SkillsList", (action, target) => {
+    const name = target.getAttribute("data-name");
+    const sourceType = target.getAttribute("data-source-type") || "command";
+    if (action === "edit-skill") showSkillsEdit(name, sourceType);
+    else if (action === "delete-skill") handleDeleteSkill(name, sourceType);
   });
 }
 
@@ -4659,11 +4726,15 @@ function hideSkillsEdit() {
 }
 
 async function handleSaveSkill() {
+  if (skillSaving) return;
   const name = $("skillNameInput").value.trim();
   const content = $("skillContentInput").value;
   const sourceType = $("skillsEdit").dataset.sourceType || "command";
   if (!name) return;
 
+  skillSaving = true;
+  const saveBtn = $("skillSaveBtn");
+  setButtonBusy(saveBtn, true, t("toastSaving"));
   try {
     await invoke("save_skill", { name, content, sourceType });
     showToast(t("toastSkillSaved"), "success");
@@ -4671,6 +4742,9 @@ async function handleSaveSkill() {
     await loadSkills();
   } catch (error) {
     showToast(String(error), "error");
+  } finally {
+    skillSaving = false;
+    setButtonBusy(saveBtn, false);
   }
 }
 
@@ -4743,6 +4817,8 @@ async function discoverSkillsFromRepos() {
 }
 
 async function searchGitHubSkills() {
+  // 防并发：与 discoverSkillsFromRepos 共用同一守卫
+  if (isDiscovering) return;
   const query = $("discoverSearch").value.trim();
   if (!query) {
     // 没有搜索词时回到目录
@@ -4821,7 +4897,7 @@ function renderDiscoverGrid() {
 
   grid.innerHTML = filtered.map((skill) => {
     const desc = currentLang === "zh" ? (skill.descriptionZh || skill.description) : skill.description;
-    const starsHtml = skill.stars ? `<span class="skill-card-badge">\u2605 ${skill.stars}</span>` : "";
+    const starsHtml = skill.stars ? `<span class="skill-card-badge">\u2605 ${esc(String(skill.stars))}</span>` : "";
     const repoLink = skill.repoUrl ? `<button class="btn btn-secondary btn-sm" data-action="open-skill-url" data-url="${esc(skill.repoUrl)}">${t("mcpGithubBtn")}</button>` : "";
     return `
     <div class="skill-card">
@@ -4846,33 +4922,32 @@ function renderDiscoverGrid() {
     `;
   }).join("");
 
-  grid.querySelectorAll("button[data-action='install-catalog']").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const name = btn.getAttribute("data-name");
+  // A10: 容器级委托。btn 就是被点中的那个按钮，禁用/改文案的行为与原来一致
+  bindDelegatedActions(grid, "DiscoverGrid", async (action, btn) => {
+    if (action === "open-skill-url") {
       const url = btn.getAttribute("data-url");
-      btn.disabled = true;
-      btn.textContent = "...";
-      try {
-        await invoke("install_skill_from_url", { name, url });
-        showToast(t("toastSkillInstalled", { name }), "success");
-        // Update local state
-        const skill = discoverSkills.find((s) => s.name === name);
-        if (skill) skill.installed = true;
-        renderDiscoverGrid();
-        await loadSkills();
-      } catch (error) {
-        showToast(String(error), "error");
-        btn.disabled = false;
-        btn.textContent = t("installBtn");
-      }
-    });
-  });
-
-  grid.querySelectorAll("button[data-action='open-skill-url']").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const url = btn.getAttribute("data-url");
-      if (url) window.__TAURI__?.shell?.open(url);
-    });
+      if (url) await invoke("open_external_target", { target: url });
+      return;
+    }
+    if (action !== "install-catalog") return;
+    const name = btn.getAttribute("data-name");
+    const url = btn.getAttribute("data-url");
+    if (btn.disabled) return; // 防重复提交
+    btn.disabled = true;
+    btn.textContent = "...";
+    try {
+      await invoke("install_skill_from_url", { name, url });
+      showToast(t("toastSkillInstalled", { name }), "success");
+      // Update local state
+      const skill = discoverSkills.find((s) => s.name === name);
+      if (skill) skill.installed = true;
+      renderDiscoverGrid();
+      await loadSkills();
+    } catch (error) {
+      showToast(String(error), "error");
+      btn.disabled = false;
+      btn.textContent = t("installBtn");
+    }
   });
 }
 
@@ -4909,15 +4984,20 @@ function renderRepoList() {
     `;
   }).join("");
 
-  list.querySelectorAll("button[data-action='remove-repo']").forEach((btn) => {
-    btn.addEventListener("click", () => handleRemoveRepo(btn.getAttribute("data-url")));
+  // A10: 容器级委托
+  bindDelegatedActions(list, "RepoList", (action, target) => {
+    if (action === "remove-repo") handleRemoveRepo(target.getAttribute("data-url"));
   });
 }
 
 async function handleAddRepo() {
+  if (repoAdding) return;
   const url = $("repoUrlInput").value.trim();
   if (!url) return;
 
+  repoAdding = true;
+  const addBtn = $("addRepoBtn");
+  setButtonBusy(addBtn, true, t("toastSaving"));
   try {
     await invoke("add_skill_repo", { url, branch: "main" });
     $("repoUrlInput").value = "";
@@ -4926,6 +5006,9 @@ async function handleAddRepo() {
     renderRepoList();
   } catch (error) {
     showToast(String(error), "error");
+  } finally {
+    repoAdding = false;
+    setButtonBusy(addBtn, false);
   }
 }
 
@@ -4943,10 +5026,7 @@ async function handleRemoveRepo(url) {
 // ── Prompts Management ──────────────────────────────
 
 function openPromptsPanel() {
-  $("promptsOverlay").classList.add("open");
-  switchPromptTab("editor");
-  loadClaudeMd();
-  loadPromptTemplates();
+  openDeveloperTools("prompts");
 }
 
 function closePromptsPanel() {
@@ -5004,26 +5084,22 @@ function renderPromptTemplates() {
     `;
   }).join("");
 
-  grid.querySelectorAll("button[data-action]").forEach((btn) => {
-    const action = btn.getAttribute("data-action");
-    const id = btn.getAttribute("data-id");
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const tpl = promptTemplates.find((t) => t.id === id);
-      if (!tpl) return;
-      if (action === "append-template") {
-        const current = $("promptContentInput").value;
-        $("promptContentInput").value = current
-          ? current + "\n\n" + tpl.content
-          : tpl.content;
-        switchPromptTab("editor");
-        showToast(t("toastSnippetInserted"), "success");
-      } else if (action === "replace-template") {
-        $("promptContentInput").value = tpl.content;
-        switchPromptTab("editor");
-        showToast(t("toastTemplateApplied"), "success");
-      }
-    });
+  // A10: 容器级委托
+  bindDelegatedActions(grid, "PromptTemplates", (action, target, e) => {
+    e.stopPropagation();
+    const id = target.getAttribute("data-id");
+    const tpl = promptTemplates.find((t) => t.id === id);
+    if (!tpl) return;
+    if (action === "append-template") {
+      const current = $("promptContentInput").value;
+      $("promptContentInput").value = current ? current + "\n\n" + tpl.content : tpl.content;
+      switchPromptTab("editor");
+      showToast(t("toastSnippetInserted"), "success");
+    } else if (action === "replace-template") {
+      $("promptContentInput").value = tpl.content;
+      switchPromptTab("editor");
+      showToast(t("toastTemplateApplied"), "success");
+    }
   });
 }
 
@@ -5054,10 +5130,7 @@ async function handleSavePrompt() {
 // ── MCP Server Management ───────────────────────────
 
 function openMcpPanel() {
-  $("mcpOverlay").classList.add("open");
-  switchMcpTab("installed");
-  hideMcpEdit();
-  loadMcpServers();
+  openDeveloperTools("mcp");
 }
 
 function closeMcpPanel() {
@@ -5100,13 +5173,11 @@ function renderMcpServers() {
     `;
   }).join("");
 
-  list.querySelectorAll("button[data-action]").forEach((btn) => {
-    const action = btn.getAttribute("data-action");
-    const name = btn.getAttribute("data-name");
-    btn.addEventListener("click", () => {
-      if (action === "edit-mcp") showMcpEdit(name);
-      if (action === "delete-mcp") handleDeleteMcp(name);
-    });
+  // A10: 容器级委托
+  bindDelegatedActions(list, "McpList", (action, target) => {
+    const name = target.getAttribute("data-name");
+    if (action === "edit-mcp") showMcpEdit(name);
+    else if (action === "delete-mcp") handleDeleteMcp(name);
   });
 }
 
@@ -5131,6 +5202,7 @@ function hideMcpEdit() {
 }
 
 async function handleSaveMcp() {
+  if (mcpSaving) return;
   const name = $("mcpNameInput").value.trim();
   const configStr = $("mcpConfigInput").value;
   if (!name) return;
@@ -5143,6 +5215,9 @@ async function handleSaveMcp() {
     return;
   }
 
+  mcpSaving = true;
+  const saveBtn = $("mcpSaveBtn");
+  setButtonBusy(saveBtn, true, t("toastSaving"));
   try {
     await invoke("save_mcp_server", { name, config });
     showToast(t("toastMcpSaved"), "success");
@@ -5150,6 +5225,9 @@ async function handleSaveMcp() {
     await loadMcpServers();
   } catch (error) {
     showToast(String(error), "error");
+  } finally {
+    mcpSaving = false;
+    setButtonBusy(saveBtn, false);
   }
 }
 
@@ -5173,6 +5251,7 @@ async function handleDeleteMcp(name) {
 
 let mcpPresets = [];
 let mcpGitHubResults = [];
+let mcpSearching = false;
 let activeMcpTab = "installed";
 
 function switchMcpTab(tab) {
@@ -5197,6 +5276,8 @@ async function loadMcpPresets() {
 }
 
 async function searchGitHubMcp() {
+  // 防并发：防止连点搜索使后完成的旧请求覆盖结果
+  if (mcpSearching) return;
   const query = $("mcpPresetSearch").value.trim();
   if (!query) {
     mcpGitHubResults = [];
@@ -5204,6 +5285,7 @@ async function searchGitHubMcp() {
     return;
   }
 
+  mcpSearching = true;
   $("mcpPresetLoading").style.display = "";
   $("mcpPresetsGrid").innerHTML = "";
 
@@ -5215,6 +5297,7 @@ async function searchGitHubMcp() {
     showToast(String(error), "error");
     $("mcpPresetsGrid").innerHTML = `<div class="discover-empty">${esc(String(error))}</div>`;
   } finally {
+    mcpSearching = false;
     $("mcpPresetLoading").style.display = "none";
   }
 }
@@ -5235,7 +5318,7 @@ function renderMcpPresets() {
     const desc = currentLang === "zh" ? (preset.descZh || preset.desc) : preset.desc;
     const isInstalled = installedNames.includes(preset.id);
     const needsEnv = preset.config && preset.config.env && Object.values(preset.config.env).some((v) => typeof v === "string" && v.startsWith("<"));
-    const stars = preset.stars ? `<span class="skill-card-badge">\u2605 ${preset.stars}</span>` : "";
+    const stars = preset.stars ? `<span class="skill-card-badge">\u2605 ${esc(String(preset.stars))}</span>` : "";
     const source = preset.source ? `<span class="skill-card-badge repo">${esc(preset.source)}</span>` : "";
 
     return `
@@ -5257,33 +5340,32 @@ function renderMcpPresets() {
     `;
   }).join("");
 
-  grid.querySelectorAll("button[data-action='install-mcp-preset']").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const id = btn.getAttribute("data-id");
-      const allItems = [...mcpPresets, ...mcpGitHubResults];
-      const preset = allItems.find((p) => p.id === id);
-      if (!preset) return;
-
-      btn.disabled = true;
-      btn.textContent = "...";
-      try {
-        await invoke("save_mcp_server", { name: preset.id, config: preset.config });
-        showToast(`${preset.name} ${t("mcpInstalled").toLowerCase()}`, "success");
-        await loadMcpServers();
-        renderMcpPresets();
-      } catch (error) {
-        showToast(String(error), "error");
-        btn.disabled = false;
-        btn.textContent = t("mcpInstallBtn");
-      }
-    });
-  });
-
-  grid.querySelectorAll("button[data-action='open-mcp-url']").forEach((btn) => {
-    btn.addEventListener("click", () => {
+  // A10: 容器级委托
+  bindDelegatedActions(grid, "McpPresets", async (action, btn) => {
+    if (action === "open-mcp-url") {
       const url = btn.getAttribute("data-url");
-      if (url) window.__TAURI__?.shell?.open(url);
-    });
+      if (url) await invoke("open_external_target", { target: url });
+      return;
+    }
+    if (action !== "install-mcp-preset") return;
+    const id = btn.getAttribute("data-id");
+    const allItems = [...mcpPresets, ...mcpGitHubResults];
+    const preset = allItems.find((p) => p.id === id);
+    if (!preset) return;
+    if (btn.disabled) return; // 防重复提交
+
+    btn.disabled = true;
+    btn.textContent = "...";
+    try {
+      await invoke("save_mcp_server", { name: preset.id, config: preset.config });
+      showToast(`${preset.name} ${t("mcpInstalled").toLowerCase()}`, "success");
+      await loadMcpServers();
+      renderMcpPresets();
+    } catch (error) {
+      showToast(String(error), "error");
+      btn.disabled = false;
+      btn.textContent = t("mcpInstallBtn");
+    }
   });
 }
 
@@ -5299,16 +5381,6 @@ function showToast(message, type = "success") {
         toast.style.opacity = "0";
         setTimeout(() => toast.remove(), 300);
       }, 3200);
-    }
-    if (typeof pushOverviewEvent === "function" && Array.isArray(overviewEvents)) {
-      // 直接写入，避免 toast->event->render 链路异常阻断
-      overviewEvents.unshift({
-        message: String(message || ""),
-        level: type === "error" ? "error" : type === "warning" ? "warning" : "info",
-        time: new Date(),
-      });
-      overviewEvents = overviewEvents.slice(0, 12);
-      if (typeof renderOverviewEvents === "function") renderOverviewEvents();
     }
   } catch (e) {
     console.error("showToast failed", e, message);
@@ -5329,10 +5401,16 @@ function closeAppDialog(result) {
 
 function openAppDialog(options = {}) {
   return new Promise((resolve) => {
+    // 若已有对话框在等待，先 resolve null 再接管，避免之前的 await 永久挂起
+    if (appDialogResolver) {
+      appDialogResolver(options.mode === "prompt" ? null : false);
+      appDialogResolver = null;
+    }
     appDialogResolver = resolve;
     const overlay = $("appDialogOverlay");
     const dialog = overlay?.querySelector(".app-dialog");
     if (!overlay || !dialog) {
+      appDialogResolver = null;
       resolve(options.mode === "prompt" ? null : false);
       return;
     }
@@ -5406,42 +5484,13 @@ function bindAppDialogOnce() {
       closeAppDialog(true);
     }
   });
-  $("appDialogOverlay")?.addEventListener("click", (event) => {
-    if (event.target === $("appDialogOverlay")) closeAppDialog(null);
-  });
+  bindOverlayDismiss("appDialogOverlay", () => closeAppDialog(null));
   $("appDialogInput")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
       $("appDialogConfirm")?.click();
     }
   });
-}
-
-// ── Overview 事件与控制台导航 ──────────────────────────────
-function pushOverviewEvent(message, level = "info") {
-  overviewEvents.unshift({
-    message: String(message || ""),
-    level,
-    time: new Date(),
-  });
-  overviewEvents = overviewEvents.slice(0, 12);
-  renderOverviewEvents();
-}
-
-function formatRelativeTime(date) {
-  if (!date) return "--";
-  const diff = Math.max(0, Date.now() - date.getTime());
-  if (diff < 60_000) return currentLang === "zh" ? "刚刚" : "just now";
-  if (diff < 3_600_000) {
-    const m = Math.floor(diff / 60_000);
-    return currentLang === "zh" ? `${m} 分钟前` : `${m}m ago`;
-  }
-  if (diff < 86_400_000) {
-    const h = Math.floor(diff / 3_600_000);
-    return currentLang === "zh" ? `${h} 小时前` : `${h}h ago`;
-  }
-  const d = Math.floor(diff / 86_400_000);
-  return currentLang === "zh" ? `${d} 天前` : `${d}d ago`;
 }
 
 function setBadge(el, text, tone = "") {
@@ -5457,24 +5506,13 @@ function setNavDot(id, tone = "") {
 }
 
 function mountToolboxPages() {
-  const market = $("toolboxMarketContent");
+  const tabs = $("toolboxPageTabs");
   const session = $("toolboxSessionContent");
   const remote = $("toolboxRemoteContent");
-  const pluginHost = $("pluginPageHost");
-  const sessionHost = $("sessionPageHost");
-  const mobileHost = $("mobilePageHost");
-  if (market && pluginHost && market.parentElement !== pluginHost) {
-    pluginHost.appendChild(market);
-    market.style.display = "";
-  }
-  if (session && sessionHost && session.parentElement !== sessionHost) {
-    sessionHost.appendChild(session);
-    session.style.display = "";
-  }
-  if (remote && mobileHost && remote.parentElement !== mobileHost) {
-    mobileHost.appendChild(remote);
-    remote.style.display = "";
-  }
+  const toolboxHost = $("toolboxPageHost");
+  if (tabs && toolboxHost && tabs.parentElement !== toolboxHost) toolboxHost.appendChild(tabs);
+  if (session && toolboxHost && session.parentElement !== toolboxHost) toolboxHost.appendChild(session);
+  if (remote && toolboxHost && remote.parentElement !== toolboxHost) toolboxHost.appendChild(remote);
 
   // 设置页：把设置面板 body 挂入页面
   const settingsBody = document.querySelector("#settingsOverlay .settings-body");
@@ -5484,11 +5522,1202 @@ function mountToolboxPages() {
   }
 }
 
+function getSelectedUniversalProviderPreset() {
+  return UNIVERSAL_PROVIDER_PRESETS.find((preset) => preset.id === selectedUniversalProviderPreset)
+    || UNIVERSAL_PROVIDER_PRESETS[0];
+}
+
+function getUniversalProviderApps() {
+  return Object.fromEntries(
+    [...document.querySelectorAll("[data-universal-app]")].map((input) => [
+      input.getAttribute("data-universal-app"),
+      input.checked,
+    ])
+  );
+}
+
+function renderUniversalProviderForm() {
+  const preset = getSelectedUniversalProviderPreset();
+  document.querySelectorAll("[data-universal-preset]").forEach((button) => {
+    const active = button.getAttribute("data-universal-preset") === preset.id;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-checked", String(active));
+  });
+  setText("universalProviderPresetHint", preset.description);
+
+  const apps = getUniversalProviderApps();
+  document.querySelectorAll("[data-universal-app-card]").forEach((card) => {
+    card.hidden = !apps[card.getAttribute("data-universal-app-card")];
+  });
+  updateUniversalUrlPreviews();
+  const labels = [apps.claude && "Claude", apps.codex && "Codex", apps.grok && "Grok", apps.gemini && "Gemini"].filter(Boolean);
+  setText("universalProviderFooterHint", labels.length
+    ? `将同步到 ${labels.join("、")}`
+    : "请至少启用一个应用");
+}
+
+// 同一个网关地址在各应用的实际写入形式不同（OpenAI 兼容协议自动补 /v1），实时展示避免歧义
+function updateUniversalUrlPreviews() {
+  const raw = $("universalProviderBaseUrl")?.value.trim() || "";
+  const claudeOpenAi = $("universalClaudeApiFormat")?.value === "openai_chat";
+  document.querySelectorAll("[data-universal-url-preview]").forEach((hint) => {
+    const app = hint.getAttribute("data-universal-url-preview");
+    // Claude 选 OpenAI 格式时按 OpenAI 惯例处理地址（补 /v1），并提示走本地代理
+    const usesOpenAiRules = app === "codex" || app === "grok" || (app === "claude" && claudeOpenAi);
+    if (!raw) {
+      hint.textContent = usesOpenAiRules ? "保存时地址自动补全 /v1 后缀" : "";
+      hint.hidden = !hint.textContent;
+      return;
+    }
+    const resolveApp = usesOpenAiRules ? (app === "grok" ? "grok" : "codex") : app;
+    const resolved = helpers.resolveUniversalAppBaseUrl
+      ? helpers.resolveUniversalAppBaseUrl(resolveApp, raw)
+      : raw;
+    hint.textContent = app === "claude" && claudeOpenAi
+      ? `上游地址：${resolved}（经 127.0.0.1:25789 本地代理转换）`
+      : `写入地址：${resolved}`;
+    hint.hidden = false;
+  });
+}
+
+function fillUniversalModelOptions(models) {
+  const datalist = $("universalModelOptions");
+  if (!datalist) return;
+  const normalized = helpers.normalizeFetchedModels
+    ? helpers.normalizeFetchedModels(models)
+    : [];
+  datalist.innerHTML = normalized.map((model) => `<option value="${esc(model)}"></option>`).join("");
+}
+
+// 统一供应商的连通性验证：走 OpenAI 兼容 /models 端点（NewAPI 等网关通用），
+// 成功后把模型列表填入 datalist，四个应用的模型输入框都能自动补全。
+async function handleUniversalEndpointTest() {
+  const button = $("universalEndpointTestBtn");
+  const container = $("universalEndpointResults");
+  const baseUrl = $("universalProviderBaseUrl").value.trim();
+  const apiKey = $("universalProviderApiKey").value.trim();
+  if (!baseUrl || !apiKey) {
+    showToast("请先填写 API 地址和 API Key", "warning");
+    return;
+  }
+
+  const previousText = button.textContent;
+  button.disabled = true;
+  button.textContent = t("endpointTesting");
+  const startedAt = performance.now();
+  try {
+    const models = await invoke("fetch_available_models", { baseUrl, apiKey, timeoutSecs: 12, protocol: "codex" });
+    const elapsed = Math.round(performance.now() - startedAt);
+    const count = (models || []).length;
+    fillUniversalModelOptions(models || []);
+    if (container) {
+      container.innerHTML = `<div class="endpoint-row"><span class="endpoint-url" title="${esc(baseUrl)}">${esc(baseUrl)}</span><span class="endpoint-meta fast">${t("verifyOkLabel")} · ${count} ${t("verifyModelsSuffix")} · ${elapsed}ms</span></div>`;
+      container.classList.add("open");
+    }
+    showToast(t("verifyOkToast"), "success");
+  } catch (error) {
+    const message = describeVerifyError(String(error));
+    if (container) {
+      container.innerHTML = `<div class="endpoint-row"><span class="endpoint-url" title="${esc(baseUrl)}">${esc(baseUrl)}</span><span class="endpoint-meta failed">${esc(message)}</span></div>`;
+      container.classList.add("open");
+    }
+    showToast(message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = previousText || t("endpointTest");
+  }
+}
+
+function applyUniversalProviderPreset(presetId) {
+  const preset = UNIVERSAL_PROVIDER_PRESETS.find((item) => item.id === presetId);
+  if (!preset) return;
+  selectedUniversalProviderPreset = preset.id;
+  $("universalProviderName").value = preset.name;
+  $("universalClaudeModel").value = preset.models.claude;
+  $("universalCodexModel").value = preset.models.codex;
+  $("universalGrokModel").value = preset.models.grok;
+  $("universalGeminiModel").value = preset.models.gemini;
+  renderUniversalProviderForm();
+}
+
+function resetUniversalProviderForm(protocol = null) {
+  selectedUniversalProviderPreset = "newapi";
+  $("universalProviderForm")?.reset();
+  document.querySelectorAll("[data-universal-app]").forEach((input) => {
+    input.checked = protocol ? input.getAttribute("data-universal-app") === protocol : true;
+  });
+  $("universalProviderBaseUrl").value = "";
+  $("universalProviderApiKey").value = "";
+  $("universalProviderApiKey").type = "password";
+  setText("universalProviderApiKeyToggle", "显示");
+  const claudeApiFormat = $("universalClaudeApiFormat");
+  if (claudeApiFormat) claudeApiFormat.value = "anthropic";
+  const codexWireApi = $("universalCodexWireApi");
+  if (codexWireApi) codexWireApi.value = "responses";
+  const grokApiBackend = $("universalGrokApiBackend");
+  if (grokApiBackend) grokApiBackend.value = "chat_completions";
+  const endpointResults = $("universalEndpointResults");
+  if (endpointResults) {
+    endpointResults.innerHTML = "";
+    endpointResults.classList.remove("open");
+  }
+  const modelOptions = $("universalModelOptions");
+  if (modelOptions) modelOptions.innerHTML = "";
+  applyUniversalProviderPreset("newapi");
+}
+
+function openProviderOnboarding(protocol = null) {
+  switchConsolePage("add-provider");
+  resetUniversalProviderForm(["claude", "codex", "grok", "gemini"].includes(protocol) ? protocol : null);
+}
+
+async function rollbackUniversalProviderProfiles(createdProfiles) {
+  const deleteCommands = {
+    claude: "delete_profile",
+    codex: "delete_codex_profile",
+    grok: "delete_grok_profile",
+    gemini: "delete_gemini_profile",
+  };
+  const failures = [];
+  for (const profile of [...createdProfiles].reverse()) {
+    try {
+      await invoke(deleteCommands[profile.app], { id: profile.id });
+    } catch (error) {
+      failures.push(`${profile.app}: ${String(error)}`);
+    }
+  }
+  return failures;
+}
+
+async function handleUniversalProviderSubmit(event) {
+  event.preventDefault();
+  if (universalProviderSaving) return;
+
+  const apps = getUniversalProviderApps();
+  const enabledApps = ["claude", "codex", "grok", "gemini"].filter((app) => apps[app]);
+  if (enabledApps.length === 0) {
+    showToast("请至少启用一个应用", "warning");
+    return;
+  }
+
+  const name = $("universalProviderName").value.trim();
+  const baseUrl = $("universalProviderBaseUrl").value.trim();
+  const apiKey = $("universalProviderApiKey").value.trim();
+  if (!name || !baseUrl || !apiKey) {
+    showToast("请填写供应商名称、API 地址和 API Key", "warning");
+    return;
+  }
+  const claudeApiFormat = $("universalClaudeApiFormat")?.value || "anthropic";
+  if (apps.claude && claudeApiFormat === "openai_chat" && !$("universalClaudeModel").value.trim()) {
+    showToast(t("claudeApiFormatNeedsModel"), "warning");
+    return;
+  }
+
+  const createdProfiles = [];
+  const submitButton = $("universalProviderSubmitBtn");
+  universalProviderSaving = true;
+  setButtonBusy(submitButton, true, "正在同步...");
+
+  const appBaseUrl = (app) => (helpers.resolveUniversalAppBaseUrl
+    ? helpers.resolveUniversalAppBaseUrl(app, baseUrl)
+    : baseUrl);
+
+  try {
+    if (apps.claude) {
+      const created = await invoke("add_profile", {
+        name,
+        apiKey,
+        // OpenAI 格式的上游地址遵循 OpenAI 惯例（复用 codex 的 /v1 规则）
+        baseUrl: claudeApiFormat === "openai_chat" ? appBaseUrl("codex") : appBaseUrl("claude"),
+        modelId: $("universalClaudeModel").value.trim() || null,
+        apiFormat: claudeApiFormat,
+      });
+      createdProfiles.push({ app: "claude", id: created.id });
+    }
+    if (apps.codex) {
+      const created = await invoke("add_codex_profile", {
+        name,
+        apiKey,
+        baseUrl: appBaseUrl("codex"),
+        authMode: "auth_json",
+        wireApi: $("universalCodexWireApi")?.value || "responses",
+        model: $("universalCodexModel").value.trim() || null,
+        providerName: getSelectedUniversalProviderPreset().providerName,
+        imageApiKey: null,
+        imageBaseUrl: null,
+      });
+      createdProfiles.push({ app: "codex", id: created.id });
+    }
+    if (apps.grok) {
+      const created = await invoke("add_grok_profile", {
+        name,
+        apiKey,
+        baseUrl: appBaseUrl("grok"),
+        model: $("universalGrokModel").value.trim() || null,
+        apiBackend: $("universalGrokApiBackend")?.value || "chat_completions",
+      });
+      createdProfiles.push({ app: "grok", id: created.id });
+    }
+    if (apps.gemini) {
+      const created = await invoke("add_gemini_profile", {
+        name,
+        apiKey,
+        baseUrl: appBaseUrl("gemini"),
+        model: $("universalGeminiModel").value.trim() || null,
+      });
+      createdProfiles.push({ app: "gemini", id: created.id });
+    }
+
+    await Promise.allSettled([loadProfiles(), loadCodexProfiles(), loadGrokProfiles(), loadGeminiProfiles()]);
+    renderProviderNavigation();
+    showToast(`已将 ${name} 同步到 ${enabledApps.length} 个应用`, "success");
+    switchConsolePage(enabledApps[0]);
+  } catch (error) {
+    const rollbackFailures = await rollbackUniversalProviderProfiles(createdProfiles);
+    await Promise.allSettled([loadProfiles(), loadCodexProfiles(), loadGrokProfiles(), loadGeminiProfiles()]);
+    const suffix = rollbackFailures.length ? `；回滚失败：${rollbackFailures.join("；")}` : "，已回滚本次写入";
+    showToast(`同步失败：${String(error)}${suffix}`, "error");
+  } finally {
+    universalProviderSaving = false;
+    setButtonBusy(submitButton, false);
+  }
+}
+
+function mountDeveloperToolsPage() {
+  const panels = [
+    ["skillsOverlay", "developerToolSkillsContent"],
+    ["promptsOverlay", "developerToolPromptsContent"],
+    ["mcpOverlay", "developerToolMcpContent"],
+  ];
+  panels.forEach(([overlayId, hostId]) => {
+    const overlay = $(overlayId);
+    const host = $(hostId);
+    const panel = overlay?.querySelector(".mgmt-panel");
+    if (!panel || !host || panel.parentElement === host) return;
+    overlay.classList.remove("open");
+    panel.classList.add("developer-tool-panel");
+    host.appendChild(panel);
+  });
+}
+
+function switchDeveloperTool(tool) {
+  const nextTool = ["skills", "prompts", "mcp"].includes(tool) ? tool : "skills";
+  activeDeveloperTool = nextTool;
+  document.querySelectorAll("[data-developer-tool]").forEach((button) => {
+    const active = button.getAttribute("data-developer-tool") === nextTool;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  const surfaces = {
+    skills: $("developerToolSkillsContent"),
+    prompts: $("developerToolPromptsContent"),
+    mcp: $("developerToolMcpContent"),
+  };
+  Object.entries(surfaces).forEach(([name, surface]) => {
+    if (surface) surface.hidden = name !== nextTool;
+  });
+
+  if (nextTool === "skills") {
+    hideSkillsEdit();
+    switchSkillsTab("installed");
+    loadSkills();
+  } else if (nextTool === "prompts") {
+    switchPromptTab("editor");
+    loadClaudeMd();
+    loadPromptTemplates();
+  } else {
+    hideMcpEdit();
+    switchMcpTab("installed");
+    loadMcpServers();
+  }
+}
+
+function openDeveloperTools(tool = "skills") {
+  mountDeveloperToolsPage();
+  switchConsolePage("developer-tools");
+  switchDeveloperTool(tool);
+}
+
+function renderProviderNavigation() {
+  const availability = {
+    claude: profiles.length > 0,
+    codex: codexProfiles.length > 0,
+    grok: grokProfiles.length > 0,
+    gemini: true,
+  };
+  document.querySelectorAll("[data-provider-nav]").forEach((item) => {
+    const available = availability[item.getAttribute("data-provider-nav")] === true;
+    item.hidden = !available;
+  });
+  if (availability[activeConsolePage] === false) {
+    switchConsolePage("add-provider");
+  }
+}
+
+// ===========================================================================
+// 用量监控面板（数据口径迁移自 cc-switch）
+// ===========================================================================
+let usageRange = "7d";
+let usageAppFilter = "all";
+let usageModelFilter = "all";
+let usageLoadInFlight = false;
+let usageLoadedOnce = false;
+let usageReloadQueued = false;
+// 最近一次请求实际使用的起止时间（unix 秒），用于在面板上标注统计区间
+let usageResolvedRange = null;
+// 请求序号：只渲染最新一次请求的结果，防止慢响应覆盖新筛选
+let usageRequestSeq = 0;
+
+const USAGE_APP_LABELS = {
+  claude: "Claude Code",
+  codex: "Codex",
+  gemini: "Gemini CLI",
+  grok: "Grok CLI",
+};
+
+const USAGE_APP_ICONS = {
+  claude: "anthropic-color.svg",
+  codex: "OpenAI-black-monoblossom.svg",
+  gemini: "gemini-color.svg",
+  grok: "grok-color.svg",
+};
+
+// Codex / Gemini / Grok 由服务端自动管理缓存，没有显式缓存写入
+const USAGE_AUTO_CACHE_APPS = new Set(["codex", "gemini", "grok"]);
+
+function escapeUsageHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function usageAppLabel(app) {
+  return USAGE_APP_LABELS[app] || app;
+}
+
+function formatUsageCost(cost) {
+  const value = Number(cost) || 0;
+  if (value === 0) return "$0.00";
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  if (value < 1) return `$${value.toFixed(3)}`;
+  return `$${value.toFixed(2)}`;
+}
+
+function formatUsageTokens(tokens) {
+  const value = Number(tokens) || 0;
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
+}
+
+// 完整千分位数字（应用大卡的主数字）
+function formatUsageTokensExact(tokens) {
+  return (Number(tokens) || 0).toLocaleString("en-US");
+}
+
+// 人性化换算：中文用 亿/万，英文用 B/M/K
+function formatUsageTokensHuman(tokens) {
+  const value = Number(tokens) || 0;
+  if (currentLang !== "zh") return formatUsageTokens(value);
+  if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(2)} 亿`;
+  if (value >= 10_000) return `${(value / 10_000).toFixed(1)} 万`;
+  return String(value);
+}
+
+function formatUsageTime(unixSeconds) {
+  if (!unixSeconds) return "--";
+  const date = new Date(unixSeconds * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// 相对时间（最近记录表用），精确时间放 title
+function formatUsageRelTime(unixSeconds) {
+  if (!unixSeconds) return "--";
+  const zh = currentLang === "zh";
+  const diff = Math.floor(Date.now() / 1000) - unixSeconds;
+  if (diff < 60) return zh ? "刚刚" : "just now";
+  if (diff < 3600) {
+    const m = Math.floor(diff / 60);
+    return zh ? `${m} 分钟前` : `${m}m ago`;
+  }
+  if (diff < 86400) {
+    const h = Math.floor(diff / 3600);
+    return zh ? `${h} 小时前` : `${h}h ago`;
+  }
+  if (diff < 86400 * 7) {
+    const d = Math.floor(diff / 86400);
+    return zh ? `${d} 天前` : `${d}d ago`;
+  }
+  return formatUsageTime(unixSeconds);
+}
+
+// 当前范围按钮的显示名
+function usageRangeLabelText() {
+  const zh = currentLang === "zh";
+  const labels = {
+    today: zh ? "今天" : "Today",
+    "1d": zh ? "24 小时" : "24 hours",
+    "7d": zh ? "近 7 天" : "Last 7 days",
+    "14d": zh ? "近 14 天" : "Last 14 days",
+    "30d": zh ? "近 30 天" : "Last 30 days",
+    all: zh ? "全部" : "All time",
+    custom: zh ? "自定义" : "Custom",
+  };
+  return labels[usageRange] || usageRange;
+}
+
+// 把当前统计区间写到过滤器下方的标注条（请求发起时立即调用，
+// 避免加载期间用户把旧数据误读为新范围的结果）
+function renderUsageRangeNote() {
+  const note = $("usageRangeNote");
+  if (!note) return;
+  const zh = currentLang === "zh";
+  const label = usageRangeLabelText();
+  if (!usageResolvedRange) {
+    note.innerHTML = "";
+    return;
+  }
+  if (!usageResolvedRange.startTs && !usageResolvedRange.endTs) {
+    note.innerHTML = `<strong>${escapeUsageHtml(label)}</strong><span>${zh ? "全部历史记录" : "All history"}</span>`;
+    return;
+  }
+  const startText = usageResolvedRange.startTs
+    ? formatUsageTime(usageResolvedRange.startTs)
+    : zh ? "最早" : "earliest";
+  const endText = usageResolvedRange.endTs
+    ? formatUsageTime(usageResolvedRange.endTs)
+    : zh ? "现在" : "now";
+  note.innerHTML = `<strong>${escapeUsageHtml(label)}</strong><span>${escapeUsageHtml(startText)} → ${escapeUsageHtml(endText)}</span>`;
+}
+
+// 加载状态：首次加载显示骨架屏；刷新时旧内容半透明置灰 + 顶部状态芯片，
+// 明确告知“正在统计，当前显示的是旧结果”
+function setUsageLoadingState(loading) {
+  const skeleton = $("usageSkeleton");
+  const chip = $("usageLoadingChip");
+  const body = $("usageBody");
+  const empty = $("usageEmpty");
+  if (loading) {
+    if (!usageLoadedOnce) {
+      if (skeleton) skeleton.hidden = false;
+      if (body) body.hidden = true;
+      if (empty) empty.hidden = true;
+    } else {
+      if (chip) chip.hidden = false;
+      if (body) body.classList.add("usage-stale");
+      if (empty) empty.classList.add("usage-stale");
+    }
+  } else {
+    if (skeleton) skeleton.hidden = true;
+    if (chip) chip.hidden = true;
+    if (body) body.classList.remove("usage-stale");
+    if (empty) empty.classList.remove("usage-stale");
+  }
+}
+
+// 时间范围语义见 app-helpers.js resolveUsageRange：
+// today = 自然日（本地 00:00 → 24:00）；1d = 滚动 24 小时（now-24h → now）；
+// 7d/14d/30d = (N-1) 天前本地零点 → 现在；custom = 用户选定起止时间
+function resolveUsageRange(range) {
+  if (typeof helpers.resolveUsageRange !== "function") {
+    return { startTs: null, endTs: null };
+  }
+  const parseInput = (id) => {
+    const el = $(id);
+    if (!el || !el.value) return null;
+    const ts = new Date(el.value).getTime();
+    return Number.isFinite(ts) ? Math.floor(ts / 1000) : null;
+  };
+  return helpers.resolveUsageRange(range, {
+    nowMs: Date.now(),
+    customStartTs: parseInput("usageCustomStart"),
+    customEndTs: parseInput("usageCustomEnd"),
+    customLiveEnd: $("usageCustomLiveEnd")?.checked !== false,
+  });
+}
+
+async function loadUsageDashboard() {
+  const seq = ++usageRequestSeq;
+  // 发起请求前先按最新筛选更新区间标注与加载态，
+  // 用户点击范围按钮后立即获得视觉反馈，不会把旧数据误读为新结果
+  const range = resolveUsageRange(usageRange);
+  usageResolvedRange = range;
+  renderUsageRangeNote();
+  setUsageLoadingState(true);
+  const errorBox = $("usageError");
+  if (errorBox) errorBox.hidden = true;
+
+  // 加载中再次触发（切换筛选）时排队，结束后按最新筛选重载一次
+  if (usageLoadInFlight) {
+    usageReloadQueued = true;
+    return;
+  }
+  usageLoadInFlight = true;
+  try {
+    const dashboard = await invoke("get_usage_dashboard", {
+      startTs: range.startTs,
+      endTs: range.endTs,
+      app: usageAppFilter === "all" ? null : usageAppFilter,
+      model: usageModelFilter === "all" ? null : usageModelFilter,
+      // 后端期望 JS getTimezoneOffset() 原值（UTC−本地，UTC+8 为 -480）
+      tzOffsetMinutes: new Date().getTimezoneOffset(),
+    });
+    // 慢响应回来时若用户已切到别的筛选，丢弃本次结果，等排队的重载
+    if (seq === usageRequestSeq) {
+      usageLoadedOnce = true;
+      renderUsageDashboard(dashboard);
+    }
+  } catch (error) {
+    if (seq === usageRequestSeq) {
+      const body = $("usageBody");
+      const empty = $("usageEmpty");
+      if (body) body.hidden = true;
+      if (empty) empty.hidden = true;
+      if (errorBox) {
+        errorBox.hidden = false;
+        errorBox.textContent = (currentLang === "zh" ? "用量统计加载失败：" : "Failed to load usage stats: ") + String(error);
+      }
+    }
+  } finally {
+    usageLoadInFlight = false;
+    if (usageReloadQueued) {
+      usageReloadQueued = false;
+      loadUsageDashboard();
+    } else {
+      setUsageLoadingState(false);
+    }
+  }
+}
+
+// 模型下拉与应用/时间筛选级联：选项来自当前应用+时间范围下实际出现过的模型
+function updateUsageModelOptions(models) {
+  const select = $("usageModelFilter");
+  if (!select) return false;
+  const zh = currentLang === "zh";
+  const list = Array.isArray(models) ? models : [];
+  const selectionInvalid = usageModelFilter !== "all" && !list.includes(usageModelFilter);
+  if (selectionInvalid) usageModelFilter = "all";
+  select.innerHTML = [`<option value="all">${zh ? "全部模型" : "All models"}</option>`]
+    .concat(list.map((m) => `<option value="${escapeUsageHtml(m)}">${escapeUsageHtml(m)}</option>`))
+    .join("");
+  select.value = usageModelFilter;
+  return selectionInvalid;
+}
+
+function renderUsageDashboard(dashboard) {
+  const body = $("usageBody");
+  const empty = $("usageEmpty");
+  const zh = currentLang === "zh";
+  // 选中的模型在新筛选下已不存在时重置为“全部模型”并重载
+  if (updateUsageModelOptions(dashboard?.availableModels)) {
+    loadUsageDashboard();
+    return;
+  }
+  if (!dashboard || !dashboard.summary || Number(dashboard.summary.totalRequests) === 0) {
+    if (body) body.hidden = true;
+    if (empty) empty.hidden = false;
+    // 空态区分“该范围没有数据”与“从未有过数据”
+    const scanned = Number(dashboard?.filesScanned) || 0;
+    const rangeScoped = usageRange !== "all" && scanned > 0;
+    setText(
+      "usageEmptyTitle",
+      rangeScoped
+        ? (zh ? `「${usageRangeLabelText()}」内没有用量` : `No usage in "${usageRangeLabelText()}"`)
+        : (zh ? "暂无用量数据" : "No usage data yet")
+    );
+    setText(
+      "usageEmptyText",
+      rangeScoped
+        ? (zh
+            ? "这个时间范围内没有找到任何请求记录，试试切换到更长的时间范围。"
+            : "No requests found in this time range. Try a longer range.")
+        : (zh
+            ? "使用 Claude Code / Codex / Gemini CLI / Grok CLI 后，这里会自动统计本地会话日志。"
+            : "Once you use Claude Code / Codex / Gemini CLI / Grok CLI, local session logs will be aggregated here automatically.")
+    );
+    return;
+  }
+  if (empty) empty.hidden = true;
+  if (body) body.hidden = false;
+
+  renderUsageHero(dashboard.summary, dashboard.prevSummary || null, dashboard.byApp || []);
+  renderUsageTrend(dashboard);
+  renderUsageApps(dashboard.byApp || [], dashboard.summary);
+  renderUsageModels(dashboard.models || []);
+  renderUsageRecent(dashboard.recent || []);
+  renderUsageMeta(dashboard);
+}
+
+function renderUsageMeta(dashboard) {
+  const meta = $("usageMetaLine");
+  if (!meta) return;
+  const zh = currentLang === "zh";
+  const parts = [];
+  parts.push(
+    zh
+      ? `已扫描 ${dashboard.filesScanned} 个会话日志文件`
+      : `Scanned ${dashboard.filesScanned} session log files`
+  );
+  if (dashboard.deferredFiles > 0) {
+    parts.push(
+      zh
+        ? `${dashboard.deferredFiles} 个 Codex fork 文件待父线程就绪`
+        : `${dashboard.deferredFiles} Codex fork files awaiting parent thread`
+    );
+  }
+  const errors = dashboard.parseErrors || [];
+  if (errors.length > 0) {
+    parts.push(zh ? `${errors.length} 个文件解析失败` : `${errors.length} files failed to parse`);
+  }
+  if (dashboard.generatedAt) {
+    parts.push((zh ? "更新于 " : "Updated at ") + formatUsageTime(dashboard.generatedAt));
+  }
+  meta.textContent = parts.join(" · ");
+  meta.title = errors.length > 0 ? errors.join("\n") : "";
+}
+
+const USAGE_HERO_ICONS = {
+  cost: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="6.4"/><path d="M8 4.6v6.8M10 5.9c-.5-.6-1.2-.9-2-.9-1.2 0-2.1.7-2.1 1.6 0 2.2 4.2.9 4.2 3 0 .9-.9 1.6-2.1 1.6-.8 0-1.5-.3-2-.9"/></svg>',
+  tokens: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8 14 5v6L8 14.2 2 11V5z"/><path d="M2 5l6 3.2L14 5M8 8.2v6"/></svg>',
+  requests: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h9M9 2.5l3 3-3 3M13.5 10.5h-9M7 13.5l-3-3 3-3"/></svg>',
+  cache: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.8 1.8 3.2 9h3.6l-.9 5.2L11.5 7H7.9z"/></svg>',
+};
+
+// 环比 badge：direction = up / down / flat；tone = good / bad / neutral
+function usageHeroDelta(current, previous, options) {
+  const { lowerIsBetter = false, formatter = (v) => String(v) } = options || {};
+  if (previous == null) return "";
+  const zh = currentLang === "zh";
+  const cur = Number(current) || 0;
+  const prev = Number(previous) || 0;
+  if (prev === 0 && cur === 0) return "";
+  let text;
+  let direction;
+  if (prev === 0) {
+    text = zh ? "新增" : "new";
+    direction = "up";
+  } else {
+    const pct = ((cur - prev) / prev) * 100;
+    if (Math.abs(pct) < 0.05) {
+      text = zh ? "持平" : "flat";
+      direction = "flat";
+    } else {
+      text = `${pct > 0 ? "+" : ""}${Math.abs(pct) >= 100 ? pct.toFixed(0) : pct.toFixed(1)}%`;
+      direction = pct > 0 ? "up" : "down";
+    }
+  }
+  const tone =
+    direction === "flat" ? "neutral" : (direction === "up") === lowerIsBetter ? "bad" : "good";
+  const title = zh
+    ? `上一时段：${formatter(prev)}`
+    : `Previous period: ${formatter(prev)}`;
+  const arrow = direction === "up" ? "↑" : direction === "down" ? "↓" : "→";
+  return `<span class="usage-hero-delta usage-delta-${tone}" title="${escapeUsageHtml(title)}">${arrow} ${escapeUsageHtml(text)}</span>`;
+}
+
+function renderUsageHero(summary, prevSummary, byApp) {
+  const grid = $("usageHeroGrid");
+  if (!grid) return;
+  const zh = currentLang === "zh";
+  const cacheRate = `${((Number(summary.cacheHitRate) || 0) * 100).toFixed(1)}%`;
+  const prev = prevSummary || null;
+  // 缓存命中率是当前筛选内全部应用/模型的加权聚合；
+  // 跨多个应用时在卡片上注明口径，避免被当成某单一工具的命中率
+  const apps = Array.isArray(byApp) ? byApp : [];
+  const cacheSub =
+    apps.length > 1
+      ? (zh
+          ? `${apps.length} 个应用加权 · 各应用见下方卡片`
+          : `Weighted across ${apps.length} apps · see per-app cards`)
+      : `${zh ? "缓存读取" : "Cache read"} ${formatUsageTokens(summary.cacheReadTokens)} · ${zh ? "写入" : "Write"} ${formatUsageTokens(summary.cacheCreationTokens)}`;
+  const cacheTitle = zh
+    ? "命中率 = 缓存读取 ÷（新输入 + 缓存写入 + 缓存读取）\n为当前筛选范围内所有应用与模型的加权聚合。\n各应用的命中率见「按应用」卡片，各模型的命中率见「模型统计」表。"
+    : "Hit rate = cache read ÷ (fresh input + cache write + cache read)\nWeighted aggregate across all apps and models in the current filter.\nSee per-app cards and the model table for individual rates.";
+  const cards = [
+    {
+      label: zh ? "总成本" : "Total Cost",
+      value: formatUsageCost(summary.totalCost),
+      sub: zh ? "按各模型官方定价估算" : "Estimated with official pricing",
+      accent: "cost",
+      delta: usageHeroDelta(summary.totalCost, prev?.totalCost, {
+        lowerIsBetter: true,
+        formatter: formatUsageCost,
+      }),
+    },
+    {
+      label: zh ? "总 Tokens" : "Total Tokens",
+      value: formatUsageTokens(summary.realTotalTokens),
+      sub: `${zh ? "输入" : "In"} ${formatUsageTokens(summary.inputTokens)} · ${zh ? "输出" : "Out"} ${formatUsageTokens(summary.outputTokens)}`,
+      accent: "tokens",
+      delta: usageHeroDelta(summary.realTotalTokens, prev?.realTotalTokens, {
+        formatter: formatUsageTokens,
+      }),
+    },
+    {
+      label: zh ? "请求数" : "Requests",
+      value: formatUsageTokens(summary.totalRequests),
+      sub: zh ? "去重后的 API 消息数" : "Deduplicated API messages",
+      accent: "requests",
+      delta: usageHeroDelta(summary.totalRequests, prev?.totalRequests, {
+        formatter: formatUsageTokens,
+      }),
+    },
+    {
+      label: zh ? "缓存命中率" : "Cache Hit Rate",
+      value: cacheRate,
+      sub: cacheSub,
+      accent: "cache",
+      delta: "",
+      title: cacheTitle,
+    },
+  ];
+  grid.innerHTML = cards
+    .map(
+      (card) => `
+      <div class="usage-hero-card console-card usage-accent-${card.accent}"${card.title ? ` title="${escapeUsageHtml(card.title)}"` : ""}>
+        <div class="usage-hero-head">
+          <span class="usage-hero-icon">${USAGE_HERO_ICONS[card.accent] || ""}</span>
+          <span class="usage-hero-label">${escapeUsageHtml(card.label)}</span>
+        </div>
+        <div class="usage-hero-value-row">
+          <span class="usage-hero-value">${escapeUsageHtml(card.value)}</span>
+          ${card.delta}
+        </div>
+        <div class="usage-hero-sub">${escapeUsageHtml(card.sub)}</div>
+      </div>`
+    )
+    .join("");
+}
+
+const USAGE_QUAD_ICONS = {
+  input: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2.2v7.2M3.8 6.4 7 9.6l3.2-3.2M2.6 11.8h8.8"/></svg>',
+  output: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11.8V4.6M3.8 7.8 7 4.6l3.2 3.2M2.6 2.2h8.8"/></svg>',
+  creation: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2.2" y="2.2" width="9.6" height="9.6" rx="2"/><path d="M7 4.8v4.4M4.8 7h4.4"/></svg>',
+  hit: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M7.6 1.6 2.8 8h3.1l-.8 4.4L9.9 6H6.8z"/></svg>',
+};
+
+// cc-switch 风格的应用大卡：完整千分位主数字 + 人性化换算 +
+// 输入/输出/创建/命中四宫格 + 缓存命中率进度条
+function renderUsageApps(byApp, totalSummary) {
+  const grid = $("usageAppGrid");
+  if (!grid) return;
+  const zh = currentLang === "zh";
+  setText(
+    "usageAppsHint",
+    zh ? "真实消耗 = 新增输入 + 输出 + 缓存写入 + 缓存读取" : "Real usage = fresh input + output + cache write + cache read"
+  );
+  if (!byApp.length) {
+    grid.innerHTML = `<p class="usage-muted">${zh ? "当前筛选下没有数据" : "No data for current filter"}</p>`;
+    return;
+  }
+  const totalCost = Number(totalSummary?.totalCost) || 0;
+  const sorted = [...byApp].sort(
+    (a, b) => (Number(b.summary?.totalCost) || 0) - (Number(a.summary?.totalCost) || 0)
+  );
+  grid.innerHTML = sorted
+    .map((entry) => {
+      const s = entry.summary || {};
+      const app = entry.app;
+      const cost = Number(s.totalCost) || 0;
+      const sharePct = totalCost > 0 ? (cost / totalCost) * 100 : 0;
+      const hitPct = (Number(s.cacheHitRate) || 0) * 100;
+      const autoCache = USAGE_AUTO_CACHE_APPS.has(app);
+      const creationValue = autoCache ? "N/A" : formatUsageTokensHuman(s.cacheCreationTokens);
+      const creationTitle = autoCache
+        ? (zh
+            ? "该工具由服务端自动管理缓存，不产生显式缓存写入费用"
+            : "Cache is managed automatically by the provider; no explicit cache writes")
+        : `${formatUsageTokensExact(s.cacheCreationTokens)} tokens`;
+      const icon = USAGE_APP_ICONS[app];
+      const iconHtml = icon
+        ? `<img src="${icon}" alt="">`
+        : `<span class="usage-app-badge usage-app-${escapeUsageHtml(app)}">${escapeUsageHtml(usageAppLabel(app).slice(0, 2))}</span>`;
+      const quads = [
+        {
+          key: "input",
+          label: zh ? "新增输入" : "Fresh Input",
+          value: formatUsageTokensHuman(s.inputTokens),
+          title: `${formatUsageTokensExact(s.inputTokens)} tokens`,
+        },
+        {
+          key: "output",
+          label: zh ? "输出" : "Output",
+          value: formatUsageTokensHuman(s.outputTokens),
+          title: `${formatUsageTokensExact(s.outputTokens)} tokens`,
+        },
+        {
+          key: "creation",
+          label: zh ? "缓存创建" : "Cache Write",
+          value: creationValue,
+          title: creationTitle,
+          muted: autoCache,
+        },
+        {
+          key: "hit",
+          label: zh ? "缓存命中" : "Cache Read",
+          value: formatUsageTokensHuman(s.cacheReadTokens),
+          title: `${formatUsageTokensExact(s.cacheReadTokens)} tokens`,
+        },
+      ];
+      const quadsHtml = quads
+        .map(
+          (q) => `
+          <div class="usage-app-quad${q.muted ? " usage-quad-muted" : ""}" title="${escapeUsageHtml(q.title)}">
+            <span class="usage-quad-icon usage-quad-${q.key}">${USAGE_QUAD_ICONS[q.key]}</span>
+            <div class="usage-quad-body">
+              <small>${escapeUsageHtml(q.label)}</small>
+              <strong>${escapeUsageHtml(q.value)}</strong>
+            </div>
+          </div>`
+        )
+        .join("");
+      return `
+      <div class="usage-app-hero console-card">
+        <div class="usage-app-hero-top">
+          <div class="usage-app-hero-id">
+            <span class="usage-app-hero-avatar">${iconHtml}</span>
+            <div class="usage-app-hero-name">
+              <strong>${escapeUsageHtml(usageAppLabel(app))}</strong>
+              <small>${zh ? "真实消耗 Tokens" : "Real Tokens Used"}${totalCost > 0 && sorted.length > 1 ? ` · ${zh ? "占总成本" : "cost share"} ${sharePct.toFixed(1)}%` : ""}</small>
+            </div>
+          </div>
+          <div class="usage-app-hero-kpis">
+            <div class="usage-app-hero-kpi">
+              <small>${zh ? "总请求数" : "Requests"}</small>
+              <strong>${escapeUsageHtml(formatUsageTokensExact(s.totalRequests))}</strong>
+            </div>
+            <div class="usage-app-hero-kpi usage-kpi-cost">
+              <small>${zh ? "总成本" : "Total Cost"}</small>
+              <strong>${escapeUsageHtml(formatUsageCost(cost))}</strong>
+            </div>
+          </div>
+        </div>
+        <div class="usage-app-hero-big">
+          <span class="usage-app-hero-number">${escapeUsageHtml(formatUsageTokensExact(s.realTotalTokens))}</span>
+          <span class="usage-app-hero-approx">≈ ${escapeUsageHtml(formatUsageTokensHuman(s.realTotalTokens))}</span>
+        </div>
+        <div class="usage-app-hero-quads">${quadsHtml}</div>
+        <div class="usage-app-hero-cache">
+          <span class="usage-cache-label">${zh ? "缓存命中率" : "Cache hit rate"}</span>
+          <div class="usage-cache-track"><div class="usage-cache-fill" style="width:${Math.min(hitPct, 100).toFixed(1)}%"></div></div>
+          <strong class="usage-cache-pct">${hitPct.toFixed(1)}%</strong>
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+// 组装趋势槽位：短窗口（≤48h）按小时补全，长窗口按天补全，
+// 没有数据的时段补 0 值格子，保证时间轴连续、图形不空洞
+function buildUsageTrendSlots(dashboard) {
+  const range = usageResolvedRange || {};
+  const nowSec = Math.floor(Date.now() / 1000);
+  const spanKnown = Number.isFinite(range.startTs) && Number.isFinite(range.endTs);
+  const hourlyMode = spanKnown && range.endTs - range.startTs <= 48 * 3600;
+  const pad = (n) => String(n).padStart(2, "0");
+  const slots = [];
+
+  if (hourlyMode) {
+    const hourlyData = new Map();
+    (dashboard.hourly || []).forEach((h) => hourlyData.set(Number(h.hourStartTs), h));
+    const startHour = new Date(range.startTs * 1000);
+    startHour.setMinutes(0, 0, 0);
+    for (let ms = startHour.getTime(); ms / 1000 <= range.endTs; ms += 3600000) {
+      const ts = Math.floor(ms / 1000);
+      const d = new Date(ms);
+      const entry = hourlyData.get(ts);
+      slots.push({
+        label: pad(d.getHours()),
+        fullLabel: `${d.getMonth() + 1}-${d.getDate()} ${pad(d.getHours())}:00`,
+        cost: Number(entry?.cost) || 0,
+        tokens: Number(entry?.totalTokens) || 0,
+        requests: Number(entry?.requests) || 0,
+        future: ts > nowSec,
+      });
+      if (slots.length >= 49) break;
+    }
+    return { mode: "hourly", slots };
+  }
+
+  const byDate = new Map();
+  (dashboard.daily || []).forEach((d) => byDate.set(String(d.date), d));
+  if (Number.isFinite(range.startTs)) {
+    const cursor = new Date(range.startTs * 1000);
+    cursor.setHours(0, 0, 0, 0);
+    const endMs = Math.min((range.endTs ?? nowSec) * 1000, Date.now());
+    while (cursor.getTime() <= endMs && slots.length < 60) {
+      const dateKey = `${cursor.getFullYear()}-${pad(cursor.getMonth() + 1)}-${pad(cursor.getDate())}`;
+      const entry = byDate.get(dateKey);
+      slots.push({
+        label: `${cursor.getMonth() + 1}-${cursor.getDate()}`,
+        fullLabel: dateKey,
+        cost: Number(entry?.cost) || 0,
+        tokens: Number(entry?.totalTokens) || 0,
+        requests: Number(entry?.requests) || 0,
+        future: false,
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  } else {
+    // “全部”范围：直接用实际有数据的日期（最多最近 30 天）
+    (dashboard.daily || []).slice(-30).forEach((d) => {
+      slots.push({
+        label: String(d.date).slice(5),
+        fullLabel: String(d.date),
+        cost: Number(d.cost) || 0,
+        tokens: Number(d.totalTokens) || 0,
+        requests: Number(d.requests) || 0,
+        future: false,
+      });
+    });
+  }
+  return { mode: "daily", slots };
+}
+
+function renderUsageTrend(dashboard) {
+  const chart = $("usageTrendChart");
+  if (!chart) return;
+  const zh = currentLang === "zh";
+  const { mode, slots } = buildUsageTrendSlots(dashboard);
+
+  setText(
+    "usageTrendHint",
+    mode === "hourly" ? (zh ? "按小时" : "Hourly") : (zh ? "按天" : "Daily")
+  );
+
+  const footer = $("usageTrendFooter");
+  if (!slots.length) {
+    chart.innerHTML = `<p class="usage-muted">${zh ? "该范围内暂无数据" : "No data in this range"}</p>`;
+    if (footer) footer.textContent = "";
+    return;
+  }
+
+  const maxCost = Math.max(...slots.map((s) => s.cost), 0);
+  const scale = maxCost > 0 ? maxCost : 1;
+  // 标签密度：最多约 12 个可见标签
+  const labelStep = Math.max(1, Math.ceil(slots.length / 12));
+  const peakIndex = maxCost > 0 ? slots.findIndex((s) => s.cost === maxCost) : -1;
+
+  chart.innerHTML = slots
+    .map((slot, index) => {
+      const heightPct = Math.max((slot.cost / scale) * 100, slot.cost > 0 ? 2.5 : 0);
+      const title = `${slot.fullLabel} · ${formatUsageCost(slot.cost)} · ${formatUsageTokens(slot.tokens)} tokens · ${slot.requests} ${zh ? "次请求" : "requests"}`;
+      const colClasses = ["usage-trend-col"];
+      if (slot.future) colClasses.push("usage-trend-future");
+      if (index === peakIndex) colClasses.push("usage-trend-peak");
+      const labelHidden = index % labelStep !== 0 && index !== slots.length - 1;
+      const peakTag =
+        index === peakIndex
+          ? `<span class="usage-trend-peak-tag">${escapeUsageHtml(formatUsageCost(slot.cost))}</span>`
+          : "";
+      return `
+      <div class="${colClasses.join(" ")}" title="${escapeUsageHtml(title)}">
+        <div class="usage-trend-bar-wrap">${peakTag}<div class="usage-trend-bar" style="height:${heightPct}%"></div></div>
+        <span class="usage-trend-date${labelHidden ? " usage-trend-label-hide" : ""}">${escapeUsageHtml(slot.label)}</span>
+      </div>`;
+    })
+    .join("");
+
+  if (footer) {
+    const totalCost = slots.reduce((sum, s) => sum + s.cost, 0);
+    const totalRequests = slots.reduce((sum, s) => sum + s.requests, 0);
+    const activeSlots = slots.filter((s) => s.cost > 0 || s.requests > 0).length;
+    const unit = mode === "hourly" ? (zh ? "小时" : "hours") : (zh ? "天" : "days");
+    const parts = [
+      `${zh ? "合计" : "Total"} ${formatUsageCost(totalCost)}`,
+      `${formatUsageTokens(totalRequests)} ${zh ? "次请求" : "requests"}`,
+      `${activeSlots}/${slots.length} ${unit}${zh ? "有用量" : " active"}`,
+    ];
+    if (peakIndex >= 0) {
+      parts.push(`${zh ? "峰值" : "Peak"} ${slots[peakIndex].fullLabel}`);
+    }
+    footer.textContent = parts.join(" · ");
+  }
+}
+
+function renderUsageModels(models) {
+  const tbody = $("usageModelTableBody");
+  if (!tbody) return;
+  const zh = currentLang === "zh";
+  setText("usageModelsHint", zh ? `${models.length} 个模型` : `${models.length} models`);
+  if (!models.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="usage-muted">${zh ? "暂无模型数据" : "No model data"}</td></tr>`;
+    return;
+  }
+  const totalCost = models.reduce((sum, m) => sum + (Number(m.cost) || 0), 0);
+  tbody.innerHTML = models
+    .map((m) => {
+      const cost = Number(m.cost) || 0;
+      const sharePct = totalCost > 0 ? (cost / totalCost) * 100 : 0;
+      // cacheHitRate 为 null 表示该模型没有可缓存输入，显示 “--” 与 0% 区分
+      const hitRate =
+        m.cacheHitRate == null ? "--" : `${(Number(m.cacheHitRate) * 100).toFixed(1)}%`;
+      return `
+      <tr>
+        <td class="usage-td-model" title="${escapeUsageHtml(m.model)}">${escapeUsageHtml(m.model)}</td>
+        <td><span class="usage-app-badge usage-app-${escapeUsageHtml(m.app)}">${escapeUsageHtml(usageAppLabel(m.app))}</span></td>
+        <td>${escapeUsageHtml(formatUsageTokens(m.requests))}</td>
+        <td>${escapeUsageHtml(formatUsageTokens(m.totalTokens))}</td>
+        <td>${escapeUsageHtml(hitRate)}</td>
+        <td class="usage-td-cost">${escapeUsageHtml(formatUsageCost(cost))}</td>
+        <td class="usage-td-share">
+          <div class="usage-share-track"><div class="usage-share-fill" style="width:${Math.min(sharePct, 100).toFixed(1)}%"></div></div>
+          <span class="usage-share-text">${sharePct.toFixed(1)}%</span>
+        </td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function renderUsageRecent(recent) {
+  const tbody = $("usageRecentTableBody");
+  if (!tbody) return;
+  const zh = currentLang === "zh";
+  setText(
+    "usageRecentHint",
+    zh ? `最近 ${recent.length} 条` : `Latest ${recent.length}`
+  );
+  if (!recent.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="usage-muted">${zh ? "暂无记录" : "No records"}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = recent
+    .map(
+      (log) => `
+      <tr>
+        <td class="usage-td-time" title="${escapeUsageHtml(formatUsageTime(log.time))}">${escapeUsageHtml(formatUsageRelTime(log.time))}</td>
+        <td><span class="usage-app-badge usage-app-${escapeUsageHtml(log.app)}">${escapeUsageHtml(usageAppLabel(log.app))}</span></td>
+        <td class="usage-td-model" title="${escapeUsageHtml(log.model)}">${escapeUsageHtml(log.model)}</td>
+        <td title="${zh ? "输入" : "In"} ${escapeUsageHtml(formatUsageTokens(log.inputTokens))} / ${zh ? "输出" : "Out"} ${escapeUsageHtml(formatUsageTokens(log.outputTokens))} / ${zh ? "缓存读" : "Cache read"} ${escapeUsageHtml(formatUsageTokens(log.cacheReadTokens))}">${escapeUsageHtml(formatUsageTokens(log.totalTokens))}</td>
+        <td class="usage-td-cost">${escapeUsageHtml(formatUsageCost(log.cost))}</td>
+      </tr>`
+    )
+    .join("");
+}
+
+function applyUsagePanelLanguage() {
+  const zh = currentLang === "zh";
+  setText("usageNavLabel", zh ? "用量监控" : "Usage Monitor");
+  setText("usagePageTitle", zh ? "用量监控" : "Usage Monitor");
+  setText(
+    "usagePageSubtitle",
+    zh
+      ? "统计 Claude Code、Codex、Gemini CLI、Grok CLI 的本地会话用量与成本。"
+      : "Track local session usage and cost across Claude Code, Codex, Gemini CLI and Grok CLI."
+  );
+  setText("usageRefreshBtn", zh ? "刷新" : "Refresh");
+  setText("usageLoadingChipText", zh ? "正在扫描会话日志…" : "Scanning session logs…");
+  setText("usageAppsTitle", zh ? "按应用" : "By App");
+  setText("usageTrendTitle", zh ? "成本趋势" : "Cost Trend");
+  setText("usageModelsTitle", zh ? "模型统计" : "Model Stats");
+  setText("usageRecentTitle", zh ? "最近记录" : "Recent Activity");
+  setText("usageThModel", zh ? "模型" : "Model");
+  setText("usageThApp2", zh ? "应用" : "App");
+  setText("usageThRequests", zh ? "请求数" : "Requests");
+  setText("usageThTotalTokens", "Tokens");
+  setText("usageThCacheHit", zh ? "缓存命中" : "Cache Hit");
+  setText("usageThCost", zh ? "成本 (USD)" : "Cost (USD)");
+  setText("usageThShare", zh ? "成本占比" : "Cost Share");
+  setText("usageThTime", zh ? "时间" : "Time");
+  setText("usageThApp", zh ? "应用" : "App");
+  setText("usageThRecentModel", zh ? "模型" : "Model");
+  setText("usageThTokens", "Tokens");
+  setText("usageThRecentCost", zh ? "成本 (USD)" : "Cost (USD)");
+  renderUsageRangeNote();
+  const rangeLabels = {
+    today: zh ? "今天" : "Today",
+    "1d": zh ? "24 小时" : "24 hours",
+    "7d": zh ? "近 7 天" : "Last 7 days",
+    "14d": zh ? "近 14 天" : "Last 14 days",
+    "30d": zh ? "近 30 天" : "Last 30 days",
+    all: zh ? "全部" : "All time",
+    custom: zh ? "自定义" : "Custom",
+  };
+  document.querySelectorAll("#usageRangeSeg [data-usage-range]").forEach((btn) => {
+    const key = btn.getAttribute("data-usage-range");
+    if (rangeLabels[key]) btn.textContent = rangeLabels[key];
+  });
+  setText("usageCustomStartLabel", zh ? "开始时间" : "Start");
+  setText("usageCustomEndLabel", zh ? "结束时间" : "End");
+  setText("usageCustomLiveEndLabel", zh ? "结束取当前时间" : "End at now");
+  setText("usageCustomApplyBtn", zh ? "应用" : "Apply");
+  const allAppsBtn = document.querySelector('#usageAppSeg [data-usage-app="all"]');
+  if (allAppsBtn) allAppsBtn.textContent = zh ? "全部应用" : "All apps";
+  const modelAllOption = document.querySelector('#usageModelFilter option[value="all"]');
+  if (modelAllOption) modelAllOption.textContent = zh ? "全部模型" : "All models";
+}
+
+function bindUsageUiOnce() {
+  if (window.__varswitchUsageBound) return;
+  window.__varswitchUsageBound = true;
+  $("usageRefreshBtn")?.addEventListener("click", () => loadUsageDashboard());
+  const toDatetimeLocalValue = (date) => {
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+  $("usageRangeSeg")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-usage-range]");
+    if (!btn) return;
+    usageRange = btn.getAttribute("data-usage-range");
+    document.querySelectorAll("#usageRangeSeg [data-usage-range]").forEach((b) => {
+      b.classList.toggle("active", b === btn);
+    });
+    const customPanel = $("usageCustomRange");
+    if (customPanel) customPanel.hidden = usageRange !== "custom";
+    if (usageRange === "custom") {
+      const startInput = $("usageCustomStart");
+      const endInput = $("usageCustomEnd");
+      if (startInput && !startInput.value) {
+        startInput.value = toDatetimeLocalValue(new Date(Date.now() - 86400000));
+      }
+      if (endInput && !endInput.value) {
+        endInput.value = toDatetimeLocalValue(new Date());
+      }
+      syncUsageCustomLiveEnd();
+    }
+    loadUsageDashboard();
+  });
+  const syncUsageCustomLiveEnd = () => {
+    const endInput = $("usageCustomEnd");
+    if (endInput) endInput.disabled = $("usageCustomLiveEnd")?.checked !== false;
+  };
+  $("usageCustomLiveEnd")?.addEventListener("change", syncUsageCustomLiveEnd);
+  $("usageCustomApplyBtn")?.addEventListener("click", () => {
+    if (usageRange === "custom") loadUsageDashboard();
+  });
+  $("usageAppSeg")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-usage-app]");
+    if (!btn) return;
+    usageAppFilter = btn.getAttribute("data-usage-app");
+    // 切换应用时重置模型筛选，避免残留上一个应用的模型
+    usageModelFilter = "all";
+    const modelSelect = $("usageModelFilter");
+    if (modelSelect) modelSelect.value = "all";
+    document.querySelectorAll("#usageAppSeg [data-usage-app]").forEach((b) => {
+      b.classList.toggle("active", b === btn);
+    });
+    loadUsageDashboard();
+  });
+  $("usageModelFilter")?.addEventListener("change", (event) => {
+    usageModelFilter = event.target.value || "all";
+    loadUsageDashboard();
+  });
+}
+
 function switchConsolePage(page) {
-  const next = page || "overview";
+  const next = page || "add-provider";
+  // 离开 toolbox 页时停掉轮询，避免后台空转
+  if (activeConsolePage === "toolbox" && next !== "toolbox") {
+    stopToolboxRefresh();
+  }
   activeConsolePage = next;
   // 与旧 page 切换兼容
-  if (next === "claude" || next === "codex" || next === "grok") {
+  if (next === "claude" || next === "codex" || next === "grok" || next === "gemini") {
     currentPage = next;
   }
 
@@ -5516,26 +6745,29 @@ function switchConsolePage(page) {
   } else if (next === "codex") {
     loadCodexProfiles();
     loadCodexStatus();
-    loadCodexDiagnostics();
   } else if (next === "grok") {
     loadGrokProfiles();
     loadGrokStatus();
-  } else if (next === "configurations") {
-    renderConfigurationList();
-  } else if (next === "plugins" || next === "sessions" || next === "mobile") {
+  } else if (next === "gemini") {
+    loadGeminiProfiles();
+    loadGeminiStatus();
+  } else if (next === "add-provider") {
+    renderUniversalProviderForm();
+  } else if (next === "toolbox") {
     mountToolboxPages();
     loadCodexToolbox();
-    if (next === "plugins") switchToolboxTab("market");
-    if (next === "sessions") switchToolboxTab("session");
-    if (next === "mobile") switchToolboxTab("remote");
+    switchToolboxTab("session");
+  } else if (next === "developer-tools") {
+    mountDeveloperToolsPage();
+  } else if (next === "usage") {
+    bindUsageUiOnce();
+    loadUsageDashboard();
   } else if (next === "settings") {
     mountToolboxPages();
     openSettingsInline();
-  } else if (next === "overview") {
-    renderOverviewDashboard();
   }
 
-  renderGlobalConfigStatus();
+  renderNavigationStatus();
 
   // 滚动到主内容顶部
   $("workspaceMain")?.scrollTo?.({ top: 0, behavior: "smooth" });
@@ -5553,93 +6785,144 @@ async function openSettingsInline() {
       if ($("settingsClaudePathValue")) $("settingsClaudePathValue").textContent = paths.claudeSettings || "--";
       if ($("settingsCodexPathValue")) $("settingsCodexPathValue").textContent = paths.codexDir || paths.codexSettings || "--";
     }
-    // 同步设置页语言/主题按钮
-    $("settingsLangZh")?.classList.toggle("active", currentLang === "zh");
-    $("settingsLangEn")?.classList.toggle("active", currentLang === "en");
-    $("settingsThemeLight")?.classList.toggle("active", currentTheme === "light");
-    $("settingsThemeDark")?.classList.toggle("active", currentTheme === "dark");
+    updateSettingsSegControls();
   } catch (error) {
     showToast(String(error), "error");
   }
 }
 
-function renderOverviewEvents() {
-  const list = $("overviewEventList");
-  if (!list) return;
-  if (!overviewEvents.length) {
-    list.innerHTML = `<div class="event-item"><span class="event-dot"></span><div><strong>${currentLang === "zh" ? "暂无事件" : "No events yet"}</strong><small>${currentLang === "zh" ? "同步、导入、切换后会出现在这里" : "Sync, import and switch actions will appear here"}</small></div><span class="event-time">--</span></div>`;
-    return;
-  }
-  list.innerHTML = overviewEvents
-    .map((item) => {
-      const tone = item.level === "error" ? "warning" : item.level === "warning" ? "warning" : "";
-      return `<div class="event-item"><span class="event-dot ${tone}"></span><div><strong>${esc(item.message)}</strong></div><span class="event-time">${formatRelativeTime(item.time)}</span></div>`;
-    })
-    .join("");
+/**
+ * A10: 四套 provider（claude / codex / grok / gemini）的差异集中描述表。
+ *
+ * 只抽取「行为层」共性：切换 / 删除 / 编辑的后端命令名、toast 文案、刷新函数。
+ * 卡片 HTML 不参数化：四种 provider 展示的字段本就不同（grok 有 apiBackend，
+ * codex 有 providerName / imageApiKey / imageBaseUrl），硬套模板只会让可读性变差。
+ *
+ * 注意：claude 的切换流程与其余三家差异很大（要监听 switch-progress、
+ * 先 snapshot_config 再切、失败要 restore_config、支持取消与部分成功），
+ * 因此 claude 的 switch 保留独立实现，这张表里只复用它的 delete / edit。
+ */
+const PROVIDER_CONFIG = {
+  claude: {
+    label: "Claude",
+    getProfiles: () => profiles,
+    deleteCommand: "delete_profile",
+    deletedToast: () => t("toastDeleted"),
+    openEditModal: (profile) => openModal(profile),
+    reload: () => Promise.all([loadProfiles(), loadStatus()]),
+  },
+  codex: {
+    label: "Codex",
+    getProfiles: () => codexProfiles,
+    switchCommand: "switch_codex_profile",
+    deleteCommand: "delete_codex_profile",
+    switchedToast: (name) => t("codexSwitchedTo", { name }),
+    deletedToast: () => t("codexToastDeleted"),
+    // codex 删除时额外提示「不会自动删除远程 API 服务」
+    confirmDeleteMessage: (profile) =>
+      currentLang === "zh"
+        ? `删除配置 “${profile.name}”？\n\n删除后将无法从 VarSwitch 中恢复，但不会自动删除远程 API 服务。`
+        : t("confirmDelete", { name: profile.name }),
+    openEditModal: (profile) => openCodexModal(profile),
+    reload: () => Promise.all([loadCodexProfiles(), loadCodexStatus()]),
+    switchSettleMs: 250,
+  },
+  grok: {
+    label: "Grok",
+    getProfiles: () => grokProfiles,
+    switchCommand: "switch_grok_profile",
+    deleteCommand: "delete_grok_profile",
+    switchedToast: (name) => t("grokSwitchedTo", { name }),
+    deletedToast: () => t("grokToastDeleted"),
+    openEditModal: (profile) => openGrokModal(profile),
+    reload: () => Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]),
+    switchSettleMs: 250,
+  },
+  gemini: {
+    label: "Gemini",
+    getProfiles: () => geminiProfiles,
+    switchCommand: "switch_gemini_profile",
+    deleteCommand: "delete_gemini_profile",
+    switchedToast: (name) => `Gemini 已切换到 ${name}`,
+    deletedToast: () => "Gemini 配置已删除",
+    openEditModal: (profile) => openGeminiModal(profile),
+    reload: () => Promise.all([loadGeminiProfiles(), loadGeminiStatus()]),
+    // gemini 原实现切换后没有额外停留，保持一致
+    switchSettleMs: 0,
+  },
+};
+
+function findProviderProfile(type, id) {
+  return PROVIDER_CONFIG[type]?.getProfiles()?.find((item) => item.id === id) || null;
 }
 
-function renderOverviewRecentConfigs() {
-  const host = $("overviewRecentConfigs");
-  if (!host) return;
-  const items = [];
-  const activeClaude = profiles.find((p) => p.isActive);
-  const activeCodex = codexProfiles.find((p) => p.isActive);
-  const activeGrok = grokProfiles.find((p) => p.isActive);
-  if (activeClaude) items.push({ type: "claude", profile: activeClaude });
-  if (activeCodex) items.push({ type: "codex", profile: activeCodex });
-  if (activeGrok) items.push({ type: "grok", profile: activeGrok });
-  // 补充最近非激活配置
-  [...profiles, ...codexProfiles, ...grokProfiles]
-    .filter((p) => !p.isActive)
-    .slice(0, 4)
-    .forEach((p) => {
-      const type = profiles.includes(p) ? "claude" : codexProfiles.includes(p) ? "codex" : "grok";
-      if (!items.find((x) => x.profile.id === p.id && x.type === type)) {
-        items.push({ type, profile: p });
-      }
-    });
+/**
+ * codex / grok / gemini 的通用切换流程（claude 不走这里，见 handleSwitch）。
+ */
+async function switchProviderProfile(type, id) {
+  const config = PROVIDER_CONFIG[type];
+  if (!config?.switchCommand) return;
+  if (isSwitchingProfile) return;
+  const profile = findProviderProfile(type, id);
+  if (!profile) return;
 
-  if (!items.length) {
-    host.innerHTML = `<div class="empty-inline">${currentLang === "zh" ? "还没有配置，点击右上角添加。" : "No configs yet. Add one from the top bar."}</div>`;
-    return;
+  isSwitchingProfile = true;
+  showSwitchOverlay(profile.name, type);
+  try {
+    await waitForNextPaint();
+    await invoke(config.switchCommand, { id });
+    completeSwitchOverlay();
+    if (config.switchSettleMs) {
+      await new Promise((resolve) => setTimeout(resolve, config.switchSettleMs));
+    }
+    showToast(config.switchedToast(profile.name || ""), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  } finally {
+    hideSwitchOverlay();
+    isSwitchingProfile = false;
+    await config.reload();
   }
+}
 
-  host.innerHTML = items
-    .slice(0, 6)
-    .map(({ type, profile }) => {
-      const icon = type === "claude" ? "anthropic-color.svg" : type === "codex" ? "OpenAI-black-monoblossom.svg" : "grok-color.svg";
-      const typeLabel = type === "claude" ? "Claude" : type === "codex" ? "Codex" : "Grok";
-      const badge = profile.isActive
-        ? `<span class="status-badge-console healthy">${currentLang === "zh" ? "使用中" : "Active"}</span>`
-        : `<span class="status-badge-console">${currentLang === "zh" ? "可切换" : "Ready"}</span>`;
-      return `<div class="configuration-row configuration-row-overview">
-        <div class="configuration-data">
-          <div class="configuration-main"><img src="${icon}" alt=""><div><strong>${esc(profile.name)}</strong><small>${typeLabel} · ${esc(truncUrl(profile.baseUrl || "", 36))}</small></div></div>
-          <div class="configuration-meta">${esc(maskKey(profile.apiKey || ""))}</div>
-          <div class="configuration-state">${badge}</div>
-        </div>
-        <div class="configuration-actions">
-          ${profile.isActive
-            ? `<span class="configuration-action-slot" aria-hidden="true"></span>`
-            : `<button class="btn btn-secondary btn-sm" data-overview-switch="${type}:${esc(profile.id)}" type="button">${currentLang === "zh" ? "切换" : "Switch"}</button>`}
-          <button class="btn btn-ghost btn-sm" data-console-page="${type === "claude" ? "claude" : type === "codex" ? "codex" : "grok"}" type="button">${currentLang === "zh" ? "查看" : "Open"}</button>
-        </div>
-      </div>`;
-    })
-    .join("");
+/**
+ * 四套 provider 通用的删除流程（确认弹窗 → 调后端 → 刷新）。
+ */
+async function deleteProviderProfile(type, id) {
+  const config = PROVIDER_CONFIG[type];
+  if (!config?.deleteCommand) return;
+  const profile = findProviderProfile(type, id);
+  if (!profile) return;
 
-  host.querySelectorAll("[data-overview-switch]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const [type, id] = (btn.getAttribute("data-overview-switch") || "").split(":");
-      if (type === "claude") await handleSwitch(id);
-      else if (type === "codex") await handleCodexSwitch(id);
-      else if (type === "grok") await handleGrokSwitch(id);
-      renderOverviewDashboard();
-    });
+  const message = config.confirmDeleteMessage
+    ? config.confirmDeleteMessage(profile)
+    : t("confirmDelete", { name: profile.name });
+  const confirmed = await appConfirm(message, {
+    title: t("delete"),
+    confirmText: currentLang === "zh" ? "删除配置" : "Delete",
+    danger: true,
   });
-  host.querySelectorAll("[data-console-page]").forEach((btn) => {
-    btn.addEventListener("click", () => switchConsolePage(btn.getAttribute("data-console-page")));
-  });
+  if (!confirmed) return;
+
+  try {
+    await invoke(config.deleteCommand, { id });
+    showToast(config.deletedToast(), "success");
+    await config.reload();
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
+function editProviderProfile(type, id) {
+  const config = PROVIDER_CONFIG[type];
+  const profile = findProviderProfile(type, id);
+  if (config && profile) config.openEditModal(profile);
+}
+
+async function switchAnyProviderProfile(type, id) {
+  // claude 的切换流程特殊，单独走 handleSwitch
+  if (type === "claude") return handleSwitch(id);
+  return switchProviderProfile(type, id);
 }
 
 function renderConfigurationList() {
@@ -5650,11 +6933,13 @@ function renderConfigurationList() {
   profiles.forEach((p) => rows.push({ type: "claude", profile: p }));
   codexProfiles.forEach((p) => rows.push({ type: "codex", profile: p }));
   grokProfiles.forEach((p) => rows.push({ type: "grok", profile: p }));
+  geminiProfiles.forEach((p) => rows.push({ type: "gemini", profile: p }));
 
   const filtered = rows.filter(({ type, profile }) => {
     if (configurationFilter === "claude" && type !== "claude") return false;
     if (configurationFilter === "codex" && type !== "codex") return false;
     if (configurationFilter === "grok" && type !== "grok") return false;
+    if (configurationFilter === "gemini" && type !== "gemini") return false;
     if (configurationFilter === "active" && !profile.isActive) return false;
     if (!q) return true;
     const hay = `${profile.name || ""} ${profile.baseUrl || ""} ${profile.providerName || ""} ${profile.model || ""}`.toLowerCase();
@@ -5670,8 +6955,14 @@ function renderConfigurationList() {
 
   host.innerHTML = filtered
     .map(({ type, profile }) => {
-      const icon = type === "claude" ? "anthropic-color.svg" : type === "codex" ? "OpenAI-black-monoblossom.svg" : "grok-color.svg";
-      const typeLabel = type === "claude" ? "Claude" : type === "codex" ? "Codex" : "Grok";
+      const icon = type === "claude" ? "anthropic-color.svg"
+        : type === "codex" ? "OpenAI-black-monoblossom.svg"
+        : type === "gemini" ? "gemini-color.svg"
+        : "grok-color.svg";
+      const typeLabel = type === "claude" ? "Claude"
+        : type === "codex" ? "Codex"
+        : type === "gemini" ? "Gemini"
+        : "Grok";
       const badge = profile.isActive
         ? `<span class="status-badge-console healthy">${currentLang === "zh" ? "使用中" : "Active"}</span>`
         : `<span class="status-badge-console">${currentLang === "zh" ? "未启用" : "Idle"}</span>`;
@@ -5693,158 +6984,20 @@ function renderConfigurationList() {
     })
     .join("");
 
-  host.querySelectorAll(".configuration-row").forEach((row) => {
+  // A10: 容器级委托，provider 类型与 id 从卡片行的 data-* 上就近读取
+  bindDelegatedActions(host, "ConfigurationList", async (action, target) => {
+    const row = target.closest(".configuration-row");
+    if (!row) return;
     const type = row.getAttribute("data-config-type");
     const id = row.getAttribute("data-config-id");
-    row.querySelectorAll("button[data-action]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const action = btn.getAttribute("data-action");
-        if (action === "switch") {
-          if (type === "claude") await handleSwitch(id);
-          else if (type === "codex") await handleCodexSwitch(id);
-          else await handleGrokSwitch(id);
-        } else if (action === "edit") {
-          if (type === "claude") handleEdit(id);
-          else if (type === "codex") {
-            const p = codexProfiles.find((x) => x.id === id);
-            if (p) openCodexModal(p);
-          } else {
-            const p = grokProfiles.find((x) => x.id === id);
-            if (p) openGrokModal(p);
-          }
-        } else if (action === "copy") {
-          duplicateConfiguration(type, id);
-        } else if (action === "delete") {
-          if (type === "claude") await handleDelete(id);
-          else if (type === "codex") await handleCodexDelete(id);
-          else await handleGrokDelete(id);
-        }
-        renderConfigurationList();
-        renderOverviewDashboard();
-      });
-    });
+    if (!PROVIDER_CONFIG[type] || !id) return; // 未知类型不执行
+    if (action === "switch") await switchAnyProviderProfile(type, id);
+    else if (action === "edit") editProviderProfile(type, id);
+    else if (action === "copy") duplicateConfiguration(type, id);
+    else if (action === "delete") await deleteProviderProfile(type, id);
+    else return;
+    renderConfigurationList();
   });
-}
-
-function renderOverviewDashboard() {
-  try {
-  const activeClaude = profiles.find((p) => p.isActive);
-  const activeCodex = codexProfiles.find((p) => p.isActive);
-  const activeGrok = grokProfiles.find((p) => p.isActive);
-  const mainName = activeCodex?.name || activeClaude?.name || activeGrok?.name || (currentLang === "zh" ? "尚未启用配置" : "No active config");
-  if ($("overviewActiveName")) $("overviewActiveName").textContent = mainName;
-  renderGlobalConfigStatus();
-
-  // Claude：只要状态已读取就不再显示“检查中”
-  const claudeLoaded = lastClaudeStatus != null || profiles.length > 0;
-  const claudeOk = !!(lastClaudeStatus?.envVars || lastClaudeStatus?.claude || activeClaude);
-  setBadge(
-    $("overviewClaudeBadge"),
-    !claudeLoaded ? (currentLang === "zh" ? "检查中" : "...") : claudeOk ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "待配置" : "Idle"),
-    !claudeLoaded ? "" : claudeOk ? "healthy" : "warning"
-  );
-  if ($("overviewClaudeStatus")) {
-    $("overviewClaudeStatus").textContent = !claudeLoaded
-      ? (currentLang === "zh" ? "检查中" : "Checking")
-      : (activeClaude?.name || (currentLang === "zh" ? "未启用" : "Inactive"));
-  }
-  setNavDot("claudeNavState", !claudeLoaded ? "" : claudeOk ? "healthy" : "warning");
-
-  // Codex
-  const codexLoaded = lastCodexStatus != null || codexProfiles.length > 0;
-  const codexOk = !!(lastCodexStatus?.apiKey || activeCodex);
-  setBadge(
-    $("overviewCodexBadge"),
-    !codexLoaded ? (currentLang === "zh" ? "检查中" : "...") : codexOk ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "待配置" : "Idle"),
-    !codexLoaded ? "" : codexOk ? "healthy" : "warning"
-  );
-  if ($("overviewCodexStatus")) {
-    $("overviewCodexStatus").textContent = !codexLoaded
-      ? (currentLang === "zh" ? "检查中" : "Checking")
-      : (activeCodex?.name || (currentLang === "zh" ? "未启用" : "Inactive"));
-  }
-  setNavDot("codexNavState", !codexLoaded ? "" : codexOk ? "healthy" : "warning");
-
-  // Grok
-  const grokLoaded = lastGrokStatus != null || grokProfiles.length > 0;
-  const grokOk = !!(lastGrokStatus?.apiKey || activeGrok);
-  setBadge(
-    $("overviewGrokBadge"),
-    !grokLoaded ? (currentLang === "zh" ? "检查中" : "...") : grokOk ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "待配置" : "Idle"),
-    !grokLoaded ? "" : grokOk ? "healthy" : ""
-  );
-  if ($("overviewGrokStatus")) {
-    $("overviewGrokStatus").textContent = !grokLoaded
-      ? (currentLang === "zh" ? "检查中" : "Checking")
-      : (activeGrok?.name || (currentLang === "zh" ? "未启用" : "Inactive"));
-  }
-  setNavDot("grokNavState", !grokLoaded ? "" : grokOk ? "healthy" : "");
-
-  // Plugins / sessions / mobile from toolbox
-  const plugins = codexToolbox?.builtinPlugins?.plugins || codexToolbox?.plugins || [];
-  const pluginEnabled = Array.isArray(plugins) ? plugins.filter((p) => p.enabled || p.isEnabled).length : 0;
-  const pluginTotal = Array.isArray(plugins) ? plugins.length : 0;
-  if ($("overviewPluginStatus")) $("overviewPluginStatus").textContent = pluginTotal ? `${pluginEnabled}/${pluginTotal}` : (currentLang === "zh" ? "未加载" : "N/A");
-  setBadge($("overviewPluginBadge"), pluginTotal ? (currentLang === "zh" ? "已就绪" : "Ready") : "--", pluginTotal ? "healthy" : "");
-  setNavDot("pluginNavState", pluginTotal ? "healthy" : "");
-
-  const sessionMetrics = helpers.getCodexSessionMetrics?.(codexToolbox) || { count: 0 };
-  const sessionCount = sessionMetrics.count;
-  if ($("overviewSessionStatus")) $("overviewSessionStatus").textContent = sessionCount ? `${sessionCount}` : (currentLang === "zh" ? "0" : "0");
-  setBadge($("overviewSessionBadge"), sessionCount ? (currentLang === "zh" ? "已同步" : "Synced") : (currentLang === "zh" ? "空" : "Empty"), sessionCount ? "healthy" : "");
-  if ($("sessionNavCount")) $("sessionNavCount").textContent = String(sessionCount || 0);
-
-  const channels = codexToolbox?.mobileChannels || [];
-  const bound = Array.isArray(channels) ? channels.some((c) => c.bound || c.appId || c.botToken) : false;
-  setNavDot("mobileNavState", bound ? "healthy" : "");
-
-  const healthTone = claudeOk || codexOk ? "healthy" : "warning";
-  setBadge($("overviewHealthBadge"), healthTone === "healthy" ? (currentLang === "zh" ? "环境健康" : "Healthy") : (currentLang === "zh" ? "需要关注" : "Needs attention"), healthTone);
-  if ($("overviewHealthSummary")) {
-    $("overviewHealthSummary").textContent = currentLang === "zh"
-      ? `Claude ${claudeOk ? "正常" : "待配置"} · Codex ${codexOk ? "正常" : "待配置"} · 会话 ${sessionCount || 0}`
-      : `Claude ${claudeOk ? "OK" : "idle"} · Codex ${codexOk ? "OK" : "idle"} · Sessions ${sessionCount || 0}`;
-  }
-  if ($("globalStatusText")) {
-    $("globalStatusText").textContent = currentLang === "zh"
-      ? `Codex ${codexOk ? "正常" : "待配置"} · Claude ${claudeOk ? "正常" : "待配置"}`
-      : `Codex ${codexOk ? "OK" : "idle"} · Claude ${claudeOk ? "OK" : "idle"}`;
-  }
-  $("globalStatusDot")?.classList.toggle("healthy", healthTone === "healthy");
-  $("globalStatusDot")?.classList.toggle("warning", healthTone !== "healthy");
-
-  renderOverviewRecentConfigs();
-  renderOverviewEvents();
-  renderConfigurationList();
-  renderCodexCurrentCard();
-  renderSessionStatusCard();
-  renderMobileTimeline();
-  } catch (error) {
-    console.error("renderOverviewDashboard failed:", error);
-  }
-}
-
-function renderCodexCurrentCard() {
-  const grid = $("codexCurrentGrid");
-  if (!grid) return;
-  const active = codexProfiles.find((p) => p.isActive);
-  const status = lastCodexStatus || {};
-  const healthy = !!(status.apiKey || active);
-  setBadge($("codexCurrentHealthBadge"), healthy ? (currentLang === "zh" ? "正常" : "Healthy") : (currentLang === "zh" ? "未启用" : "Idle"), healthy ? "healthy" : "warning");
-  const rows = [
-    [currentLang === "zh" ? "当前配置" : "Active", active?.name || "--"],
-    ["Provider", status.providerName || active?.providerName || "--"],
-    ["Model", status.model || active?.model || "--"],
-    ["Auth", status.authMode || active?.authMode || "--"],
-    ["API Key", maskKey(status.apiKey || active?.apiKey || "")],
-    ["Base URL", truncUrl(status.baseUrl || active?.baseUrl || "", 48)],
-  ];
-  grid.innerHTML = rows
-    .map(([k, v]) => `<div class="wizard-review-item"><small>${esc(k)}</small><strong title="${esc(String(v))}">${esc(String(v))}</strong></div>`)
-    .join("");
-
-  const panel = $("codexDiagnosticsPanel");
-  if (panel) panel.style.display = codexDiagExpanded ? "" : "none";
 }
 
 function renderSessionStatusCard() {
@@ -5864,24 +7017,30 @@ function renderSessionStatusCard() {
   if ($("sessionNavCount")) $("sessionNavCount").textContent = String(count);
 }
 
-function renderGlobalConfigStatus() {
+function renderNavigationStatus() {
+  renderProviderNavigation();
   const activeClaude = profiles.find((profile) => profile.isActive);
   const activeCodex = codexProfiles.find((profile) => profile.isActive);
   const activeGrok = grokProfiles.find((profile) => profile.isActive);
-  const display = helpers.getGlobalConfigDisplay?.(
-    activeConsolePage,
-    {
-      claude: activeClaude?.name || "",
-      codex: activeCodex?.name || "",
-      grok: activeGrok?.name || "",
-      total: profiles.length + codexProfiles.length + grokProfiles.length,
-    },
-    currentLang
-  );
-  if (!display) return;
-  if ($("globalConfigLabel")) $("globalConfigLabel").textContent = display.label;
-  if ($("globalConfigName")) $("globalConfigName").textContent = display.name;
-  if ($("globalConfigPill")) $("globalConfigPill").title = display.title;
+  const activeGemini = geminiProfiles.find((profile) => profile.isActive);
+  const claudeLoaded = lastClaudeStatus != null || profiles.length > 0;
+  const codexLoaded = lastCodexStatus != null || codexProfiles.length > 0;
+  const grokLoaded = lastGrokStatus != null || grokProfiles.length > 0;
+  const geminiLoaded = lastGeminiStatus != null || geminiProfiles.length > 0;
+  const claudeOk = !!(lastClaudeStatus?.envVars || lastClaudeStatus?.claude || activeClaude);
+  const codexOk = !!(lastCodexStatus?.apiKey || activeCodex);
+  const grokOk = !!(lastGrokStatus?.apiKey || activeGrok);
+  const geminiOk = !!(lastGeminiStatus?.apiKey || activeGemini);
+
+  setNavDot("claudeNavState", !claudeLoaded ? "" : claudeOk ? "healthy" : "warning");
+  setNavDot("codexNavState", !codexLoaded ? "" : codexOk ? "healthy" : "warning");
+  setNavDot("grokNavState", !grokLoaded ? "" : grokOk ? "healthy" : "warning");
+  setNavDot("geminiNavState", !geminiLoaded ? "" : geminiOk ? "healthy" : "warning");
+
+  const channels = codexToolbox?.mobileChannels || [];
+  const mobileBound = Array.isArray(channels) && channels.some((channel) => channel.bound || channel.appId || channel.botToken);
+  setNavDot("mobileNavState", mobileBound ? "healthy" : "");
+
 }
 
 function renderMobileTimeline() {
@@ -5903,21 +7062,6 @@ function renderMobileTimeline() {
   });
 }
 
-function applyPluginFilters() {
-  const q = (pluginSearch || "").trim().toLowerCase();
-  const cards = document.querySelectorAll("#builtinPluginList .builtin-plugin-card, #builtinPluginList .builtin-plugin-item, #builtinPluginList .plugin-card, #pluginPageHost .builtin-plugin-item");
-  cards.forEach((card) => {
-    const text = (card.textContent || "").toLowerCase();
-    const enabled = /enabled|已启用|active/i.test(text);
-    const needsRepair = /repair|修复|broken|error|异常/i.test(text);
-    const installed = true;
-    const show = helpers.matchesPluginFilter
-      ? helpers.matchesPluginFilter({ text, enabled, needsRepair, installed }, pluginFilter, q)
-      : (!q || text.includes(q));
-    card.style.display = show ? "" : "none";
-  });
-}
-
 function duplicateConfiguration(type, id) {
   const copySuffix = currentLang === "zh" ? "副本" : "Copy";
   if (type === "claude") {
@@ -5936,11 +7080,11 @@ function duplicateConfiguration(type, id) {
     $("codexApiKey").value = profile.apiKey || "";
     $("codexBaseUrl").value = profile.baseUrl || "";
     $("codexModel").value = profile.model || "";
+    if ($("codexWireApi")) $("codexWireApi").value = profile.wireApi || "responses";
     $("codexProvider").value = profile.providerName || "";
     $("codexImageApiKey").value = profile.imageApiKey || "";
-    $("codexImageBaseUrl").value = profile.imageBaseUrl || "https://hk.getelucid.com/v1";
+    $("codexImageBaseUrl").value = profile.imageBaseUrl || "";
     setCodexAuthMode(profile.authMode || "auth_json");
-    setCodexWizardStep(3);
   } else {
     const profile = grokProfiles.find((item) => item.id === id);
     if (!profile) return;
@@ -5952,95 +7096,6 @@ function duplicateConfiguration(type, id) {
     if ($("grokApiBackend")) $("grokApiBackend").value = profile.apiBackend || "chat_completions";
   }
   showToast(currentLang === "zh" ? "已创建配置副本，请确认后保存" : "Config duplicated. Review and save it.", "success");
-}
-
-// ── Codex 分步向导 ────────────────────────────────────────
-function setCodexWizardStep(step) {
-  codexWizardStep = Math.min(5, Math.max(1, step));
-  document.querySelectorAll("#codexWizardStepper .wizard-step-indicator").forEach((el) => {
-    const n = Number(el.getAttribute("data-wizard-step"));
-    el.classList.toggle("active", n === codexWizardStep);
-    el.classList.toggle("done", n < codexWizardStep);
-  });
-  document.querySelectorAll("#codexProfileForm .wizard-step-panel").forEach((panel) => {
-    panel.classList.toggle("active", Number(panel.getAttribute("data-wizard-panel")) === codexWizardStep);
-  });
-  const back = $("codexWizardBackBtn");
-  const next = $("codexWizardNextBtn");
-  const submit = $("codexSubmitBtn");
-  const enable = $("codexSaveEnableBtn");
-  if (back) back.style.visibility = codexWizardStep === 1 ? "hidden" : "visible";
-  if (next) next.style.display = codexWizardStep < 5 ? "" : "none";
-  if (submit) submit.style.display = codexWizardStep === 5 ? "" : "none";
-  if (enable) enable.style.display = codexWizardStep === 5 ? "" : "none";
-  if (codexWizardStep === 5) renderCodexWizardReview();
-}
-
-function validateCodexWizardStep(step) {
-  if (step === 3) {
-    const name = $("codexProfileName")?.value.trim();
-    const baseUrl = $("codexBaseUrl")?.value.trim();
-    const apiKey = $("codexApiKey")?.value.trim();
-    const mode = getCodexAuthMode();
-    if (!name) {
-      showToast(currentLang === "zh" ? "请填写配置名称" : "Config name is required", "warning");
-      return false;
-    }
-    if (!baseUrl) {
-      showToast(currentLang === "zh" ? "请填写 Base URL" : "Base URL is required", "warning");
-      return false;
-    }
-    if (mode !== "official_account_api_quota" && mode !== "save_only" && !apiKey) {
-      showToast(currentLang === "zh" ? "当前写入方式需要 API Key" : "API Key is required for this write mode", "warning");
-      return false;
-    }
-  }
-  return true;
-}
-
-function renderCodexWizardReview() {
-  const host = $("codexWizardReview");
-  if (!host) return;
-  const mode = getCodexAuthMode();
-  const modeLabel =
-    mode === "official_account_api_quota"
-      ? (currentLang === "zh" ? "仅配置文件" : "Config only")
-      : mode === "save_only"
-        ? (currentLang === "zh" ? "仅保存" : "Save only")
-        : (currentLang === "zh" ? "默认写入" : "Default write");
-  const rows = [
-    [currentLang === "zh" ? "名称" : "Name", $("codexProfileName")?.value || "--"],
-    ["API Key", maskKey($("codexApiKey")?.value || "")],
-    ["Base URL", $("codexBaseUrl")?.value || "--"],
-    ["Model", $("codexModel")?.value || "--"],
-    ["Provider", $("codexProvider")?.value || "--"],
-    [currentLang === "zh" ? "写入方式" : "Write mode", modeLabel],
-  ];
-  host.innerHTML = rows
-    .map(([k, v]) => `<div class="wizard-review-item"><small>${esc(k)}</small><strong>${esc(String(v))}</strong></div>`)
-    .join("");
-}
-
-async function runCodexWizardTests() {
-  const apiKey = $("codexApiKey")?.value.trim() || "";
-  const baseUrl = $("codexBaseUrl")?.value.trim() || "";
-  const model = $("codexModel")?.value.trim() || "";
-  const keyOk = apiKey.length >= 8 || getCodexAuthMode() === "official_account_api_quota" || getCodexAuthMode() === "save_only";
-  setBadge($("codexTestKey"), keyOk ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "异常" : "Fail"), keyOk ? "healthy" : "error");
-
-  let urlOk = false;
-  try {
-    if (baseUrl) {
-      setBadge($("codexTestUrl"), currentLang === "zh" ? "检测中" : "Testing", "warning");
-      await handleEndpointTest("codex");
-      urlOk = true;
-    }
-  } catch (_) {
-    urlOk = false;
-  }
-  setBadge($("codexTestUrl"), urlOk ? (currentLang === "zh" ? "正常" : "OK") : (currentLang === "zh" ? "异常" : "Fail"), urlOk ? "healthy" : "error");
-  setBadge($("codexTestModel"), model ? (currentLang === "zh" ? "已填写" : "Set") : (currentLang === "zh" ? "可选" : "Optional"), model ? "healthy" : "");
-  setBadge($("codexTestPerm"), currentLang === "zh" ? "正常" : "OK", "healthy");
 }
 
 function bindConsoleUiOnce() {
@@ -6057,93 +7112,52 @@ function bindConsoleUiOnce() {
     if (!page) return;
     if (
       nav.tagName === "BUTTON" ||
-      nav.classList.contains("metric-card") ||
       nav.classList.contains("sidebar-item") ||
       nav.classList.contains("quick-action") ||
       nav.classList.contains("sidebar-settings")
     ) {
       event.preventDefault();
-      switchConsolePage(page);
+      if (page === "developer-tools") openDeveloperTools("skills");
+      else switchConsolePage(page);
     }
   });
 
-  $("overviewAddBtn")?.addEventListener("click", () => openConfigTypeDialog("add"));
-  $("overviewImportBtn")?.addEventListener("click", () => openConfigTypeDialog("import"));
-  $("overviewSyncBtn")?.addEventListener("click", async () => {
-    const activeCodex = codexProfiles.find((p) => p.isActive);
-    const activeClaude = profiles.find((p) => p.isActive);
-    if (activeCodex) await handleCodexSwitch(activeCodex.id);
-    else if (activeClaude) await handleSwitch(activeClaude.id);
-    else showToast(currentLang === "zh" ? "没有可同步的活动配置" : "No active config to sync", "warning");
-    renderOverviewDashboard();
+  document.querySelectorAll("[data-universal-preset]").forEach((button) => {
+    button.addEventListener("click", () => applyUniversalProviderPreset(button.getAttribute("data-universal-preset")));
   });
-  $("quickClaudeAdd")?.addEventListener("click", () => {
-    switchConsolePage("claude");
-    openModal(null);
+  document.querySelectorAll("[data-universal-app]").forEach((input) => {
+    input.addEventListener("change", renderUniversalProviderForm);
   });
-  $("quickCodexAdd")?.addEventListener("click", () => {
-    switchConsolePage("codex");
-    openCodexModal(null);
+  $("universalProviderForm")?.addEventListener("submit", handleUniversalProviderSubmit);
+  $("universalProviderResetBtn")?.addEventListener("click", () => resetUniversalProviderForm());
+  $("universalEndpointTestBtn")?.addEventListener("click", handleUniversalEndpointTest);
+  $("universalProviderBaseUrl")?.addEventListener("input", updateUniversalUrlPreviews);
+  $("universalClaudeApiFormat")?.addEventListener("change", updateUniversalUrlPreviews);
+  $("universalProviderApiKeyToggle")?.addEventListener("click", () => {
+    const input = $("universalProviderApiKey");
+    const showing = input.type === "password";
+    input.type = showing ? "text" : "password";
+    setText("universalProviderApiKeyToggle", showing ? "隐藏" : "显示");
   });
-  $("configAddBtn")?.addEventListener("click", () => openConfigTypeDialog("add"));
-  $("configImportBtn")?.addEventListener("click", () => openConfigTypeDialog("import"));
   $("claudePageAddBtn")?.addEventListener("click", () => openModal(null));
   $("claudePageImportBtn")?.addEventListener("click", handleImport);
-  $("claudeRefreshBtn")?.addEventListener("click", async () => {
-    await Promise.all([loadStatus(), loadProfiles()]);
-    showToast(currentLang === "zh" ? "Claude 状态已刷新" : "Claude status refreshed", "success");
-  });
   $("claudeSyncBtn")?.addEventListener("click", handleSyncNow);
   $("codexPageAddBtn")?.addEventListener("click", () => openCodexModal(null));
   $("codexPageImportBtn")?.addEventListener("click", handleCodexImport);
-  $("codexCardSyncBtn")?.addEventListener("click", () => {
+  $("codexSyncBtn")?.addEventListener("click", () => {
     const active = codexProfiles.find((profile) => profile.isActive);
     if (active) handleCodexSwitch(active.id);
+    else showToast(currentLang === "zh" ? "暂无启用的 Codex 配置" : "No active Codex profile", "warning");
   });
-  $("codexOpenDirBtn")?.addEventListener("click", async () => {
-    try {
-      await invoke("open_codex_dir");
-    } catch (error) {
-      // 回退到设置里的路径打开
-      try {
-        await invoke("open_path", { pathType: "codex" });
-      } catch (e2) {
-        showToast(String(error || e2), "error");
-      }
-    }
-  });
-  $("codexToggleDiagBtn")?.addEventListener("click", () => {
-    codexDiagExpanded = !codexDiagExpanded;
-    $("codexToggleDiagBtn").textContent = codexDiagExpanded
-      ? (currentLang === "zh" ? "收起诊断详情" : "Hide diagnostics")
-      : (currentLang === "zh" ? "查看诊断详情" : "View diagnostics");
-    renderCodexCurrentCard();
+  $("geminiPageAddBtn")?.addEventListener("click", () => openGeminiModal(null));
+  $("geminiPageImportBtn")?.addEventListener("click", handleGeminiImport);
+  // 与 Claude 的“立即同步”语义一致:重新应用当前启用的配置
+  $("geminiRefreshBtn")?.addEventListener("click", () => {
+    const active = geminiProfiles.find((p) => p.isActive);
+    if (active) handleGeminiSwitch(active.id);
+    else showToast(currentLang === "zh" ? "暂无启用的 Gemini 配置" : "No active Gemini profile", "warning");
   });
   $("sessionPageSyncBtn")?.addEventListener("click", handleToolboxSessionSync);
-
-  $("configurationSearch")?.addEventListener("input", (event) => {
-    configurationSearch = event.target.value || "";
-    renderConfigurationList();
-  });
-  $("configurationFilter")?.querySelectorAll("button[data-config-filter]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      configurationFilter = btn.getAttribute("data-config-filter") || "all";
-      $("configurationFilter").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
-      renderConfigurationList();
-    });
-  });
-  $("pluginSearchInput")?.addEventListener("input", (event) => {
-    pluginSearch = event.target.value || "";
-    applyPluginFilters();
-  });
-  $("pluginFilter")?.querySelectorAll("button[data-plugin-filter]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      pluginFilter = btn.getAttribute("data-plugin-filter") || "all";
-      $("pluginFilter").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
-      applyPluginFilters();
-    });
-  });
-
   $("settingsLangZh")?.addEventListener("click", () => setLanguage("zh"));
   $("settingsLangEn")?.addEventListener("click", () => setLanguage("en"));
   $("settingsThemeLight")?.addEventListener("click", () => setTheme("light"));
@@ -6152,20 +7166,13 @@ function bindConsoleUiOnce() {
   $("settingsUpdateBtn")?.addEventListener("click", () => handleUpdateButton());
   $("settingsDownloadBtn")?.addEventListener("click", () => openUpdateReleasePage());
   $("settingsGithubBtn")?.addEventListener("click", () => openGitHubRepo());
-  $("settingsSkillsBtn")?.addEventListener("click", () => openSkillsPanel());
-  $("settingsPromptsBtn")?.addEventListener("click", () => openPromptsPanel());
-  $("settingsMcpBtn")?.addEventListener("click", () => openMcpPanel());
-
-  // Codex wizard controls
-  $("codexWizardNextBtn")?.addEventListener("click", async () => {
-    if (!validateCodexWizardStep(codexWizardStep)) return;
-    if (codexWizardStep === 4) await runCodexWizardTests();
-    setCodexWizardStep(codexWizardStep + 1);
+  document.querySelectorAll("[data-developer-tool]").forEach((button) => {
+    button.addEventListener("click", () => switchDeveloperTool(button.getAttribute("data-developer-tool")));
   });
-  $("codexWizardBackBtn")?.addEventListener("click", () => setCodexWizardStep(codexWizardStep - 1));
-  $("codexWizardRunTestBtn")?.addEventListener("click", () => runCodexWizardTests());
+
+  // Codex 表单附加控件
   $("codexSaveEnableBtn")?.addEventListener("click", async () => {
-    codexWizardEnableAfterSave = true;
+    codexEnableAfterSave = true;
     $("codexSubmitBtn")?.click();
   });
   $("codexApiKeyToggle")?.addEventListener("click", () => {
@@ -6175,18 +7182,14 @@ function bindConsoleUiOnce() {
     input.type = show ? "text" : "password";
     $("codexApiKeyToggle").textContent = show ? (currentLang === "zh" ? "隐藏" : "Hide") : (currentLang === "zh" ? "显示" : "Show");
   });
-  document.querySelectorAll("#codexWizardStepper .wizard-step-indicator").forEach((el) => {
-    el.addEventListener("click", () => {
-      const step = Number(el.getAttribute("data-wizard-step"));
-      if (step < codexWizardStep) setCodexWizardStep(step);
-    });
-  });
 }
 
 function enhanceAfterDataLoad() {
   mountToolboxPages();
-  renderOverviewDashboard();
-  applyPluginFilters();
+  renderNavigationStatus();
+  renderUniversalProviderForm();
+  renderSessionStatusCard();
+  renderMobileTimeline();
 }
 
 let configTypeAction = "add";
@@ -6232,33 +7235,31 @@ function bindConfigTypeDialogOnce() {
   window.__varswitchConfigTypeBound = true;
   $("configTypeClose")?.addEventListener("click", closeConfigTypeDialog);
   $("configTypeCancel")?.addEventListener("click", closeConfigTypeDialog);
-  $("configTypeOverlay")?.addEventListener("click", (event) => {
-    if (event.target === $("configTypeOverlay")) closeConfigTypeDialog();
-  });
+  bindOverlayDismiss("configTypeOverlay", closeConfigTypeDialog);
   $("configTypeOverlay")?.querySelectorAll("[data-config-kind]").forEach((button) => {
     button.addEventListener("click", () => runConfigTypeAction(button.getAttribute("data-config-kind")));
   });
 }
 
 
+// 在应用页上触发添加时直接打开该应用的表单；其他页面进入统一供应商页
 function triggerCurrentAdd() {
-  if (activeConsolePage === "codex") openCodexModal(null);
+  if (activeConsolePage === "claude") openModal(null);
+  else if (activeConsolePage === "codex") openCodexModal(null);
   else if (activeConsolePage === "grok") openGrokModal(null);
-  else if (activeConsolePage === "claude") openModal(null);
-  else openConfigTypeDialog("add");
+  else if (activeConsolePage === "gemini") openGeminiModal(null);
+  else openProviderOnboarding(null);
 }
 
 function triggerCurrentImport() {
   if (activeConsolePage === "codex") handleCodexImport();
   else if (activeConsolePage === "grok") handleGrokImport();
+  else if (activeConsolePage === "gemini") handleGeminiImport();
   else if (activeConsolePage === "claude") handleImport();
-  else openConfigTypeDialog("import");
+  else handleImport();
 }
 
-$("codexRefreshDiagnosticsBtn")?.addEventListener("click", loadCodexDiagnostics);
-$("codexBackupRuntimeBtn")?.addEventListener("click", handleCodexRuntimeBackup);
 $("heroToolboxBtn")?.addEventListener("click", openCodexToolbox);
-$("codexToolboxOpenBtn")?.addEventListener("click", openCodexToolbox);
 on("langZhBtn", "click", () => setLanguage("zh"));
 on("langEnBtn", "click", () => setLanguage("en"));
 on("themeLightBtn", "click", () => setTheme("light"));
@@ -6267,15 +7268,12 @@ on("cancelBtn", "click", closeModal);
 on("modalClose", "click", closeModal);
 on("switchCancelBtn", "click", handleCancelSwitch);
 on("profileForm", "submit", handleSubmit);
+on("profilePresetSelect", "change", () => applyClaudePreset(getSelectedClaudePreset()));
 on("profileBaseUrl", "focus", () => tryClipboardAutoFill("url", "profileBaseUrl"));
 on("profileApiKey", "focus", () => tryClipboardAutoFill("key", "profileApiKey"));
 on("profileModelFetchBtn", "click", () => handleModelFetch("claude"));
 on("profileEndpointTestBtn", "click", () => handleEndpointTest("claude"));
-on("modalOverlay", "click", (event) => {
-  if (event.target === $("modalOverlay")) {
-    closeModal();
-  }
-});
+bindOverlayDismiss("modalOverlay", closeModal);
 
 // ── Page Tabs Event Listeners ───────────────────────
 
@@ -6305,9 +7303,7 @@ $("codexAuthModeSaveOnly")?.addEventListener("change", updateCodexAuthModeUi);
 on("codexCopyOfficialConfigBtn", "click", copyCodexOfficialConfig);
 on("codexModelFetchBtn", "click", () => handleModelFetch("codex"));
 on("codexEndpointTestBtn", "click", () => handleEndpointTest("codex"));
-on("codexModalOverlay", "click", (event) => {
-  if (event.target === $("codexModalOverlay")) closeCodexModal();
-});
+bindOverlayDismiss("codexModalOverlay", closeCodexModal);
 
 // ── Grok Modal Event Listeners ──────────────────────
 
@@ -6319,31 +7315,29 @@ $("grokBaseUrl")?.addEventListener("focus", () => tryClipboardAutoFill("url", "g
 $("grokApiKey")?.addEventListener("focus", () => tryClipboardAutoFill("key", "grokApiKey"));
 $("grokModelFetchBtn")?.addEventListener("click", () => handleModelFetch("grok"));
 $("grokEndpointTestBtn")?.addEventListener("click", () => handleEndpointTest("grok"));
-$("grokModalOverlay")?.addEventListener("click", (event) => {
-  if (event.target === $("grokModalOverlay")) closeGrokModal();
-});
-$("grokSyncNowBtn")?.addEventListener("click", () => {
+bindOverlayDismiss("grokModalOverlay", closeGrokModal);
+$("grokPageAddBtn")?.addEventListener("click", () => openGrokModal(null));
+// 与 Claude 的“立即同步”语义一致:重新应用当前启用的配置
+$("grokRefreshBtn")?.addEventListener("click", () => {
   const active = grokProfiles.find((p) => p.isActive);
   if (active) handleGrokSwitch(active.id);
+  else showToast(currentLang === "zh" ? "暂无启用的 Grok 配置" : "No active Grok profile", "warning");
 });
-$("grokPageAddBtn")?.addEventListener("click", () => openGrokModal(null));
-$("grokRefreshBtn")?.addEventListener("click", async () => {
-  await Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]);
-  showToast(currentLang === "zh" ? "Grok 状态已刷新" : "Grok status refreshed", "success");
-});
-$("grokOpenFolderBtn")?.addEventListener("click", handleOpenGrokFolder);
-$("grokBackupRuntimeBtn")?.addEventListener("click", handleGrokRuntimeBackup);
 $("grokPageImportBtn")?.addEventListener("click", handleGrokImport);
-$("quickGrokAdd")?.addEventListener("click", () => {
-  switchPage("grok");
-  openGrokModal(null);
-});
+
+// ── Gemini Modal Event Listeners ───────────────────
+
+$("geminiCancelBtn")?.addEventListener("click", closeGeminiModal);
+$("geminiModalClose")?.addEventListener("click", closeGeminiModal);
+$("geminiProfileForm")?.addEventListener("submit", handleGeminiSubmit);
+$("geminiBaseUrl")?.addEventListener("focus", () => tryClipboardAutoFill("url", "geminiBaseUrl"));
+$("geminiApiKey")?.addEventListener("focus", () => tryClipboardAutoFill("key", "geminiApiKey"));
+$("geminiModelFetchBtn")?.addEventListener("click", () => handleModelFetch("gemini"));
+$("geminiEndpointTestBtn")?.addEventListener("click", () => handleEndpointTest("gemini"));
+bindOverlayDismiss("geminiModalOverlay", closeGeminiModal);
 $("codexToolboxBtn")?.addEventListener("click", openCodexToolbox);
 on("codexToolboxClose", "click", closeCodexToolbox);
-on("codexToolboxOverlay", "click", (event) => {
-  if (event.target === $("codexToolboxOverlay")) closeCodexToolbox();
-});
-on("toolboxTabMarket", "click", () => switchToolboxTab("market"));
+bindOverlayDismiss("codexToolboxOverlay", closeCodexToolbox);
 on("toolboxTabSession", "click", () => switchToolboxTab("session"));
 on("toolboxTabRemote", "click", () => switchToolboxTab("remote"));
 on("toolboxSessionSearchInput", "input", (event) => {
@@ -6358,49 +7352,12 @@ async function handleToolboxSessionSync() {
     finishToolboxSessionProgress(true);
     showToast(t("toolboxSessionsSynced"), "success");
     renderCodexToolbox();
-    renderOverviewDashboard();
+    renderSessionStatusCard();
   } catch (error) {
     finishToolboxSessionProgress(false);
     showToast(String(error), "error");
   }
 }
-$("builtinPluginRepairBtn")?.addEventListener("click", handleRepairOpenAiBundledPlugins);
-$("builtinPluginEnableImportantBtn")?.addEventListener("click", handleEnableImportantBuiltinPlugins);
-on("toolboxMarketApplyBtn", "click", async () => {
-  if (marketplaceInstallBusy) return;
-  setMarketplaceInstallBusy(true);
-  showMarketplaceProgress();
-  try {
-    if (marketplaceProgressUnlisten) {
-      marketplaceProgressUnlisten();
-      marketplaceProgressUnlisten = null;
-    }
-    marketplaceProgressUnlisten = await listen("plugin-marketplace-progress", (event) => {
-      updateMarketplaceProgress(event.payload);
-    });
-    codexToolbox = await invoke("apply_plugin_marketplace", {
-      source: $("toolboxMarketplaceInput").value.trim(),
-    });
-    updateMarketplaceProgress({ step: 6, total: 6, label: "done" });
-    showToast(t("toolboxMarketplaceApplied"), "success");
-    renderCodexToolbox();
-  } catch (error) {
-    showToast(String(error), "error");
-  } finally {
-    if (marketplaceProgressUnlisten) {
-      marketplaceProgressUnlisten();
-      marketplaceProgressUnlisten = null;
-    }
-    setMarketplaceInstallBusy(false);
-  }
-});
-on("toolboxMarketplaceInput", "change", () => {
-  const option =
-    helpers.getCodexPluginMarketplaceOption?.($("toolboxMarketplaceInput").value) ||
-    {};
-  $("toolboxMarketplaceDesc").textContent =
-    currentLang === "zh" ? option.zh || "" : option.en || option.zh || "";
-});
 on("toolboxRemoteStartBtn", "click", async () => {
   if (toolboxRemoteBusy) return;
   mobileDebug("remote start button clicked");
@@ -6475,9 +7432,7 @@ on("skillsClose", "click", closeSkillsPanel);
 on("addSkillBtn", "click", () => showSkillsEdit(null, "command"));
 on("skillCancelBtn", "click", hideSkillsEdit);
 on("skillSaveBtn", "click", handleSaveSkill);
-on("skillsOverlay", "click", (event) => {
-  if (event.target === $("skillsOverlay")) closeSkillsPanel();
-});
+bindOverlayDismiss("skillsOverlay", closeSkillsPanel);
 
 // Skills tabs
 on("skillsTabInstalled", "click", () => switchSkillsTab("installed"));
@@ -6514,9 +7469,7 @@ on("refreshDiscoverBtn", "click", () => {
   backToCatalog();
 });
 on("repoManagerClose", "click", closeRepoManager);
-on("repoManagerOverlay", "click", (event) => {
-  if (event.target === $("repoManagerOverlay")) closeRepoManager();
-});
+bindOverlayDismiss("repoManagerOverlay", closeRepoManager);
 on("addRepoBtn", "click", handleAddRepo);
 on("repoUrlInput", "keydown", (e) => {
   if (e.key === "Enter") handleAddRepo();
@@ -6525,9 +7478,7 @@ on("repoUrlInput", "keydown", (e) => {
 on("promptsBtn", "click", openPromptsPanel);
 on("promptsClose", "click", closePromptsPanel);
 on("promptSaveBtn", "click", handleSavePrompt);
-on("promptsOverlay", "click", (event) => {
-  if (event.target === $("promptsOverlay")) closePromptsPanel();
-});
+bindOverlayDismiss("promptsOverlay", closePromptsPanel);
 on("promptTabEditor", "click", () => switchPromptTab("editor"));
 on("promptTabTemplates", "click", () => switchPromptTab("templates"));
 on("promptInsertSelect", "change", (e) => {
@@ -6549,9 +7500,7 @@ on("mcpClose", "click", closeMcpPanel);
 on("addMcpBtn", "click", () => showMcpEdit(null));
 on("mcpCancelBtn", "click", hideMcpEdit);
 on("mcpSaveBtn", "click", handleSaveMcp);
-on("mcpOverlay", "click", (event) => {
-  if (event.target === $("mcpOverlay")) closeMcpPanel();
-});
+bindOverlayDismiss("mcpOverlay", closeMcpPanel);
 on("mcpTabInstalled", "click", () => switchMcpTab("installed"));
 on("mcpTabPresets", "click", () => switchMcpTab("presets"));
 on("mcpPresetSearch", "keydown", (e) => {
@@ -6577,9 +7526,7 @@ on("githubRepoBtn", "click", openGitHubRepo);
 on("usageGuideCloseBtn", "click", closeUsageGuide);
 on("usageGuideCloseIcon", "click", closeUsageGuide);
 on("usageGuideNeverBtn", "click", handleNeverShowUsageGuide);
-on("usageGuideOverlay", "click", (event) => {
-  if (event.target === $("usageGuideOverlay")) closeUsageGuide();
-});
+bindOverlayDismiss("usageGuideOverlay", closeUsageGuide);
 
 // ── Settings Panel ──────────────────────────────────
 
@@ -6903,9 +7850,7 @@ async function handleImportProfiles() {
 
 // Settings event listeners
 on("settingsClose", "click", closeSettingsPanel);
-on("settingsOverlay", "click", (event) => {
-  if (event.target === $("settingsOverlay")) closeSettingsPanel();
-});
+bindOverlayDismiss("settingsOverlay", closeSettingsPanel);
 on("settingsAutoStart", "change", handleSettingsToggle);
 on("settingsMinTray", "change", handleSettingsToggle);
 on("settingsSilentStart", "change", handleSettingsToggle);
@@ -6921,17 +7866,35 @@ on("settingsOpenCodexDir", "click", () => {
 on("settingsOpenLogsDir", "click", () => {
   invoke("open_logs_folder").catch((error) => showToast(String(error), "error"));
 });
+async function copySettingsPath(pathKey) {
+  const path = pathKey === "codexSettings"
+    ? appPaths?.codexDir || appPaths?.codexSettings
+    : appPaths?.[pathKey];
+  if (!path) return;
+  try {
+    await copyToolboxText(path);
+    showToast(t("toastCopied"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+document.querySelectorAll("[data-settings-copy-path]").forEach((button) => {
+  button.addEventListener("click", () => copySettingsPath(button.dataset.settingsCopyPath));
+});
 on("settingsExportBtn", "click", handleExportProfiles);
 on("settingsImportBtn", "click", handleImportProfiles);
 on("settingsOpenBackupsBtn", "click", () => {
   invoke("open_backups_folder").catch((error) => showToast(String(error), "error"));
 });
 on("settingsViewBackupsBtn", "click", toggleBackupList);
+let backupRestoreBusy = false;
 on("settingsBackupList", "click", async (event) => {
   const btn = event.target.closest("[data-restore-backup]");
-  if (!btn) return;
+  if (!btn || backupRestoreBusy) return;
   const name = btn.getAttribute("data-restore-backup");
   if (!(await appConfirm(currentLang === "zh" ? "确定用这个备份覆盖当前配置吗？当前配置会先自动备份。" : "Overwrite current profiles with this backup? A safety backup will be created first.", { title: currentLang === "zh" ? "恢复备份" : "Restore backup", danger: true, confirmText: currentLang === "zh" ? "覆盖恢复" : "Restore" }))) return;
+  backupRestoreBusy = true;
+  setButtonBusy(btn, true, currentLang === "zh" ? "恢复中..." : "Restoring...");
   try {
     await invoke("restore_config_backup", { name });
     showToast("已从备份恢复配置", "success");
@@ -6940,6 +7903,9 @@ on("settingsBackupList", "click", async (event) => {
     $("settingsBackupList").style.display = "none";
   } catch (error) {
     showToast(String(error), "error");
+  } finally {
+    backupRestoreBusy = false;
+    setButtonBusy(btn, false);
   }
 });
 
@@ -7035,12 +8001,11 @@ async function safeLoad(label, fn, ms = 8000) {
   // 2) 先绑定交互，保证侧边栏/按钮立刻可点
   try {
     bindAppDialogOnce();
-    bindConfigTypeDialogOnce();
     bindConsoleUiOnce();
     mountToolboxPages();
-    switchConsolePage("overview");
-    // 先渲染一次“空状态”，避免一直停在 HTML 初始的“检查中”
-    if (typeof renderOverviewDashboard === "function") renderOverviewDashboard();
+    switchConsolePage("add-provider");
+    // B15: 尽早订阅后端通道状态推送，绑定流程中的状态变化不会漏收
+    bindMobileChannelStatusListener();
   } catch (e) {
     console.error("console bind failed", e);
   }
@@ -7057,10 +8022,11 @@ async function safeLoad(label, fn, ms = 8000) {
     safeLoad("loadProfiles", () => loadProfiles()),
     safeLoad("loadCodexProfiles", () => loadCodexProfiles()),
     safeLoad("loadCodexStatus", () => loadCodexStatus()),
-    safeLoad("loadCodexDiagnostics", () => loadCodexDiagnostics()),
     safeLoad("loadGrokProfiles", () => loadGrokProfiles()),
     safeLoad("loadGrokStatus", () => loadGrokStatus()),
     safeLoad("loadGrokDiagnostics", () => loadGrokDiagnostics()),
+    safeLoad("loadGeminiProfiles", () => loadGeminiProfiles()),
+    safeLoad("loadGeminiStatus", () => loadGeminiStatus()),
     safeLoad("loadCodexToolbox", () => loadCodexToolbox(), 10000),
     safeLoad("loadAppSettings", () => loadAppSettings()),
   ]);
@@ -7069,7 +8035,7 @@ async function safeLoad(label, fn, ms = 8000) {
     renderGrokPresetOptions();
     renderUpdateButton();
     enhanceAfterDataLoad();
-    switchConsolePage("overview");
+    switchConsolePage("add-provider");
   } catch (e) {
     console.error("post-load render failed", e);
   }

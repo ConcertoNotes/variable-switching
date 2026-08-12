@@ -44,16 +44,6 @@
           <button class="seg-btn" id="themeDarkBtn" type="button">Dark</button>
         </div>
         <div class="toolbar-divider"></div>
-        <div class="global-status-cluster" id="globalStatusCluster">
-          <div class="global-status-pill" id="globalConfigPill" title="当前配置">
-            <span class="global-status-label" id="globalConfigLabel">配置</span>
-            <strong id="globalConfigName">--</strong>
-          </div>
-          <div class="global-status" id="globalStatus" aria-live="polite">
-            <span class="global-status-dot" id="globalStatusDot"></span>
-            <span id="globalStatusText">正在检查环境</span>
-          </div>
-        </div>
         <button class="toolbar-btn-icon" id="skillsBtn" type="button" title="Skills">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
         </button>
@@ -82,110 +72,57 @@
     <aside class="sidebar" aria-label="主导航">
       <div class="sidebar-section-label">工作台</div>
       <nav class="sidebar-nav" id="sidebarNav">
-        <button class="sidebar-item active" data-console-page="overview" type="button">
-          <img src="app-icon.png" alt=""><span>概览</span><span class="nav-state-dot healthy"></span>
-        </button>
-        <button class="sidebar-item" data-console-page="claude" type="button">
+        <button class="sidebar-item" data-console-page="claude" data-provider-nav="claude" type="button" hidden>
           <img src="anthropic-color.svg" alt=""><span>Claude Code</span><span class="nav-state-dot" id="claudeNavState"></span>
         </button>
-        <button class="sidebar-item" data-console-page="codex" type="button">
-          <img src="OpenAI-black-monoblossom.svg" alt=""><span>Codex CLI</span><span class="nav-state-dot" id="codexNavState"></span>
+        <button class="sidebar-item" data-console-page="codex" data-provider-nav="codex" type="button" hidden>
+          <img src="OpenAI-black-monoblossom.svg" alt=""><span>Codex</span><span class="nav-state-dot" id="codexNavState"></span>
         </button>
-        <button class="sidebar-item" data-console-page="grok" type="button">
+        <button class="sidebar-item" data-console-page="grok" data-provider-nav="grok" type="button" hidden>
           <img src="grok-color.svg" alt=""><span>Grok / xAI</span><span class="nav-state-dot" id="grokNavState"></span>
         </button>
-        <button class="sidebar-item" data-console-page="configurations" type="button">
-          <img src="icon-toolbox.svg" alt=""><span>配置管理</span><span class="nav-count" id="configNavCount">0</span>
+        <button class="sidebar-item" data-console-page="gemini" data-provider-nav="gemini" type="button">
+          <img src="gemini-color.svg" alt=""><span>Gemini</span><span class="nav-state-dot" id="geminiNavState"></span>
         </button>
-        <div class="sidebar-section-label sidebar-section-label-spaced">扩展与连接</div>
-        <button class="sidebar-item" data-console-page="plugins" type="button">
-          <img src="toolbox.svg" alt=""><span>插件市场</span><span class="nav-state-dot" id="pluginNavState"></span>
+        <button class="sidebar-item active" data-console-page="add-provider" type="button">
+          <img src="icon-toolbox.svg" alt=""><span>添加配置</span>
         </button>
-        <button class="sidebar-item" data-console-page="sessions" type="button">
-          <img src="icon-update.svg" alt=""><span>会话同步</span><span class="nav-count" id="sessionNavCount">0</span>
-        </button>
-        <button class="sidebar-item" data-console-page="mobile" type="button">
-          <img src="icon-guide.svg" alt=""><span>手机控制</span><span class="nav-state-dot" id="mobileNavState"></span>
-        </button>
+        <div class="sidebar-section-label sidebar-section-label-spaced" id="toolboxSectionLabel">工具箱</div>
+        <div class="sidebar-toolbox">
+          <button class="sidebar-item sidebar-toolbox-entry" id="developerToolsNav" data-console-page="developer-tools" type="button">
+            <img src="anthropic-color.svg" alt=""><span>Claude Toolbox</span>
+          </button>
+          <button class="sidebar-item sidebar-toolbox-entry" id="codexToolboxNav" data-console-page="toolbox" type="button">
+            <img src="OpenAI-black-monoblossom.svg" alt=""><span>Codex Toolbox</span><span class="nav-count" id="sessionNavCount">0</span>
+          </button>
+          <button class="sidebar-item sidebar-toolbox-entry" id="usageDashboardNav" data-console-page="usage" type="button">
+            <img src="icon-usage.svg" alt=""><span id="usageNavLabel">用量监控</span>
+          </button>
+        </div>
       </nav>
       <button class="sidebar-item sidebar-settings" data-console-page="settings" type="button">
         <img src="icon-guide.svg" alt=""><span>设置</span>
       </button>
-      <div class="sidebar-version">VarSwitch <span>v2.3.8</span></div>
+      <div class="sidebar-version">VarSwitch <span>v2.4.5</span></div>
     </aside>
 
     <main class="workspace-main" id="workspaceMain">
-      <section class="console-page active" id="pageOverview" data-console-page-panel="overview">
-        <header class="page-header">
-          <div><h1>概览</h1><p>查看 AI 开发环境状态并处理需要关注的问题。</p></div>
-          <div class="page-header-actions">
-            <button class="btn btn-secondary" id="overviewImportBtn" type="button">导入配置</button>
-            <button class="btn btn-primary" id="overviewAddBtn" type="button">添加配置</button>
-          </div>
-        </header>
-        <section class="overview-hero">
-          <div class="overview-hero-copy">
-            <span class="status-badge-console healthy" id="overviewHealthBadge">环境健康</span>
-            <h2 id="overviewActiveName">尚未启用配置</h2>
-            <p id="overviewHealthSummary">正在读取 Claude Code、Codex CLI 与本地服务状态。</p>
-          </div>
-          <button class="btn btn-primary overview-sync-btn" id="overviewSyncBtn" type="button">立即同步</button>
-        </section>
-        <section class="overview-metrics" id="overviewMetrics">
-          <button class="metric-card" data-console-page="claude" type="button"><span class="metric-icon anthropic"><img src="anthropic-color.svg" alt=""></span><span><small>Claude Code</small><strong id="overviewClaudeStatus">检查中</strong></span><span class="status-badge-console" id="overviewClaudeBadge">--</span></button>
-          <button class="metric-card" data-console-page="codex" type="button"><span class="metric-icon codex"><img src="OpenAI-black-monoblossom.svg" alt=""></span><span><small>Codex CLI</small><strong id="overviewCodexStatus">检查中</strong></span><span class="status-badge-console" id="overviewCodexBadge">--</span></button>
-          <button class="metric-card" data-console-page="grok" type="button"><span class="metric-icon"><img src="grok-color.svg" alt=""></span><span><small>Grok / xAI</small><strong id="overviewGrokStatus">检查中</strong></span><span class="status-badge-console" id="overviewGrokBadge">--</span></button>
-          <button class="metric-card" data-console-page="plugins" type="button"><span class="metric-icon"><img src="toolbox.svg" alt=""></span><span><small>插件能力</small><strong id="overviewPluginStatus">检查中</strong></span><span class="status-badge-console" id="overviewPluginBadge">--</span></button>
-          <button class="metric-card" data-console-page="sessions" type="button"><span class="metric-icon"><img src="icon-update.svg" alt=""></span><span><small>会话同步</small><strong id="overviewSessionStatus">检查中</strong></span><span class="status-badge-console" id="overviewSessionBadge">--</span></button>
-        </section>
-        <section class="console-card overview-recent-configs" style="margin-bottom:16px;">
-          <div class="console-card-header"><div><h2>最近配置</h2><p>当前使用与可快速切换的配置</p></div></div>
-          <div class="configuration-list" id="overviewRecentConfigs"></div>
-        </section>
-        <div class="overview-columns">
-          <section class="console-card">
-            <div class="console-card-header"><div><h2>快捷操作</h2><p>常用环境管理入口</p></div></div>
-            <div class="quick-action-grid">
-              <button class="quick-action" id="quickClaudeAdd" type="button"><img src="anthropic-color.svg" alt=""><span><strong>添加 Claude 配置</strong><small>Token、Base URL 与模型</small></span></button>
-              <button class="quick-action" id="quickCodexAdd" type="button"><img src="OpenAI-black-monoblossom.svg" alt=""><span><strong>添加 Codex 配置</strong><small>分步配置 Provider 与认证</small></span></button>
-              <button class="quick-action" id="quickGrokAdd" type="button"><img src="grok-color.svg" alt=""><span><strong>添加 Grok 配置</strong><small>~/.grok/config.toml 与 API</small></span></button>
-              <button class="quick-action" data-console-page="plugins" type="button"><img src="toolbox.svg" alt=""><span><strong>打开插件市场</strong><small>安装、启用或修复插件</small></span></button>
-              <button class="quick-action" data-console-page="settings" type="button"><img src="icon-guide.svg" alt=""><span><strong>诊断与设置</strong><small>路径、备份与帮助</small></span></button>
-            </div>
-          </section>
-          <section class="console-card">
-            <div class="console-card-header"><div><h2>最近事件</h2><p>本次运行中的关键状态</p></div></div>
-            <div class="event-list" id="overviewEventList"></div>
-          </section>
-        </div>
-      </section>
-
-
 <div class="page-content console-page" id="pageClaudeCode" data-console-page-panel="claude">
   <div class="app">
-    <header class="page-header"><div><h1>Claude Code</h1><p>管理环境变量、编辑器配置与 Claude 设置同步状态。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="claudeRefreshBtn" type="button">刷新诊断</button><button class="btn btn-secondary" id="claudeSyncBtn" type="button">立即同步</button><button class="btn btn-secondary" id="claudePageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="claudePageAddBtn" type="button">添加 Claude 配置</button></div></header>
-    <section class="env-matrix" id="claudeEnvMatrix" aria-label="环境状态矩阵"></section>
+    <header class="page-header"><div><h1>Claude Code</h1><p>管理系统环境变量与 Claude 设置同步状态。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="claudeSyncBtn" type="button">立即同步</button><button class="btn btn-secondary" id="claudePageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="claudePageAddBtn" type="button">添加 Claude 配置</button></div></header>
     <section class="support-section control-panel-section console-hint-section">
       <p class="support-hint" id="supportHint">Open the usage guide, check GitHub Releases for updates, or jump to the repository.</p>
     </section>
 
     <section class="status-section">
-      <h2 class="section-title" id="statusSectionTitle">Current Status</h2>
-      <div class="status-grid" id="statusGrid"></div>
-      <p class="hint" id="statusHint">Restart terminal and VSCode after switching to apply env variables.</p>
-    </section>
-
-    <section class="active-config-section" id="activeConfigSection" style="display:none;">
-      <div class="active-config-bar">
-        <div class="active-config-info">
-          <span class="active-config-label" id="activeConfigLabel">Active Config</span>
-          <span class="active-config-name" id="activeConfigName">--</span>
-        </div>
+      <div class="section-header-row">
+        <h2 class="section-title" id="statusSectionTitle">Claude Status</h2>
       </div>
+      <div class="status-grid" id="statusGrid"></div>
     </section>
 
     <section class="profiles-section">
-      <h2 class="section-title" id="profilesSectionTitle">Config List</h2>
+      <h2 class="section-title" id="profilesSectionTitle">Claude Config List</h2>
       <div class="profiles-grid" id="profilesGrid"></div>
     </section>
   </div>
@@ -193,47 +130,18 @@
 
   <div class="page-content console-page" id="pageCodex" data-console-page-panel="codex">
   <div class="app">
-    <header class="page-header"><div><h1>Codex CLI</h1><p>管理 Provider、模型、认证方式与本地运行文件。</p></div>
+    <header class="page-header"><div><h1>Codex</h1><p>管理 Provider、模型、认证方式与本地运行文件。</p></div>
       <div class="page-header-actions">
-        <button class="btn btn-secondary" id="codexRefreshDiagnosticsBtn" type="button">刷新诊断</button>
-        <button class="btn btn-secondary" id="codexBackupRuntimeBtn" type="button">备份 Codex 文件</button>
+        <button class="btn btn-secondary" id="codexSyncBtn" type="button">立即同步</button>
         <button class="btn btn-secondary" id="codexPageImportBtn" type="button">导入当前配置</button>
         <button class="btn btn-primary" id="codexPageAddBtn" type="button">添加 Codex 配置</button>
       </div>
     </header>
-    <section class="console-card codex-current-card" id="codexCurrentStatusCard">
-      <div class="console-card-header">
-        <div>
-          <h2 id="codexCurrentCardTitle">Codex CLI 当前状态</h2>
-          <p id="codexCurrentCardDesc">当前生效配置与健康摘要</p>
-        </div>
-        <span class="status-badge-console" id="codexCurrentHealthBadge">--</span>
-      </div>
-      <div class="codex-current-grid" id="codexCurrentGrid"></div>
-      <div class="page-header-actions" style="margin-top:14px;justify-content:flex-start;">
-        <button class="btn btn-primary btn-sm" id="codexCardSyncBtn" type="button">立即同步</button>
-        <button class="btn btn-secondary btn-sm" id="codexOpenDirBtn" type="button">打开配置目录</button>
-        <button class="btn btn-ghost btn-sm" id="codexToggleDiagBtn" type="button">查看诊断详情</button>
-      </div>
-    </section>
     <section class="status-section">
       <div class="section-header-row">
-        <h2 class="section-title" id="codexStatusSectionTitle">Current Status</h2>
-        <div class="section-header-actions">
-          <button class="btn btn-secondary btn-sm" id="codexToolboxOpenBtn" type="button">打开 Codex Toolbox</button>
-        </div>
+        <h2 class="section-title" id="codexStatusSectionTitle">Codex 状态</h2>
       </div>
       <div class="status-grid" id="codexStatusGrid"></div>
-      <div class="diagnostics-panel" id="codexDiagnosticsPanel"></div>
-    </section>
-
-    <section class="active-config-section" id="codexActiveConfigSection" style="display:none;">
-      <div class="active-config-bar">
-        <div class="active-config-info">
-          <span class="active-config-label" id="codexActiveConfigLabel">Active Config</span>
-          <span class="active-config-name" id="codexActiveConfigName">--</span>
-        </div>
-      </div>
     </section>
 
     <section class="profiles-section">
@@ -245,33 +153,12 @@
 
   <div class="page-content console-page" id="pageGrok" data-console-page-panel="grok">
   <div class="app">
-    <header class="page-header"><div><h1>Grok / xAI</h1><p>管理 ~/.grok/config.toml 中的 API Key、Base URL 与默认模型，一键切换 Grok CLI 配置。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="grokRefreshBtn" type="button">刷新状态</button><button class="btn btn-secondary" id="grokPageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="grokPageAddBtn" type="button">添加 Grok 配置</button></div></header>
+    <header class="page-header"><div><h1>Grok / xAI</h1><p>管理 Grok CLI 配置与模型切换。</p></div><div class="page-header-actions grok-page-header-actions"><button class="btn btn-secondary" id="grokRefreshBtn" type="button">立即同步</button><button class="btn btn-secondary" id="grokPageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="grokPageAddBtn" type="button">添加 Grok 配置</button></div></header>
     <section class="status-section">
       <div class="section-header-row">
-        <h2 class="section-title" id="grokStatusSectionTitle">Current Status</h2>
-        <div class="section-header-actions">
-          <button class="btn btn-secondary btn-sm" id="grokOpenFolderBtn" type="button">打开 .grok 目录</button>
-          <button class="btn btn-secondary btn-sm" id="grokBackupRuntimeBtn" type="button">备份 config.toml</button>
-        </div>
+        <h2 class="section-title" id="grokStatusSectionTitle">Grok Status</h2>
       </div>
       <div class="status-grid" id="grokStatusGrid"></div>
-      <div class="diagnostics-panel" id="grokDiagnosticsPanel"></div>
-      <p class="hint" id="grokStatusHint">切换后会写入 ~/.grok/config.toml（默认模型与 API），并同步 XAI_API_KEY / XAI_BASE_URL。请重启 Grok CLI 使配置生效。</p>
-    </section>
-
-    <section class="active-config-section" id="grokActiveConfigSection" style="display:none;">
-      <div class="active-config-bar">
-        <div class="active-config-info">
-          <span class="active-config-label" id="grokActiveConfigLabel">Active Config</span>
-          <span class="active-config-name" id="grokActiveConfigName">--</span>
-        </div>
-        <div class="active-config-actions">
-          <button class="btn btn-primary btn-sm" id="grokSyncNowBtn" type="button">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            <span id="grokSyncNowBtnText">Sync Now</span>
-          </button>
-        </div>
-      </div>
     </section>
 
     <section class="profiles-section">
@@ -281,56 +168,275 @@
   </div>
   </div><!-- end pageGrok -->
 
-      <section class="console-page" id="pageConfigurations" data-console-page-panel="configurations">
-        <header class="page-header"><div><h1>配置管理</h1><p>统一查看、搜索和维护 Claude、Codex 与 Grok 配置。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="configImportBtn" type="button">导入配置</button><button class="btn btn-primary" id="configAddBtn" type="button">添加配置</button></div></header>
-        <div class="filter-toolbar"><label class="search-field"><span>搜索</span><input id="configurationSearch" type="search" placeholder="搜索名称、Provider 或 Base URL"></label><div class="segmented-filter" id="configurationFilter"><button class="active" data-config-filter="all" type="button">全部</button><button data-config-filter="claude" type="button">Claude</button><button data-config-filter="codex" type="button">Codex</button><button data-config-filter="grok" type="button">Grok</button><button data-config-filter="active" type="button">使用中</button></div></div>
-        <div class="configuration-list" id="configurationList"></div>
-      </section>
+  <div class="page-content console-page" id="pageGemini" data-console-page-panel="gemini">
+  <div class="app">
+    <header class="page-header"><div><h1>Gemini</h1><p>管理 Gemini CLI 的 API Key、自定义网关与默认模型。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="geminiRefreshBtn" type="button">立即同步</button><button class="btn btn-secondary" id="geminiPageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="geminiPageAddBtn" type="button">添加 Gemini 配置</button></div></header>
+    <section class="status-section">
+      <div class="section-header-row"><h2 class="section-title" id="geminiStatusSectionTitle">Gemini 状态</h2></div>
+      <div class="status-grid" id="geminiStatusGrid"></div>
+    </section>
+    <section class="profiles-section">
+      <h2 class="section-title" id="geminiProfilesSectionTitle">Gemini 配置列表</h2>
+      <div class="profiles-grid" id="geminiProfilesGrid"></div>
+    </section>
+  </div>
+  </div><!-- end pageGemini -->
 
-      <section class="console-page" id="pagePlugins" data-console-page-panel="plugins">
-        <header class="page-header">
-          <div><h1>插件市场</h1><p>安装、启用和修复 Codex 扩展能力。</p></div>
-          <div class="page-header-actions">
-            <button class="btn btn-primary" id="toolboxMarketApplyBtn" type="button">安装到 Codex</button>
-          </div>
-        </header>
-        <div class="filter-toolbar plugin-filter-toolbar">
-          <label class="search-field"><span>搜索</span><input id="pluginSearchInput" type="search" placeholder="搜索插件名称"></label>
-          <div class="segmented-filter" id="pluginFilter">
-            <button class="active" data-plugin-filter="all" type="button">全部</button>
-            <button data-plugin-filter="installed" type="button">已安装</button>
-            <button data-plugin-filter="enabled" type="button">已启用</button>
-            <button data-plugin-filter="repair" type="button">需要修复</button>
-          </div>
+      <section class="console-page active" id="pageAddProvider" data-console-page-panel="add-provider">
+        <div class="provider-onboarding">
+          <header class="page-header provider-onboarding-header">
+            <div><h1>添加统一供应商</h1><p>一次配置 API 网关，并同步到选中的应用。</p></div>
+          </header>
+          <form class="provider-builder" id="universalProviderForm">
+            <div class="provider-builder-section">
+              <div class="provider-builder-heading">
+                <div><h2>供应商预设</h2><p>与 cc-switch 一致，统一供应商从 NewAPI 或自定义网关开始。</p></div>
+              </div>
+              <div class="universal-provider-preset-grid" id="universalProviderPresetGrid" role="radiogroup" aria-label="供应商预设">
+                <button class="universal-provider-preset active" data-universal-preset="newapi" type="button" role="radio" aria-checked="true"><strong>NewAPI</strong><small>多协议统一 API 网关</small></button>
+                <button class="universal-provider-preset" data-universal-preset="custom_gateway" type="button" role="radio" aria-checked="false"><strong>自定义网关</strong><small>手动配置兼容服务</small></button>
+              </div>
+              <p class="provider-preset-hint" id="universalProviderPresetHint">支持 Anthropic、OpenAI 与多种兼容协议的统一 API 网关</p>
+            </div>
+            <div class="provider-builder-section">
+              <div class="provider-builder-heading">
+                <div><h2>连接信息</h2><p>所有选中的应用共用这组地址和密钥。</p></div>
+              </div>
+              <div class="universal-provider-fields">
+                <label class="form-group"><span>供应商名称</span><input id="universalProviderName" type="text" value="NewAPI" placeholder="例如：公司 NewAPI" required></label>
+                <div class="form-group">
+                  <div class="universal-label-row"><span>API 地址</span><button class="link-button" id="universalEndpointTestBtn" type="button">验证连接</button></div>
+                  <input id="universalProviderBaseUrl" type="url" placeholder="https://api.example.com" required>
+                </div>
+                <label class="form-group universal-api-key-field"><span>API Key</span><span class="input-with-action"><input id="universalProviderApiKey" type="password" placeholder="sk-..." autocomplete="off" required><button class="link-button" id="universalProviderApiKeyToggle" type="button">显示</button></span></label>
+                <div class="endpoint-results universal-endpoint-results" id="universalEndpointResults"></div>
+              </div>
+            </div>
+            <div class="provider-builder-section">
+              <div class="provider-builder-heading">
+                <div><h2>启用的应用</h2><p>保存后会生成对应配置，并在左侧显示栏目。</p></div>
+              </div>
+              <div class="universal-provider-apps" id="universalProviderApps">
+                <label class="universal-app-option"><span><img src="anthropic-color.svg" alt=""><span><strong>Claude Code</strong><small>Anthropic Messages</small></span></span><input data-universal-app="claude" type="checkbox" checked><i aria-hidden="true"></i></label>
+                <label class="universal-app-option"><span><img src="OpenAI-black-monoblossom.svg" alt=""><span><strong>Codex</strong><small>OpenAI Responses</small></span></span><input data-universal-app="codex" type="checkbox" checked><i aria-hidden="true"></i></label>
+                <label class="universal-app-option"><span><img src="grok-color.svg" alt=""><span><strong>Grok / xAI</strong><small>Chat / Responses / Messages</small></span></span><input data-universal-app="grok" type="checkbox" checked><i aria-hidden="true"></i></label>
+                <label class="universal-app-option"><span><img src="gemini-color.svg" alt=""><span><strong>Gemini</strong><small>Google Generative Language</small></span></span><input data-universal-app="gemini" type="checkbox" checked><i aria-hidden="true"></i></label>
+              </div>
+            </div>
+            <div class="provider-builder-section">
+              <div class="provider-builder-heading">
+                <div><h2>应用参数</h2><p>按应用设置协议与默认模型；验证连接后模型输入框支持自动补全，留空时由对应客户端决定。</p></div>
+              </div>
+              <datalist id="universalModelOptions"></datalist>
+              <div class="universal-provider-models">
+                <div class="universal-app-card" data-universal-app-card="claude">
+                  <div class="universal-app-card-head">
+                    <img src="anthropic-color.svg" alt="">
+                    <div><strong>Claude Code</strong><small>写入 ~/.claude/settings.json 与系统环境变量</small></div>
+                  </div>
+                  <label class="form-group"><span>API 格式</span>
+                    <select class="form-select" id="universalClaudeApiFormat">
+                      <option value="anthropic">Anthropic Messages（网关支持 Anthropic 协议）</option>
+                      <option value="openai_chat">OpenAI Chat Completions（经本地代理转换）</option>
+                    </select>
+                  </label>
+                  <label class="form-group"><span>默认模型</span><input id="universalClaudeModel" type="text" value="claude-sonnet-5" placeholder="claude-sonnet-5" list="universalModelOptions"></label>
+                  <p class="universal-app-card-hint" data-universal-url-preview="claude"></p>
+                </div>
+                <div class="universal-app-card" data-universal-app-card="codex">
+                  <div class="universal-app-card-head">
+                    <img src="OpenAI-black-monoblossom.svg" alt="">
+                    <div><strong>Codex</strong><small>写入 ~/.codex/config.toml 的 wire_api 字段</small></div>
+                  </div>
+                  <label class="form-group"><span>上游协议</span>
+                    <select class="form-select" id="universalCodexWireApi">
+                      <option value="responses">OpenAI Responses（官方 / 兼容网关）</option>
+                      <option value="chat">OpenAI Chat Completions（DeepSeek、Kimi 等）</option>
+                    </select>
+                  </label>
+                  <label class="form-group"><span>默认模型</span><input id="universalCodexModel" type="text" value="gpt-5.5" placeholder="gpt-5.5" list="universalModelOptions"></label>
+                  <p class="universal-app-card-hint" data-universal-url-preview="codex"></p>
+                </div>
+                <div class="universal-app-card" data-universal-app-card="grok">
+                  <div class="universal-app-card-head">
+                    <img src="grok-color.svg" alt="">
+                    <div><strong>Grok / xAI</strong><small>写入 ~/.grok/config.toml 的 api_backend 字段</small></div>
+                  </div>
+                  <label class="form-group"><span>API Backend</span>
+                    <select class="form-select" id="universalGrokApiBackend">
+                      <option value="chat_completions">chat_completions（默认）</option>
+                      <option value="responses">responses</option>
+                      <option value="messages">messages（Anthropic）</option>
+                    </select>
+                  </label>
+                  <label class="form-group"><span>默认模型</span><input id="universalGrokModel" type="text" value="grok-4" placeholder="grok-4" list="universalModelOptions"></label>
+                  <p class="universal-app-card-hint" data-universal-url-preview="grok"></p>
+                </div>
+                <div class="universal-app-card" data-universal-app-card="gemini">
+                  <div class="universal-app-card-head">
+                    <img src="gemini-color.svg" alt="">
+                    <div><strong>Gemini</strong><small>Generative Language · 写入 GOOGLE_GEMINI_BASE_URL</small></div>
+                  </div>
+                  <label class="form-group"><span>默认模型</span><input id="universalGeminiModel" type="text" value="gemini-2.5-pro" placeholder="gemini-2.5-pro" list="universalModelOptions"></label>
+                  <p class="universal-app-card-hint" data-universal-url-preview="gemini"></p>
+                </div>
+              </div>
+            </div>
+            <footer class="provider-builder-footer">
+              <p class="provider-footer-hint" id="universalProviderFooterHint">将同步到 Claude、Codex、Grok、Gemini</p>
+              <div class="provider-builder-actions"><button class="btn btn-secondary" id="universalProviderResetBtn" type="button">重置</button><button class="btn btn-primary" id="universalProviderSubmitBtn" type="submit">添加并同步</button></div>
+            </footer>
+          </form>
         </div>
-        <div class="tool-page-host plugin-market-host" id="pluginPageHost"></div>
       </section>
 
-      <section class="console-page" id="pageSessions" data-console-page-panel="sessions">
-        <header class="page-header"><div><h1>会话同步</h1><p>同步、搜索和管理本地 Codex 会话。</p></div>
+      <section class="console-page" id="pageCodexToolbox" data-console-page-panel="toolbox">
+        <header class="page-header"><div><h1>Codex Toolbox</h1><p>同步 Codex 会话，并配置手机端远程控制。</p></div></header>
+        <div class="tool-page-host toolbox-page-host" id="toolboxPageHost"></div>
+      </section>
+
+      <section class="console-page" id="pageDeveloperTools" data-console-page-panel="developer-tools">
+        <header class="page-header"><div><h1>Claude Toolbox</h1><p>管理 Claude Code 的 Skills、Prompts 与 MCP Servers。</p></div></header>
+        <div class="developer-tools-tabs" role="tablist" aria-label="Claude Toolbox">
+          <button class="developer-tools-tab active" id="developerToolsSkillsTab" data-developer-tool="skills" type="button" role="tab" aria-selected="true" aria-controls="developerToolSkillsContent">Skills</button>
+          <button class="developer-tools-tab" id="developerToolsPromptsTab" data-developer-tool="prompts" type="button" role="tab" aria-selected="false" aria-controls="developerToolPromptsContent">Prompts</button>
+          <button class="developer-tools-tab" id="developerToolsMcpTab" data-developer-tool="mcp" type="button" role="tab" aria-selected="false" aria-controls="developerToolMcpContent">MCP Servers</button>
+        </div>
+        <div class="developer-tools-workspace">
+          <div class="developer-tool-surface" id="developerToolSkillsContent" role="tabpanel" aria-labelledby="developerToolsSkillsTab"></div>
+          <div class="developer-tool-surface" id="developerToolPromptsContent" role="tabpanel" aria-labelledby="developerToolsPromptsTab" hidden></div>
+          <div class="developer-tool-surface" id="developerToolMcpContent" role="tabpanel" aria-labelledby="developerToolsMcpTab" hidden></div>
+        </div>
+      </section>
+
+      <section class="console-page" id="pageUsage" data-console-page-panel="usage">
+        <header class="page-header">
+          <div><h1 id="usagePageTitle">用量监控</h1><p id="usagePageSubtitle">统计 Claude Code、Codex、Gemini CLI、Grok CLI 的本地会话用量与成本。</p></div>
           <div class="page-header-actions">
-            <button class="btn btn-primary" id="sessionPageSyncBtn" type="button">立即同步</button>
+            <button class="btn btn-secondary" id="usageRefreshBtn" type="button">刷新</button>
           </div>
         </header>
-        <section class="console-card" id="sessionStatusCard">
-          <div class="console-card-header"><div><h2>同步状态</h2><p id="sessionStatusSummary">尚未同步</p></div></div>
-          <div class="session-status-metrics" id="sessionStatusMetrics"></div>
-        </section>
-        <div class="tool-page-host" id="sessionPageHost"></div>
-      </section>
 
-      <section class="console-page" id="pageMobile" data-console-page-panel="mobile">
-        <header class="page-header"><div><h1>手机控制</h1><p>绑定消息平台、选择会话并开启远程监听。</p></div></header>
-        <section class="console-card mobile-flow-card">
-          <div class="console-card-header"><div><h2>工作流程</h2><p>绑定应用 → 选择会话 → 开启监听 → 等待消息</p></div></div>
-          <ol class="mobile-timeline" id="mobileTimeline">
-            <li data-step="bind"><strong>绑定应用</strong><small>微信 / 飞书 / QQ</small></li>
-            <li data-step="session"><strong>选择控制会话</strong><small>指定 Codex 会话</small></li>
-            <li data-step="listen"><strong>开启平台连接</strong><small>开始监听手机消息</small></li>
-            <li data-step="wait"><strong>等待手机消息</strong><small>消息将转发到 Codex</small></li>
-          </ol>
-        </section>
-        <div class="tool-page-host" id="mobilePageHost"></div>
+        <div class="usage-filters">
+          <div class="seg-control usage-range-seg" id="usageRangeSeg">
+            <button type="button" data-usage-range="today">今天</button>
+            <button type="button" data-usage-range="1d">24 小时</button>
+            <button type="button" data-usage-range="7d" class="active">近 7 天</button>
+            <button type="button" data-usage-range="14d">近 14 天</button>
+            <button type="button" data-usage-range="30d">近 30 天</button>
+            <button type="button" data-usage-range="all">全部</button>
+            <button type="button" data-usage-range="custom">自定义</button>
+          </div>
+          <div class="seg-control usage-app-seg" id="usageAppSeg">
+            <button type="button" data-usage-app="all" class="active">全部应用</button>
+            <button type="button" data-usage-app="claude">Claude</button>
+            <button type="button" data-usage-app="codex">Codex</button>
+            <button type="button" data-usage-app="gemini">Gemini</button>
+            <button type="button" data-usage-app="grok">Grok</button>
+          </div>
+          <select class="form-select usage-model-select" id="usageModelFilter">
+            <option value="all">全部模型</option>
+          </select>
+        </div>
+
+        <div class="usage-custom-range" id="usageCustomRange" hidden>
+          <label class="usage-custom-field">
+            <span id="usageCustomStartLabel">开始时间</span>
+            <input type="datetime-local" id="usageCustomStart">
+          </label>
+          <span class="usage-custom-sep" aria-hidden="true">→</span>
+          <label class="usage-custom-field">
+            <span id="usageCustomEndLabel">结束时间</span>
+            <input type="datetime-local" id="usageCustomEnd">
+          </label>
+          <label class="usage-custom-live">
+            <input type="checkbox" id="usageCustomLiveEnd" checked>
+            <span id="usageCustomLiveEndLabel">结束取当前时间</span>
+          </label>
+          <button class="btn btn-primary btn-sm" id="usageCustomApplyBtn" type="button">应用</button>
+        </div>
+
+        <div class="usage-context-bar">
+          <span class="usage-range-note" id="usageRangeNote"></span>
+          <span class="usage-loading-chip" id="usageLoadingChip" hidden>
+            <span class="usage-spinner"></span>
+            <span id="usageLoadingChipText">正在扫描会话日志…</span>
+          </span>
+        </div>
+
+        <div class="usage-error" id="usageError" hidden></div>
+
+        <div class="usage-skeleton" id="usageSkeleton" hidden aria-hidden="true">
+          <div class="usage-skeleton-grid">
+            <div class="usage-skeleton-block"></div>
+            <div class="usage-skeleton-block"></div>
+            <div class="usage-skeleton-block"></div>
+            <div class="usage-skeleton-block"></div>
+          </div>
+          <div class="usage-skeleton-block usage-skeleton-chart"></div>
+          <div class="usage-skeleton-block usage-skeleton-table"></div>
+        </div>
+
+        <div class="usage-body" id="usageBody" hidden>
+          <div class="usage-hero-grid" id="usageHeroGrid"></div>
+
+          <section class="usage-section">
+            <div class="section-header-row">
+              <h2 class="section-title" id="usageTrendTitle">成本趋势</h2>
+              <span class="usage-section-hint" id="usageTrendHint"></span>
+            </div>
+            <div class="usage-trend-card console-card">
+              <div class="usage-trend-chart" id="usageTrendChart"></div>
+              <div class="usage-trend-footer" id="usageTrendFooter"></div>
+            </div>
+          </section>
+
+          <section class="usage-section">
+            <div class="section-header-row">
+              <h2 class="section-title" id="usageAppsTitle">按应用</h2>
+              <span class="usage-section-hint" id="usageAppsHint"></span>
+            </div>
+            <div class="usage-app-grid" id="usageAppGrid"></div>
+          </section>
+
+          <section class="usage-section">
+            <div class="section-header-row">
+              <h2 class="section-title" id="usageModelsTitle">模型统计</h2>
+              <span class="usage-section-hint" id="usageModelsHint"></span>
+            </div>
+            <div class="usage-table-card console-card">
+              <table class="usage-table" id="usageModelTable">
+                <thead><tr>
+                  <th id="usageThModel">模型</th><th id="usageThApp2">应用</th><th id="usageThRequests">请求数</th><th id="usageThTotalTokens">Tokens</th><th id="usageThCacheHit">缓存命中</th><th id="usageThCost">成本 (USD)</th><th id="usageThShare">成本占比</th>
+                </tr></thead>
+                <tbody id="usageModelTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="usage-section">
+            <div class="section-header-row">
+              <h2 class="section-title" id="usageRecentTitle">最近记录</h2>
+              <span class="usage-section-hint" id="usageRecentHint"></span>
+            </div>
+            <div class="usage-table-card console-card">
+              <table class="usage-table" id="usageRecentTable">
+                <thead><tr>
+                  <th id="usageThTime">时间</th><th id="usageThApp">应用</th><th id="usageThRecentModel">模型</th><th id="usageThTokens">Tokens</th><th id="usageThRecentCost">成本 (USD)</th>
+                </tr></thead>
+                <tbody id="usageRecentTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <p class="usage-meta" id="usageMetaLine"></p>
+        </div>
+
+        <div class="usage-empty" id="usageEmpty" hidden>
+          <img src="icon-usage.svg" alt="" class="usage-empty-icon">
+          <p class="usage-empty-title" id="usageEmptyTitle">当前时间范围内没有用量</p>
+          <p id="usageEmptyText">暂无用量数据。使用 Claude Code / Codex / Gemini CLI / Grok CLI 后，这里会自动统计本地会话日志。</p>
+        </div>
       </section>
 
       <section class="console-page" id="pageSettings" data-console-page-panel="settings">
@@ -345,14 +451,6 @@
           <button class="quick-action" id="settingsDownloadBtn" type="button"><img src="icon-download.svg" alt=""><span><strong>下载网站</strong><small>打开版本下载页面</small></span></button>
           <button class="quick-action" id="settingsGithubBtn" type="button"><img src="icon-github.svg" alt=""><span><strong>GitHub 仓库</strong><small>查看源码与问题反馈</small></span></button>
         </div>
-        <section class="console-card settings-tools-card">
-          <div class="console-card-header"><div><h2>开发工具</h2><p>管理 Claude Code 的扩展能力与本地配置。</p></div></div>
-          <div class="settings-help-grid settings-tools-grid">
-            <button class="quick-action" id="settingsSkillsBtn" type="button"><img src="icon-toolbox.svg" alt=""><span><strong>Skills</strong><small>管理命令、技能与技能仓库</small></span></button>
-            <button class="quick-action" id="settingsPromptsBtn" type="button"><img src="icon-guide.svg" alt=""><span><strong>Prompts</strong><small>编辑 CLAUDE.md 与提示词模板</small></span></button>
-            <button class="quick-action" id="settingsMcpBtn" type="button"><img src="icon-update.svg" alt=""><span><strong>MCP Servers</strong><small>管理 Claude MCP 服务配置</small></span></button>
-          </div>
-        </section>
         <div class="tool-page-host settings-page-host" id="settingsPageHost"></div>
       </section>
 </main>
@@ -362,7 +460,7 @@
       <div class="control-hero-main">
         <div class="control-kicker">Unified Control Center</div>
         <h1>VarSwitch Console</h1>
-        <p>集中管理 Claude Code、Codex CLI、插件市场、移动端控制与诊断状态。</p>
+        <p>集中管理 Claude Code、Codex、移动端控制与诊断状态。</p>
       </div>
       <div class="control-hero-actions control-command-grid console-command-grid">
         <button class="command-tile" id="usageGuideBtn" type="button">
@@ -399,7 +497,7 @@
         <span class="page-tab-icon page-tab-icon-codex" aria-hidden="true">
           <img src="OpenAI-black-monoblossom.svg" width="15" height="15" alt="">
         </span>
-        <span>Codex CLI</span>
+        <span>Codex</span>
       </button>
       <button class="page-tab" data-page="grok" type="button">
         <span class="page-tab-icon page-tab-icon-grok" aria-hidden="true">
@@ -421,22 +519,37 @@
       <form id="profileForm">
         <input type="hidden" id="profileId">
         <div class="form-group">
+          <label id="profilePresetLabel" for="profilePresetSelect">供应商预设</label>
+          <select class="form-select" id="profilePresetSelect">
+            <option value="">自定义</option>
+          </select>
+          <small id="profilePresetHint" class="form-hint"></small>
+        </div>
+        <div class="form-group">
+          <label id="profileApiFormatLabel" for="profileApiFormat">API 格式</label>
+          <select class="form-select" id="profileApiFormat">
+            <option value="anthropic">Anthropic Messages（默认直连）</option>
+            <option value="openai_chat">OpenAI Chat Completions（经本地代理转换）</option>
+          </select>
+          <small id="profileApiFormatHint" class="form-hint">上游仅提供 OpenAI 接口时选第二项：请求经 127.0.0.1:25789 本地代理转换协议，需保持 VarSwitch 运行。</small>
+        </div>
+        <div class="form-group">
           <label id="profileNameLabel" for="profileName">Config Name</label>
           <input type="text" id="profileName" required placeholder="e.g. Production">
         </div>
         <div class="form-group">
           <label id="profileApiKeyLabel" for="profileApiKey">API Key</label>
-          <input type="text" id="profileApiKey" required placeholder="sk-...">
+          <input type="password" id="profileApiKey" required placeholder="sk-..." autocomplete="off" spellcheck="false">
         </div>
         <div class="form-group">
           <div class="form-label-row">
             <label id="profileBaseUrlLabel" for="profileBaseUrl">Base URL</label>
             <div class="form-label-actions">
-              <button class="link-button" id="profileModelFetchBtn" type="button">Fetch Models</button>
-              <button class="link-button" id="profileEndpointTestBtn" type="button">Test Speed</button>
+              <button class="link-button" id="profileModelFetchBtn" type="button">获取模型</button>
+              <button class="link-button" id="profileEndpointTestBtn" type="button">验证连接</button>
             </div>
           </div>
-          <input type="text" id="profileBaseUrl" required placeholder="https://api.example.com">
+          <input type="text" id="profileBaseUrl" placeholder="留空使用官方地址 https://api.anthropic.com">
           <div class="endpoint-results" id="profileEndpointResults"></div>
         </div>
         <div class="form-group">
@@ -461,35 +574,50 @@
       </div>
       <form id="codexProfileForm">
         <input type="hidden" id="codexProfileId">
-        <div class="wizard-stepper" id="codexWizardStepper" aria-label="配置步骤">
-          <button type="button" class="wizard-step-indicator active" data-wizard-step="1">1 预设</button>
-          <button type="button" class="wizard-step-indicator" data-wizard-step="2">2 写入方式</button>
-          <button type="button" class="wizard-step-indicator" data-wizard-step="3">3 连接信息</button>
-          <button type="button" class="wizard-step-indicator" data-wizard-step="4">4 测试</button>
-          <button type="button" class="wizard-step-indicator" data-wizard-step="5">5 保存</button>
+        <div class="form-group">
+          <label id="codexPresetLabel" for="codexPresetSelect">供应商预设</label>
+          <select class="form-select" id="codexPresetSelect">
+            <option value="">自定义</option>
+          </select>
+          <small id="codexPresetHint" class="form-hint"></small>
         </div>
-
-        <div class="wizard-step-panel active" data-wizard-panel="1">
-          <div class="wizard-step-heading">
-            <h3 id="codexWizardStep1Title">选择配置预设</h3>
-            <p id="codexWizardStep1Desc">预设会自动填充 Base URL、Provider 与默认模型，之后仍可修改。</p>
-          </div>
-          <div class="form-group">
-            <label id="codexPresetLabel" for="codexPresetSelect">Preset</label>
-            <select class="form-select" id="codexPresetSelect">
-              <option value="">Custom</option>
-            </select>
-            <small id="codexPresetHint" class="form-hint"></small>
-          </div>
+        <div class="form-group">
+          <label id="codexWireApiLabel" for="codexWireApi">上游协议</label>
+          <select class="form-select" id="codexWireApi">
+            <option value="responses">OpenAI Responses（官方 / 兼容网关）</option>
+            <option value="chat">OpenAI Chat Completions（DeepSeek、Kimi 等）</option>
+          </select>
+          <small id="codexWireApiHint" class="form-hint">写入 ~/.codex/config.toml 的 wire_api 字段；选择预设时自动匹配。</small>
         </div>
-
-        <div class="wizard-step-panel" data-wizard-panel="2">
-          <div class="wizard-step-heading">
-            <h3 id="codexWizardStep2Title">选择写入方式</h3>
-            <p id="codexWizardStep2Desc">决定配置如何落到本机 Codex 文件中。</p>
+        <div class="form-group">
+          <label id="codexNameLabel" for="codexProfileName">配置名称</label>
+          <input type="text" id="codexProfileName" required placeholder="e.g. Production">
+        </div>
+        <div class="form-group">
+          <label id="codexApiKeyLabel" for="codexApiKey">API Key</label>
+          <input type="password" id="codexApiKey" required placeholder="sk-..." autocomplete="off">
+          <button class="link-button" id="codexApiKeyToggle" type="button">显示</button>
+        </div>
+        <div class="form-group">
+          <div class="form-label-row">
+            <label id="codexBaseUrlLabel" for="codexBaseUrl">Base URL</label>
+            <div class="form-label-actions">
+              <button class="link-button" id="codexModelFetchBtn" type="button">获取模型</button>
+              <button class="link-button" id="codexEndpointTestBtn" type="button">验证连接</button>
+            </div>
           </div>
+          <input type="text" id="codexBaseUrl" placeholder="留空使用官方地址 https://api.openai.com/v1">
+          <div class="endpoint-results" id="codexEndpointResults"></div>
+        </div>
+        <div class="form-group">
+          <label id="codexModelLabel" for="codexModel">Model</label>
+          <input type="text" id="codexModel" placeholder="e.g. gpt-5.5">
+          <div class="model-results" id="codexModelResults"></div>
+        </div>
+        <details class="form-section compact" id="codexAdvancedSection">
+          <summary id="codexAdvancedTitle">高级选项</summary>
           <div class="form-group">
-            <label id="codexAuthModeLabel">Write Mode</label>
+            <label id="codexAuthModeLabel">写入方式</label>
             <div class="radio-card-grid">
               <label class="radio-card">
                 <input type="radio" name="codexAuthMode" id="codexAuthModeDefault" value="auth_json" checked>
@@ -514,53 +642,19 @@
               </label>
             </div>
           </div>
-        </div>
-
-        <div class="wizard-step-panel" data-wizard-panel="3">
-          <div class="wizard-step-heading">
-            <h3 id="codexWizardStep3Title">填写连接信息</h3>
-            <p id="codexWizardStep3Desc">配置名称与 Base URL 必填；API Key 根据写入方式校验。</p>
+          <div class="form-group">
+            <label id="codexProviderLabel" for="codexProvider">Provider 标识</label>
+            <input type="text" id="codexProvider" placeholder="留空自动使用 custom">
+          </div>
+          <div class="form-section-title" id="codexImageSectionTitle">Codex Image Skill</div>
+          <small class="form-hint" id="codexImageSectionHint">Optional. Enabling this profile installs a local image-generation Skill. Restart Codex after switching.</small>
+          <div class="form-group">
+            <label id="codexImageApiKeyLabel" for="codexImageApiKey">Image API Key</label>
+            <input type="password" id="codexImageApiKey" placeholder="sk-..." autocomplete="off">
           </div>
           <div class="form-group">
-            <label id="codexNameLabel" for="codexProfileName">Config Name</label>
-            <input type="text" id="codexProfileName" required placeholder="e.g. Production">
-          </div>
-          <div class="form-group">
-            <label id="codexApiKeyLabel" for="codexApiKey">API Key</label>
-            <input type="password" id="codexApiKey" required placeholder="sk-..." autocomplete="off">
-            <button class="link-button" id="codexApiKeyToggle" type="button">显示</button>
-          </div>
-          <div class="form-group">
-            <div class="form-label-row">
-              <label id="codexBaseUrlLabel" for="codexBaseUrl">Base URL</label>
-              <div class="form-label-actions">
-                <button class="link-button" id="codexModelFetchBtn" type="button">Fetch Models</button>
-                <button class="link-button" id="codexEndpointTestBtn" type="button">Test Speed</button>
-              </div>
-            </div>
-            <input type="text" id="codexBaseUrl" required placeholder="https://api.example.com">
-            <div class="endpoint-results" id="codexEndpointResults"></div>
-          </div>
-          <div class="form-group">
-            <label id="codexModelLabel" for="codexModel">Model</label>
-            <input type="text" id="codexModel" placeholder="e.g. gpt-4o">
-            <div class="model-results" id="codexModelResults"></div>
-          </div>
-          <div class="form-group">
-            <label id="codexProviderLabel" for="codexProvider">Provider</label>
-            <input type="text" id="codexProvider" placeholder="e.g. custom">
-          </div>
-          <div class="form-section compact">
-            <div class="form-section-title" id="codexImageSectionTitle">GPT Image 2</div>
-            <small class="form-hint" id="codexImageSectionHint">Optional image-only API written to ~/.codex/config.toml.</small>
-            <div class="form-group">
-              <label id="codexImageApiKeyLabel" for="codexImageApiKey">Image API Key</label>
-              <input type="password" id="codexImageApiKey" placeholder="sk-..." autocomplete="off">
-            </div>
-            <div class="form-group">
-              <label id="codexImageBaseUrlLabel" for="codexImageBaseUrl">Image Base URL</label>
-              <input type="text" id="codexImageBaseUrl" placeholder="https://hk.getelucid.com/v1">
-            </div>
+            <label id="codexImageBaseUrlLabel" for="codexImageBaseUrl">Image Base URL</label>
+            <input type="text" id="codexImageBaseUrl" placeholder="URL">
           </div>
           <div class="form-group" id="codexOfficialConfigGroup" style="display:none;">
             <div class="form-label-row">
@@ -569,40 +663,11 @@
             </div>
             <textarea class="config-preview" id="codexOfficialConfig" rows="8" readonly></textarea>
           </div>
-        </div>
-
-        <div class="wizard-step-panel" data-wizard-panel="4">
-          <div class="wizard-step-heading">
-            <h3 id="codexWizardStep4Title">测试连接</h3>
-            <p id="codexWizardStep4Desc">检查 API Key 格式、Base URL 可访问性与模型可用性。</p>
-          </div>
-          <div class="wizard-test-list" id="codexWizardTestList">
-            <div class="wizard-test-row"><span>API Key 格式</span><span class="status-badge-console" id="codexTestKey">待检测</span></div>
-            <div class="wizard-test-row"><span>Base URL 连接</span><span class="status-badge-console" id="codexTestUrl">待检测</span></div>
-            <div class="wizard-test-row"><span>模型可用性</span><span class="status-badge-console" id="codexTestModel">待检测</span></div>
-            <div class="wizard-test-row"><span>配置文件权限</span><span class="status-badge-console" id="codexTestPerm">待检测</span></div>
-          </div>
-          <div class="form-actions" style="justify-content:flex-start;margin-top:14px;">
-            <button class="btn btn-secondary" id="codexWizardRunTestBtn" type="button">运行检测</button>
-          </div>
-        </div>
-
-        <div class="wizard-step-panel" data-wizard-panel="5">
-          <div class="wizard-step-heading">
-            <h3 id="codexWizardStep5Title">确认并保存</h3>
-            <p id="codexWizardStep5Desc">确认信息无误后保存，或保存并立即启用。</p>
-          </div>
-          <div class="wizard-review" id="codexWizardReview"></div>
-        </div>
-
-        <div class="wizard-form-actions">
-          <button type="button" class="btn btn-ghost" id="codexWizardBackBtn">上一步</button>
-          <div class="wizard-form-actions-right">
-            <button type="button" class="btn btn-secondary" id="codexCancelBtn">取消</button>
-            <button type="button" class="btn btn-primary" id="codexWizardNextBtn">下一步</button>
-            <button type="submit" class="btn btn-primary" id="codexSubmitBtn" style="display:none;">保存</button>
-            <button type="button" class="btn btn-primary" id="codexSaveEnableBtn" style="display:none;">保存并启用</button>
-          </div>
+        </details>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" id="codexCancelBtn">取消</button>
+          <button type="submit" class="btn btn-primary" id="codexSubmitBtn">保存</button>
+          <button type="button" class="btn btn-primary" id="codexSaveEnableBtn">保存并启用</button>
         </div>
       </form>
     </div>
@@ -629,17 +694,17 @@
         </div>
         <div class="form-group">
           <label id="grokApiKeyLabel" for="grokApiKey">API Key</label>
-          <input type="text" id="grokApiKey" required placeholder="xai-...">
+          <input type="password" id="grokApiKey" required placeholder="xai-..." autocomplete="off" spellcheck="false">
         </div>
         <div class="form-group">
           <div class="form-label-row">
             <label id="grokBaseUrlLabel" for="grokBaseUrl">Base URL</label>
             <div class="form-label-actions">
-              <button class="link-button" id="grokModelFetchBtn" type="button">Fetch Models</button>
-              <button class="link-button" id="grokEndpointTestBtn" type="button">Test Speed</button>
+              <button class="link-button" id="grokModelFetchBtn" type="button">获取模型</button>
+              <button class="link-button" id="grokEndpointTestBtn" type="button">验证连接</button>
             </div>
           </div>
-          <input type="text" id="grokBaseUrl" required placeholder="https://api.x.ai/v1">
+          <input type="text" id="grokBaseUrl" placeholder="留空使用官方地址 https://api.x.ai/v1">
           <div class="endpoint-results" id="grokEndpointResults"></div>
         </div>
         <div class="form-group">
@@ -665,6 +730,23 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="geminiModalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="geminiModalTitle">添加 Gemini 配置</h2>
+        <button class="modal-close" id="geminiModalClose" type="button">&times;</button>
+      </div>
+      <form id="geminiProfileForm">
+        <input type="hidden" id="geminiProfileId">
+        <div class="form-group"><label for="geminiProfileName">配置名称</label><input type="text" id="geminiProfileName" required placeholder="例如：公司 Gemini 网关"></div>
+        <div class="form-group"><label for="geminiApiKey">Gemini API Key</label><input type="password" id="geminiApiKey" required placeholder="AIza..." autocomplete="off"></div>
+        <div class="form-group"><div class="form-label-row"><label for="geminiBaseUrl">Base URL</label><div class="form-label-actions"><button class="link-button" id="geminiModelFetchBtn" type="button">获取模型</button><button class="link-button" id="geminiEndpointTestBtn" type="button">验证连接</button></div></div><input type="text" id="geminiBaseUrl" placeholder="留空使用官方地址 https://generativelanguage.googleapis.com"><div class="endpoint-results" id="geminiEndpointResults"></div></div>
+        <div class="form-group"><label for="geminiModel">模型</label><input type="text" id="geminiModel" placeholder="例如：gemini-2.5-pro"><div class="model-results" id="geminiModelResults"></div></div>
+        <div class="form-actions"><button type="button" class="btn btn-secondary" id="geminiCancelBtn">取消</button><button type="submit" class="btn btn-primary" id="geminiSubmitBtn">保存</button></div>
+      </form>
+    </div>
+  </div>
+
   <div class="mgmt-overlay" id="codexToolboxOverlay">
     <div class="mgmt-panel mgmt-panel-wide codex-toolbox-panel">
       <div class="mgmt-header">
@@ -672,49 +754,20 @@
         <button class="modal-close" id="codexToolboxClose" type="button">&times;</button>
       </div>
 
-      <div class="skills-tabs">
-        <button class="skills-tab active" id="toolboxTabMarket" type="button">Plugin Market</button>
-        <button class="skills-tab" id="toolboxTabSession" type="button">Session Sync</button>
-        <button class="skills-tab" id="toolboxTabRemote" type="button">Mobile Control</button>
+      <div class="skills-tabs" id="toolboxPageTabs" role="tablist" aria-label="Codex Toolbox">
+        <button class="skills-tab active" id="toolboxTabSession" type="button" role="tab" aria-selected="true" aria-controls="toolboxSessionContent">Session Sync</button>
+        <button class="skills-tab" id="toolboxTabRemote" type="button" role="tab" aria-selected="false" aria-controls="toolboxRemoteContent">Mobile Control</button>
       </div>
 
-      <div class="skills-tab-content" id="toolboxMarketContent">
-        <div class="mgmt-hint" id="toolboxMarketHint">Manage the Codex plugin marketplace source persisted in `~/.codex/config.toml`.</div>
-        <div class="form-group">
-          <label id="toolboxMarketInputLabel" for="toolboxMarketplaceInput">Marketplace Source</label>
-          <select class="form-select" id="toolboxMarketplaceInput"></select>
-          <div class="form-hint" id="toolboxMarketplaceDesc"></div>
-        </div>
-        <div class="toolbox-market-progress" id="toolboxMarketProgress" hidden>
-          <div class="switch-progress-track">
-            <div class="switch-progress-bar" id="toolboxMarketProgressBar"></div>
-          </div>
-          <div class="switch-progress-meta">
-            <div class="switch-step-label" id="toolboxMarketProgressLabel">Preparing...</div>
-            <div class="switch-progress-percent" id="toolboxMarketProgressPercent">0%</div>
-          </div>
-        </div>
-        <div class="builtin-plugin-panel" id="builtinPluginPanel">
-          <div class="builtin-plugin-header">
-            <div>
-              <div class="builtin-plugin-kicker">Codex App Built-ins</div>
-              <h3>Computer Use / Chrome 插件修复</h3>
-              <p>自动发现 Codex App 自带 openai-bundled 插件，挂载本地市场并启用关键能力。</p>
-            </div>
-            <div class="builtin-plugin-actions">
-              <button class="btn btn-secondary btn-sm" id="builtinPluginRepairBtn" type="button">修复内置市场</button>
-              <button class="btn btn-primary btn-sm" id="builtinPluginEnableImportantBtn" type="button">启用关键插件</button>
-            </div>
-          </div>
-          <div class="builtin-plugin-summary" id="builtinPluginSummary">--</div>
-          <div class="builtin-plugin-list" id="builtinPluginList"></div>
-        </div>
-      </div>
-
-      <div class="skills-tab-content" id="toolboxSessionContent" style="display:none;">
+      <div class="skills-tab-content" id="toolboxSessionContent" role="tabpanel" aria-labelledby="toolboxTabSession">
         <div class="mgmt-hint" id="toolboxSessionHint">Sync local Codex history records into VarSwitch.</div>
+        <section class="console-card" id="sessionStatusCard">
+          <div class="console-card-header"><div><h2>同步状态</h2><p id="sessionStatusSummary">尚未同步</p></div></div>
+          <div class="session-status-metrics" id="sessionStatusMetrics"></div>
+        </section>
         <div class="toolbox-sync-bar">
           <div class="settings-row-value" id="toolboxSessionSummary">--</div>
+          <button class="btn btn-primary" id="sessionPageSyncBtn" type="button">立即同步</button>
         </div>
         <div class="toolbox-session-progress" id="toolboxSessionProgress" hidden>
           <div class="switch-progress-track">
@@ -754,8 +807,17 @@
         <div class="mgmt-body" id="toolboxSyncedThreadsList"></div>
       </div>
 
-      <div class="skills-tab-content" id="toolboxRemoteContent" style="display:none;">
+      <div class="skills-tab-content" id="toolboxRemoteContent" role="tabpanel" aria-labelledby="toolboxTabRemote" style="display:none;">
         <div class="mgmt-hint" id="toolboxRemoteHint">Choose an app, finish binding, select a Codex conversation, then start listening.</div>
+        <section class="console-card mobile-flow-card">
+          <div class="console-card-header"><div><h2>工作流程</h2><p>绑定应用 → 选择会话 → 开启监听 → 等待消息</p></div></div>
+          <ol class="mobile-timeline" id="mobileTimeline">
+            <li data-step="bind"><strong>绑定应用</strong><small>微信 / 飞书 / QQ</small></li>
+            <li data-step="session"><strong>选择控制会话</strong><small>指定 Codex 会话</small></li>
+            <li data-step="listen"><strong>开启平台连接</strong><small>开始监听手机消息</small></li>
+            <li data-step="wait"><strong>等待手机消息</strong><small>消息将转发到 Codex</small></li>
+          </ol>
+        </section>
         <div class="toolbox-mobile-grid">
           <div class="toolbox-mobile-controls">
             <div class="form-group">
@@ -1043,8 +1105,11 @@
                 <div class="settings-row-label" id="settingsConfigDirLabel">Config directory</div>
                 <div class="settings-row-value" id="settingsConfigDirValue">--</div>
               </div>
-              <div class="settings-row-action">
-                <button class="btn btn-secondary btn-sm" id="settingsOpenConfigDir" type="button">Open</button>
+              <div class="settings-row-action settings-path-actions">
+                <button class="copy-btn settings-path-copy" data-settings-copy-path="configDir" type="button" title="复制路径" aria-label="复制路径">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                </button>
+                <button class="btn btn-secondary btn-sm" id="settingsOpenConfigDir" type="button">打开</button>
               </div>
             </div>
             <div class="settings-row">
@@ -1052,8 +1117,11 @@
                 <div class="settings-row-label" id="settingsClaudePathLabel">Claude settings</div>
                 <div class="settings-row-value" id="settingsClaudePathValue">--</div>
               </div>
-              <div class="settings-row-action">
-                <button class="btn btn-secondary btn-sm" id="settingsOpenClaudeDir" type="button">Open</button>
+              <div class="settings-row-action settings-path-actions">
+                <button class="copy-btn settings-path-copy" data-settings-copy-path="claudeSettings" type="button" title="复制路径" aria-label="复制路径">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                </button>
+                <button class="btn btn-secondary btn-sm" id="settingsOpenClaudeDir" type="button">打开</button>
               </div>
             </div>
             <div class="settings-row">
@@ -1061,8 +1129,11 @@
                 <div class="settings-row-label" id="settingsCodexPathLabel">Codex settings</div>
                 <div class="settings-row-value" id="settingsCodexPathValue">--</div>
               </div>
-              <div class="settings-row-action">
-                <button class="btn btn-secondary btn-sm" id="settingsOpenCodexDir" type="button">Open</button>
+              <div class="settings-row-action settings-path-actions">
+                <button class="copy-btn settings-path-copy" data-settings-copy-path="codexSettings" type="button" title="复制路径" aria-label="复制路径">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                </button>
+                <button class="btn btn-secondary btn-sm" id="settingsOpenCodexDir" type="button">打开</button>
               </div>
             </div>
             <div class="settings-row">
@@ -1071,7 +1142,7 @@
                 <div class="settings-row-value" id="settingsLogsValue">出现问题时可打开日志文件夹查看或反馈</div>
               </div>
               <div class="settings-row-action">
-                <button class="btn btn-secondary btn-sm" id="settingsOpenLogsDir" type="button">Open</button>
+                <button class="btn btn-secondary btn-sm" id="settingsOpenLogsDir" type="button">打开</button>
               </div>
             </div>
             <!-- 动态编辑器路径列表 -->
@@ -1083,21 +1154,27 @@
         <div class="settings-group">
           <div class="settings-group-title" id="settingsGroupBackup">Backup</div>
           <div class="settings-group-items">
-            <div class="settings-backup-actions">
-              <button class="btn btn-secondary" id="settingsExportBtn" type="button">Export Profiles</button>
-              <button class="btn btn-secondary" id="settingsImportBtn" type="button">Import Profiles</button>
+            <div class="settings-row settings-backup-config-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label" id="settingsManualBackupLabel">手动配置备份</div>
+                <div class="settings-row-desc" id="settingsManualBackupDesc">导入与导出当前的所有配置</div>
+              </div>
+              <div class="settings-row-action settings-compact-actions">
+                <button class="btn btn-secondary btn-sm" id="settingsExportBtn" type="button">导出配置</button>
+                <button class="btn btn-secondary btn-sm" id="settingsImportBtn" type="button">导入配置</button>
+              </div>
             </div>
-            <div class="settings-row" style="margin-top:8px">
+            <div class="settings-row">
               <div class="settings-row-info">
                 <div class="settings-row-label" id="settingsAutoBackupLabel">自动备份</div>
                 <div class="settings-row-value" id="settingsAutoBackupDesc">每次切换配置前自动快照，误操作可回滚</div>
               </div>
-              <div class="settings-row-action" style="display:flex;gap:8px">
+              <div class="settings-row-action settings-compact-actions">
                 <button class="btn btn-secondary btn-sm" id="settingsViewBackupsBtn" type="button">回滚</button>
-                <button class="btn btn-secondary btn-sm" id="settingsOpenBackupsBtn" type="button">Open</button>
+                <button class="btn btn-secondary btn-sm" id="settingsOpenBackupsBtn" type="button">打开</button>
               </div>
             </div>
-            <div id="settingsBackupList" style="display:none;margin-top:8px"></div>
+            <div id="settingsBackupList" style="display:none"></div>
           </div>
         </div>
       </div>
@@ -1126,7 +1203,7 @@
           <div class="guide-step-card">
             <div class="guide-step-index">2</div>
             <div>
-              <div class="guide-step-title" id="usageGuideStep2Title">Codex CLI configs</div>
+              <div class="guide-step-title" id="usageGuideStep2Title">Codex configs</div>
               <div class="guide-step-desc" id="usageGuideStep2Desc">Manage Codex API Key, Base URL, model, provider, auth mode, diagnostics, and runtime backups.</div>
             </div>
           </div>
@@ -1134,7 +1211,7 @@
             <div class="guide-step-index">3</div>
             <div>
               <div class="guide-step-title" id="usageGuideStep3Title">Codex Toolbox</div>
-              <div class="guide-step-desc" id="usageGuideStep3Desc">Install plugin marketplaces, repair bundled plugins, sync Codex sessions, and bind mobile control.</div>
+              <div class="guide-step-desc" id="usageGuideStep3Desc">Sync Codex sessions and bind mobile control.</div>
             </div>
           </div>
           <div class="guide-step-card">
@@ -1182,24 +1259,6 @@
       <div class="form-actions">
         <button class="btn btn-secondary" id="appDialogCancel" type="button">取消</button>
         <button class="btn btn-primary" id="appDialogConfirm" type="button">确认</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="configTypeOverlay" role="presentation">
-    <div class="app-dialog config-type-dialog" role="dialog" aria-modal="true" aria-labelledby="configTypeTitle">
-      <div class="modal-header">
-        <div><div class="dialog-kicker">Configurations</div><h2 id="configTypeTitle">选择配置类型</h2></div>
-        <button class="modal-close" id="configTypeClose" type="button" aria-label="关闭">&times;</button>
-      </div>
-      <p class="app-dialog-message" id="configTypeMessage">选择要添加的配置类型。</p>
-      <div class="config-type-grid">
-        <button class="config-type-option" data-config-kind="claude" type="button"><img src="anthropic-color.svg" alt=""><span><strong>Claude Code</strong><small>环境变量、编辑器与 Claude 设置</small></span></button>
-        <button class="config-type-option" data-config-kind="codex" type="button"><img src="OpenAI-black-monoblossom.svg" alt=""><span><strong>Codex CLI</strong><small>Provider、模型与认证文件</small></span></button>
-        <button class="config-type-option" data-config-kind="grok" type="button"><img src="grok-color.svg" alt=""><span><strong>Grok / xAI</strong><small>API、Base URL 与默认模型</small></span></button>
-      </div>
-      <div class="form-actions">
-        <button class="btn btn-secondary" id="configTypeCancel" type="button">取消</button>
       </div>
     </div>
   </div>

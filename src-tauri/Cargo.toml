@@ -1,6 +1,6 @@
 [package]
 name = "varswitch"
-version = "2.3.10"
+version = "2.4.5"
 edition = "2021"
 
 [lib]
@@ -15,11 +15,15 @@ uuid = { version = "1", features = ["v4"] }
 sha1 = "0.10"
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
+# Claude 本地协议转换代理的 HTTP 服务器（同步模型，无 async 依赖）
+tiny_http = "0.12"
 tauri-plugin-dialog = "2"
 qrcode = "0.14"
 image = "0.25"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# 单实例：重复点击图标时聚焦已有窗口，而不是再启动一个进程
+tauri-plugin-single-instance = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

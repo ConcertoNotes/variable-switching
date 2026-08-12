@@ -8,6 +8,7 @@ set "BUILD_VERSION="
 set "NO_PAUSE=0"
 set "VERSION_STATE_FILE=.build-version"
 set "TAURI_ARGS="
+set "HAS_BUNDLE_ARG=0"
 
 :parse_args
 if "%~1"=="" goto :after_parse
@@ -57,12 +58,15 @@ if /I "%~1"=="--version" (
   shift
   goto :parse_args
 )
+if /I "%~1"=="--bundles" set "HAS_BUNDLE_ARG=1"
+if /I "%~1"=="-b" set "HAS_BUNDLE_ARG=1"
 set "TAURI_ARGS=!TAURI_ARGS! %~1"
 shift
 goto :parse_args
 
 :after_parse
 if "%SHOW_HELP%"=="1" goto :help
+if "%HAS_BUNDLE_ARG%"=="0" set "TAURI_ARGS=!TAURI_ARGS! --bundles nsis"
 
 pushd "%~dp0" >nul
 
@@ -197,12 +201,24 @@ if exist "app-icon.png" (
 )
 
 echo [3/4] Building Tauri bundle...
+set "TEMP=%CD%\src-tauri\target\build-temp"
+set "TMP=%TEMP%"
+if exist "%TEMP%" rmdir /s /q "%TEMP%" >nul 2>&1
+mkdir "%TEMP%" >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Failed to prepare build temporary directory:
+  echo         %TEMP%
+  goto :fail
+)
+echo       Build temporary directory: %TEMP%
 if exist "src-tauri\updater.key" (
   for /f "usebackq delims=" %%K in ("src-tauri\updater.key") do set "TAURI_SIGNING_PRIVATE_KEY=%%K"
   set "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=varswitch-updater"
 )
 call npm run tauri -- build!TAURI_ARGS!
-if errorlevel 1 (
+set "TAURI_EXIT=!ERRORLEVEL!"
+if exist "%TEMP%" rmdir /s /q "%TEMP%" >nul 2>&1
+if not "!TAURI_EXIT!"=="0" (
   echo [ERROR] Tauri build failed.
   goto :fail
 )
@@ -211,6 +227,20 @@ echo.
 echo Build completed. Artifacts are under:
 echo   src-tauri\target\release\bundle
 
+set "RECOMMENDED_INSTALLER="
+if exist "src-tauri\target\release\bundle\nsis" (
+  for /f "delims=" %%F in ('dir /b /s /o-d "src-tauri\target\release\bundle\nsis\VarSwitch_*_x64-setup.exe" 2^>nul') do (
+    if not defined RECOMMENDED_INSTALLER set "RECOMMENDED_INSTALLER=%%F"
+  )
+)
+if defined RECOMMENDED_INSTALLER (
+  echo.
+  echo Recommended installer:
+  echo   !RECOMMENDED_INSTALLER!
+)
+
+echo.
+echo All bundle files currently present ^(may include earlier builds^):
 for %%D in (appimage deb dmg msi nsis rpm app) do (
   if exist "src-tauri\target\release\bundle\%%D" (
     for /f "delims=" %%F in ('dir /b /s "src-tauri\target\release\bundle\%%D\*" 2^>nul') do echo   %%F
@@ -231,6 +261,7 @@ echo   build.bat --install
 echo   build.bat --patch
 echo   build.bat --version 1.2.3
 echo   build.bat --no-version-prompt
+echo   build.bat --bundles msi
 echo   build.bat --target x86_64-pc-windows-msvc
 echo.
 echo Options:
@@ -241,6 +272,7 @@ echo   --patch           Use current patch version + 1 without prompting.
 echo   --no-version-prompt
 echo                    Keep current version without prompting.
 echo   --no-pause       Do not pause when an error occurs.
+echo   --bundles type   Override the default Windows bundle type ^(nsis^).
 echo   -h, --help        Show this help.
 exit /b 0
 
