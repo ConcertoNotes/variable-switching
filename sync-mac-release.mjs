@@ -31,6 +31,12 @@ const MAC_TARGETS = [
   { platform: 'darwin-x86_64', arch: 'x64' },
 ];
 
+const DOWNLOAD_ATTEMPTS = 4;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function parseArgs(argv) {
   const options = { tag: '', repo: DEFAULT_REPO, host: 'local', token: process.env.GITHUB_TOKEN || '' };
   for (let i = 0; i < argv.length; i += 1) {
@@ -96,14 +102,35 @@ async function fetchRelease({ repo, tag, token }) {
   return response.json();
 }
 
+// 走代理下载 GitHub 资源时连接经常中途断开（Node 报 fetch failed）。
+// 一次抖动不该让整轮同步作废，因此这里对网络错误与 5xx 做重试；
+// 4xx 是权限或资源问题，重试没有意义，直接抛出。
 async function downloadAsset(asset, token) {
   const headers = { Accept: 'application/octet-stream', 'User-Agent': 'varswitch-sync' };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(asset.url, { headers, redirect: 'follow' });
-  if (!response.ok) {
-    throw new Error(`下载 ${asset.name} 失败: HTTP ${response.status}`);
+  const name = asset.label || asset.name;
+
+  let lastError;
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(asset.url, { headers, redirect: 'follow' });
+      if (!response.ok) {
+        const error = new Error(`下载 ${name} 失败: HTTP ${response.status}`);
+        if (response.status >= 400 && response.status < 500) error.fatal = true;
+        throw error;
+      }
+      return Buffer.from(await response.arrayBuffer());
+    } catch (error) {
+      if (error.fatal) throw error;
+      lastError = error;
+      if (attempt < DOWNLOAD_ATTEMPTS) {
+        const waitMs = attempt * 2000;
+        console.warn(`  ${name} 第 ${attempt} 次下载失败（${error.message}），${waitMs / 1000}s 后重试`);
+        await sleep(waitMs);
+      }
+    }
   }
-  return Buffer.from(await response.arrayBuffer());
+  throw new Error(`下载 ${name} 失败，已重试 ${DOWNLOAD_ATTEMPTS} 次: ${lastError.message}`);
 }
 
 function findAsset(assets, name) {
@@ -254,8 +281,15 @@ async function main() {
       // 落盘一律使用规范名，GitHub 有时会改写资源的 name 字段，
       // 若照抄回来会和页面链接、latest.json 里的 URL 对不上。
       for (const [asset, fileName] of [[dmgAsset, dmgName], [updaterAsset, updaterName]]) {
+        const filePath = path.join(RELEASES_DIR, fileName);
+        // 上一轮中断后重跑时，已经完整落盘的大文件不必再下一次。
+        const existing = await fs.stat(filePath).catch(() => null);
+        if (existing && existing.size === asset.size) {
+          console.log(`已存在 ${fileName} (${formatSize(existing.size)})，跳过下载`);
+          continue;
+        }
         const buffer = await downloadAsset(asset, options.token);
-        await fs.writeFile(path.join(RELEASES_DIR, fileName), buffer);
+        await fs.writeFile(filePath, buffer);
         console.log(`已下载 ${fileName} (${formatSize(buffer.length)})`);
       }
       await fs.writeFile(path.join(RELEASES_DIR, sigName), signature, 'utf8');

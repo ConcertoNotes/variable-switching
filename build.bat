@@ -9,6 +9,11 @@ set "NO_PAUSE=0"
 set "VERSION_STATE_FILE=.build-version"
 set "TAURI_ARGS="
 set "HAS_BUNDLE_ARG=0"
+set "SKIP_TAG=0"
+set "TAG_NAME="
+set "TAG_PUSHED=0"
+set "TAG_PUSH_FAILED=0"
+set "GITHUB_REPO=ConcertoNotes/varswitch"
 
 :parse_args
 if "%~1"=="" goto :after_parse
@@ -55,6 +60,11 @@ if /I "%~1"=="--version" (
   set "VERSION_MODE=set"
   set "BUILD_VERSION=%~2"
   shift
+  shift
+  goto :parse_args
+)
+if /I "%~1"=="--no-tag" (
+  set "SKIP_TAG=1"
   shift
   goto :parse_args
 )
@@ -130,13 +140,82 @@ if errorlevel 1 (
 set /p "FINAL_VERSION="<"%VERSION_TMP%"
 del "%VERSION_TMP%" >nul 2>&1
 
-echo [0/4] Syncing project version to %FINAL_VERSION%...
+echo [1/5] Syncing project version to %FINAL_VERSION%...
 node -e "const fs=require('fs'); const version=process.argv[1]; function writeJson(file, update){ const data=JSON.parse(fs.readFileSync(file,'utf8')); update(data); fs.writeFileSync(file, JSON.stringify(data,null,2)+'\n'); } writeJson('package.json', d=>{d.version=version}); if(fs.existsSync('package-lock.json')) writeJson('package-lock.json', d=>{d.version=version; if(d.packages&&d.packages['']) d.packages[''].version=version;}); writeJson('src-tauri/tauri.conf.json', d=>{d.version=version}); const cargo='src-tauri/Cargo.toml'; let inPackage=false; const text=fs.readFileSync(cargo,'utf8').split(/\r?\n/).map(line=>{ if(/^\[package\]\s*$/.test(line)){ inPackage=true; return line; } if(/^\[/.test(line)) inPackage=false; if(inPackage && /^version\s*=/.test(line)) return 'version = \"'+version+'\"'; return line; }).join('\n'); fs.writeFileSync(cargo, text.endsWith('\n') ? text : text+'\n');" "%FINAL_VERSION%"
 if errorlevel 1 (
   echo [ERROR] Failed to sync version files.
   goto :fail
 )
 > "%VERSION_STATE_FILE%" echo %FINAL_VERSION%
+
+echo [2/5] Pushing release tag to trigger the GitHub macOS build...
+if "%SKIP_TAG%"=="1" (
+  echo       --no-tag set, skipping tag push.
+  goto :after_tag_push
+)
+where git >nul 2>&1
+if errorlevel 1 (
+  echo       git is not available in PATH, skipping tag push.
+  goto :after_tag_push
+)
+git rev-parse --is-inside-work-tree >nul 2>&1
+if errorlevel 1 (
+  echo       Not a git working tree, skipping tag push.
+  goto :after_tag_push
+)
+set "TAG_NAME=v%FINAL_VERSION%"
+git ls-remote --exit-code --tags origin "refs/tags/%TAG_NAME%" >nul 2>&1
+if not errorlevel 1 (
+  echo       Tag %TAG_NAME% already exists on origin, macOS build was already triggered.
+  goto :after_tag_push
+)
+rem The tag has to include the version bump commit, otherwise Actions would
+rem build the previous version number into the macOS artifacts.
+for %%P in ("package.json" "package-lock.json" "src-tauri\tauri.conf.json" "src-tauri\Cargo.toml" "src-tauri\Cargo.lock") do (
+  if exist "%%~P" git add -- "%%~P" >nul 2>&1
+)
+set "NEED_COMMIT=0"
+git diff --cached --quiet
+if errorlevel 1 set "NEED_COMMIT=1"
+if "%NEED_COMMIT%"=="1" (
+  git commit -q -m "chore: release %TAG_NAME%"
+  if errorlevel 1 (
+    echo [WARN] Failed to commit the version bump, skipping tag push.
+    set "TAG_PUSH_FAILED=1"
+    goto :after_tag_push
+  )
+) else (
+  echo       Version files unchanged, tagging current HEAD.
+)
+git rev-parse -q --verify "refs/tags/%TAG_NAME%" >nul 2>&1
+if errorlevel 1 goto :create_tag
+echo       Local tag %TAG_NAME% already exists, pushing it as is.
+echo       If it points at an older commit, fix it with:
+echo         git tag -f %TAG_NAME% ^&^& git push -f origin %TAG_NAME%
+goto :push_tag
+:create_tag
+git tag "%TAG_NAME%"
+if errorlevel 1 (
+  echo [WARN] Failed to create tag %TAG_NAME%, skipping push.
+  set "TAG_PUSH_FAILED=1"
+  goto :after_tag_push
+)
+:push_tag
+git push origin HEAD
+if errorlevel 1 (
+  echo [WARN] Failed to push the current branch to origin, skipping tag push.
+  set "TAG_PUSH_FAILED=1"
+  goto :after_tag_push
+)
+git push origin "%TAG_NAME%"
+if errorlevel 1 (
+  echo [WARN] Failed to push tag %TAG_NAME%.
+  set "TAG_PUSH_FAILED=1"
+  goto :after_tag_push
+)
+set "TAG_PUSHED=1"
+echo       Pushed %TAG_NAME%, GitHub Actions is now building the macOS packages.
+:after_tag_push
 
 set "DO_INSTALL=0"
 set "HAS_TAURI_BIN=0"
@@ -151,11 +230,11 @@ if /I "%INSTALL_MODE%"=="auto" (
 if "%DO_INSTALL%"=="1" (
   set "NPM_EXIT=0"
   if exist "package-lock.json" (
-    echo [1/4] Installing dependencies via npm ci...
+    echo [3/5] Installing dependencies via npm ci...
     call npm ci
     set "NPM_EXIT=!ERRORLEVEL!"
   ) else (
-    echo [1/4] Installing dependencies via npm install...
+    echo [3/5] Installing dependencies via npm install...
     call npm install
     set "NPM_EXIT=!ERRORLEVEL!"
   )
@@ -172,19 +251,19 @@ if "%DO_INSTALL%"=="1" (
   )
 ) else (
   if /I "%INSTALL_MODE%"=="skip" (
-    echo [1/4] Skipping dependency installation.
+    echo [3/5] Skipping dependency installation.
     if "%HAS_TAURI_BIN%"=="0" (
       echo [ERROR] Tauri CLI is not available in node_modules.
       echo         Run build.bat without --skip-install once.
       goto :fail
     )
   ) else (
-    echo [1/4] node_modules and Tauri CLI exist, skipping dependency installation.
+    echo [3/5] node_modules and Tauri CLI exist, skipping dependency installation.
   )
 )
 
 if exist "app-icon.png" (
-  echo [2/4] Syncing Tauri icons from app-icon.png...
+  echo [4/5] Syncing Tauri icons from app-icon.png...
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Drawing; $src='app-icon.png'; $dst='src-tauri/icons/source-square.png'; $img=[System.Drawing.Image]::FromFile($src); $size=[Math]::Max($img.Width,$img.Height); $bmp=New-Object System.Drawing.Bitmap($size,$size); $g=[System.Drawing.Graphics]::FromImage($bmp); $g.Clear([System.Drawing.Color]::Transparent); $x=[int](($size-$img.Width)/2); $y=[int](($size-$img.Height)/2); $g.DrawImage($img,$x,$y,$img.Width,$img.Height); $bmp.Save($dst,[System.Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $bmp.Dispose(); $img.Dispose()"
   if errorlevel 1 (
     echo [ERROR] Failed to generate square icon source.
@@ -197,10 +276,10 @@ if exist "app-icon.png" (
     goto :fail
   )
 ) else (
-  echo [2/4] app-icon.png not found, skipping icon sync.
+  echo [4/5] app-icon.png not found, skipping icon sync.
 )
 
-echo [3/4] Building Tauri bundle...
+echo [5/5] Building Tauri bundle...
 set "TEMP=%CD%\src-tauri\target\build-temp"
 set "TMP=%TEMP%"
 if exist "%TEMP%" rmdir /s /q "%TEMP%" >nul 2>&1
@@ -247,12 +326,26 @@ for %%D in (appimage deb dmg msi nsis rpm app) do (
   )
 )
 
+if "%TAG_PUSHED%"=="1" (
+  echo.
+  echo GitHub Actions is building the macOS packages for v%FINAL_VERSION%:
+  echo   https://github.com/%GITHUB_REPO%/actions
+  echo Once the run is green, publish both platforms with:
+  echo   deploy-download-site.bat
+)
+if "%TAG_PUSH_FAILED%"=="1" (
+  echo.
+  echo [WARN] Release tag was not pushed, so the macOS build has not started.
+  echo        Push it manually, then run deploy-download-site.bat:
+  echo          git push origin v%FINAL_VERSION%
+)
+
 popd
 exit /b 0
 
 :help
 echo Usage:
-echo   build.bat [--skip-install^|--install] [--version x.y.z^|--patch^|--no-version-prompt] [--no-pause] [tauri-build-args]
+echo   build.bat [--skip-install^|--install] [--version x.y.z^|--patch^|--no-version-prompt] [--no-tag] [--no-pause] [tauri-build-args]
 echo.
 echo Examples:
 echo   build.bat
@@ -261,6 +354,7 @@ echo   build.bat --install
 echo   build.bat --patch
 echo   build.bat --version 1.2.3
 echo   build.bat --no-version-prompt
+echo   build.bat --no-tag
 echo   build.bat --bundles msi
 echo   build.bat --target x86_64-pc-windows-msvc
 echo.
@@ -271,9 +365,15 @@ echo   --version x.y.z   Set package/Tauri/Cargo version before building.
 echo   --patch           Use current patch version + 1 without prompting.
 echo   --no-version-prompt
 echo                    Keep current version without prompting.
+echo   --no-tag         Do not commit and push the vX.Y.Z release tag.
 echo   --no-pause       Do not pause when an error occurs.
 echo   --bundles type   Override the default Windows bundle type ^(nsis^).
 echo   -h, --help        Show this help.
+echo.
+echo Release flow:
+echo   The version bump is committed and pushed as tag vX.Y.Z right after the
+echo   version is chosen, so GitHub Actions builds the macOS packages while the
+echo   Windows bundle compiles locally. Use --no-tag for local test builds.
 exit /b 0
 
 :fail
