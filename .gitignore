@@ -95,6 +95,9 @@ docs/
 # Tauri 更新器从 latest.json 内联的 signature 校验，不会去请求 .sig 文件。
 varswitch-download-site/releases/
 
+# deploy-download-site.bat 用于同步 macOS 产物的 GitHub Token，禁止入库
+.github-token
+
 # 各类 AI / 编辑器本地配置
 # 注意：.github 不能加进来，CI 工作流必须随仓库上传
 AGENTS.md
