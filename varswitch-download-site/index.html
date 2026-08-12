@@ -58,7 +58,7 @@
               <div class="hero-actions">
                 <a
                   class="button button-primary"
-                  href="./releases/VarSwitch_2.4.5_x64-setup.exe"
+                  href="./releases/VarSwitch_3.1.1_x64-setup.exe"
                   download
                 >
                   下载 Windows 版
@@ -88,7 +88,7 @@
                   <span>管理模块</span>
                 </article>
                 <article class="stat-card">
-                  <strong>v2.4.5</strong>
+                  <strong>v3.1.1</strong>
                   <span>当前版本</span>
                 </article>
               </div>
@@ -267,11 +267,11 @@
                 <div class="am-quick">
                   <div class="am-quick-copy">
                     <strong>快捷操作</strong>
-                    <p>发现新版本 v2.4.5，再次点击即可打开下载页。</p>
+                    <p>发现新版本 v3.1.1，再次点击即可打开下载页。</p>
                   </div>
                   <div class="am-quick-actions">
                     <span class="am-btn am-btn-soft">使用说明</span>
-                    <span class="am-btn am-btn-soft">打开下载页 v2.4.5</span>
+                    <span class="am-btn am-btn-soft">打开下载页 v3.1.1</span>
                     <span class="am-btn am-btn-soft">GitHub 仓库</span>
                   </div>
                 </div>
@@ -352,7 +352,7 @@
           <div class="section-heading">
             <p class="eyebrow">Install</p>
             <h2>直接下载，不需要跳转 GitHub。</h2>
-            <p>当前页面托管 Windows 安装包，适合无法稳定访问 GitHub 的客户。</p>
+            <p>Windows 与 macOS 安装包都由本站托管，适合无法稳定访问 GitHub 的客户。</p>
           </div>
 
           <div class="install-grid">
@@ -361,16 +361,48 @@
               <p>下载后双击安装。安装完成后打开 VarSwitch，导入或填写你的配置。</p>
               <a
                 class="button button-primary"
-                href="./releases/VarSwitch_2.4.5_x64-setup.exe"
+                href="./releases/VarSwitch_3.1.1_x64-setup.exe"
                 download
               >
-                下载 VarSwitch_2.4.5_x64-setup.exe
+                下载 VarSwitch_3.1.1_x64-setup.exe
               </a>
             </article>
             <article class="install-card">
               <h3>macOS</h3>
-              <p>macOS 安装包暂不在此页面公开托管，如需使用请联系服务人员获取。</p>
-              <code>联系服务人员获取 dmg 安装包</code>
+              <p>
+                点开屏幕左上角的苹果菜单 &gt; 关于本机，「芯片」一栏写着 Apple M
+                系列就选第一个，写着 Intel 就选第二个。
+              </p>
+              <div class="install-options">
+                <a
+                  class="button button-primary"
+                  data-mac-download="aarch64"
+                  href="./releases/VarSwitch_3.1.1_aarch64.dmg"
+                  download
+                >
+                  Apple 芯片
+                </a>
+                <a
+                  class="button button-secondary"
+                  data-mac-download="x64"
+                  href="./releases/VarSwitch_3.1.1_x64.dmg"
+                  download
+                >
+                  Intel 芯片
+                </a>
+              </div>
+              <p class="install-files">
+                <span data-mac-file="aarch64">VarSwitch_3.1.1_aarch64.dmg</span>
+                <span data-mac-file="x64">VarSwitch_3.1.1_x64.dmg</span>
+              </p>
+              <details class="install-note">
+                <summary>打开时提示「已损坏，无法打开」？</summary>
+                <p>
+                  安装包没有经过 Apple 公证，系统会自动加上隔离标记，文件本身是完好的。把
+                  VarSwitch 拖进「应用程序」后，打开「终端」执行一次下面这行命令，之后就能正常使用。
+                </p>
+                <code>sudo xattr -rd com.apple.quarantine /Applications/VarSwitch.app</code>
+              </details>
             </article>
           </div>
         </div>
@@ -407,7 +439,7 @@
             <div class="cta-actions">
               <a
                 class="button button-primary"
-                href="./releases/VarSwitch_2.4.5_x64-setup.exe"
+                href="./releases/VarSwitch_3.1.1_x64-setup.exe"
                 download
               >
                 立即下载

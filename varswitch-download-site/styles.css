@@ -1225,7 +1225,7 @@ h1 {
 /* ======================== INSTALL ======================== */
 
 .install-grid {
-  grid-template-columns: 1.25fr 0.75fr;
+  grid-template-columns: 1fr 1fr;
 }
 
 .install-card {
@@ -1233,6 +1233,77 @@ h1 {
   flex-direction: column;
   justify-content: space-between;
   gap: 22px;
+}
+
+.install-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.install-card p.install-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin-top: -12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.5;
+}
+
+.install-note {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.install-note summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.install-note summary::-webkit-details-marker {
+  display: none;
+}
+
+.install-note summary::after {
+  content: "";
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  background:
+    linear-gradient(currentColor, currentColor) center / 12px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 2px 12px no-repeat;
+  color: var(--primary);
+  transition: transform 0.28s var(--ease);
+}
+
+.install-note[open] summary::after {
+  transform: rotate(90deg);
+  background:
+    linear-gradient(currentColor, currentColor) center / 12px 2px no-repeat;
+}
+
+.install-card .install-note p {
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.install-card .install-note code {
+  margin-top: 12px;
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 12.5px;
+  word-break: break-all;
+  user-select: all;
 }
 
 .install-card-primary {
@@ -1464,6 +1535,10 @@ h1 {
   .hero-actions,
   .topbar-actions {
     width: 100%;
+  }
+
+  .install-options {
+    grid-template-columns: 1fr;
   }
 
   .product-screen,

@@ -306,24 +306,81 @@ build.bat
 src-tauri/target/release/bundle/
 ```
 
-Windows 通常生成 `.msi` 和 `.exe` 安装包，macOS 通常生成 `.dmg`。
+Windows 生成 `.exe`（NSIS）安装包，macOS 生成 `.dmg`。
+
+> macOS 安装包无法在 Windows 上构建。Apple 的系统框架、制作 `.dmg` 用的 `hdiutil`
+> 以及签名工具链都只存在于 macOS，Rust 也无法从 Windows 交叉编译到 macOS。
+> 因此 macOS 版本统一由 GitHub Actions 的 macos runner 产出，见下方发布流程。
 
 ## CI/CD
 
-项目配置了 GitHub Actions 自动构建，推送 `v*` 标签时触发，支持：
+推送 `v*` 标签或手动触发工作流后，会并行构建三个目标：
 
-- macOS aarch64 / x86_64
-- Windows x86_64
+| 作业 | 安装包 |
+| --- | --- |
+| Windows x64 | `VarSwitch_<版本>_x64-setup.exe` |
+| macOS Apple Silicon | `VarSwitch_<版本>_aarch64.dmg` |
+| macOS Intel | `VarSwitch_<版本>_x64.dmg` |
 
-### macOS 发布签名
+每个作业同时产出更新包与 `.sig` 签名供自动更新使用。macOS 的更新包被显式重命名为
+`VarSwitch_<版本>_<架构>.app.tar.gz`，因为 Tauri 默认命名不含架构，两个 macOS
+作业会上传同名文件并互相覆盖。
 
-macOS 从浏览器下载的 `.dmg` 如果没有做 Apple Developer 签名和 notarization，Gatekeeper 可能拦截。发布工作流要求在 GitHub Actions 中配置以下 secrets：
+需要在仓库 Settings > Secrets and variables > Actions 中配置：
 
-- `APPLE_CERTIFICATE`：`Developer ID Application` 证书导出的 `.p12` 文件内容，需先转成 base64
+- `TAURI_SIGNING_PRIVATE_KEY`：`src-tauri/updater.key` 的完整内容
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：该私钥的密码
+
+缺少这两项时工作流会直接失败。否则构建仍会成功，但产物没有签名，对应平台会被静默
+排除在 `latest.json` 之外，表现为「CI 全绿，用户却收不到更新」。
+
+## 发布流程
+
+```bash
+# 1. 本地构建 Windows 包并统一版本号
+build.bat --version x.y.z
+
+# 2. 推送标签，触发三平台构建
+git tag vx.y.z && git push origin vx.y.z
+
+# 3. 三个作业全绿后，把 macOS 产物同步进下载站
+node sync-mac-release.mjs --token <GitHub Token>
+
+# 4. 部署下载站
+deploy-download-site.bat
+```
+
+本仓库是私有仓库，因此第 3 步必须带 Token（私有仓库对未认证请求一律返回 404）。
+Token 只需要 `repo` 读权限，也可以写进环境变量 `GITHUB_TOKEN` 后省略该参数。
+
+私有仓库的 macOS runner 按 10 倍分钟计费，GitHub Free 的 2000 分钟/月相当于约 200
+分钟 macOS 构建时间。工作流已启用 Rust 编译缓存，首次构建较慢，之后会显著缩短。
+
+Windows 与 macOS 必须发布同一版本号。若 `latest.json` 中两端版本不一致，落后的一端
+会被反复提示更新却始终停留在旧版本，因此 `deploy-download-site.bat` 会主动丢弃版本
+不匹配的 macOS 条目并给出提示。
+
+`sync-mac-release.mjs` 默认把 dmg 与更新包下载到下载站，由自有域名分发，方便无法稳定
+访问 GitHub 的用户；加 `--host github` 则只写入 GitHub Release 的链接，不占用部署体积。
+
+### macOS 未公证说明
+
+安装包目前没有做 Apple Developer 签名与公证。从浏览器下载后 Gatekeeper 会加上隔离
+标记，首次打开会提示「VarSwitch 已损坏，无法打开」——文件本身是完好的。用户把 App
+拖进「应用程序」后执行一次下面的命令即可正常使用：
+
+```bash
+sudo xattr -rd com.apple.quarantine /Applications/VarSwitch.app
+```
+
+通过应用内自动更新安装的版本不经过浏览器，不会带上隔离标记，无需重复执行。
+
+若后续购买了 Apple Developer 账号，在仓库中配置以下 secrets 并在工作流里加入签名与
+公证步骤，即可免去用户的这一步操作：
+
+- `APPLE_CERTIFICATE`：`Developer ID Application` 证书导出的 `.p12`，需先转成 base64
 - `APPLE_CERTIFICATE_PASSWORD`：导出 `.p12` 时设置的密码
-- `APPLE_ID`：用于 notarization 的 Apple ID 邮箱
-- `APPLE_PASSWORD`：上述 Apple ID 的 app-specific password
-- `APPLE_TEAM_ID`：Apple Developer Team ID
+- `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID`：公证用的 Apple ID、app-specific password 与 Team ID
 - `KEYCHAIN_PASSWORD`：CI 临时 keychain 的密码
 
 获取 `APPLE_CERTIFICATE` 的方式示例：
@@ -348,10 +405,12 @@ openssl base64 -A -in certificate.p12 -out certificate-base64.txt
 │   ├── Cargo.toml       # Rust 依赖
 │   ├── tauri.conf.json  # Tauri 配置
 │   └── capabilities/    # Tauri 权限配置
-├── .github/workflows/   # CI 构建配置
+├── .github/workflows/   # CI 构建配置（Windows + macOS 双架构）
+├── varswitch-download-site/  # 下载站，含 releases 与 latest.json
 ├── dev-server.js        # 前端开发静态服务器
 ├── dev.bat              # Windows 开发脚本
 ├── build.bat            # Windows 构建脚本
+├── sync-mac-release.mjs # 把 CI 构建的 macOS 产物同步进下载站
 └── README.md            # 使用说明
 ```
 

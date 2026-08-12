@@ -7,16 +7,34 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g. v1.0.0)'
+        description: 'Release tag (e.g. v3.1.2)'
         required: true
-        default: 'v1.0.0'
+        default: 'v3.1.2'
 
 permissions:
   contents: write
 
 jobs:
   build:
-    runs-on: windows-latest
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            label: Windows x64
+            target: x86_64-pc-windows-msvc
+            args: --bundles nsis
+          - platform: macos-latest
+            label: macOS Apple Silicon
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            label: macOS Intel
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+
+    runs-on: ${{ matrix.platform }}
 
     steps:
       - uses: actions/checkout@v7
@@ -25,19 +43,36 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          cache: npm
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: ${{ matrix.target }}
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Tauri app
+      # 缺少签名密钥时 Tauri 仍会构建成功，但不产出 .sig，latest.json 会静默丢掉该平台，
+      # 表现为「CI 全绿但用户收不到更新」。这里提前失败，避免发出无法更新的版本。
+      - name: Check updater signing key
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
+            echo "::error::缺少 secret TAURI_SIGNING_PRIVATE_KEY，构建产物将无法用于自动更新。"
+            echo "请在 GitHub 仓库 Settings > Secrets and variables > Actions 中添加："
+            echo "  TAURI_SIGNING_PRIVATE_KEY          = src-tauri/updater.key 的完整内容"
+            echo "  TAURI_SIGNING_PRIVATE_KEY_PASSWORD = 该私钥的密码"
+            exit 1
+          fi
+
+      - name: Build and upload release assets
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -45,15 +80,51 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tauriScript: npm run tauri
-
-      - name: Publish Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          name: VarSwitch ${{ github.event.inputs.version || github.ref_name }}
-          body: See the assets below to download the installer for your platform.
-          draft: false
+          args: ${{ matrix.args }}
+          tagName: ${{ inputs.version || github.ref_name }}
+          releaseName: VarSwitch ${{ inputs.version || github.ref_name }}
+          releaseDraft: false
           prerelease: false
-          files: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*setup.exe
+          retryAttempts: 2
+          updaterJsonPreferNsis: true
+          # Tauri 给 macOS updater 包的原生命名是 VarSwitch.app.tar.gz，不含架构，
+          # 两个 macOS matrix 作业会上传同名资源并互相覆盖。加入 [arch] 后：
+          #   VarSwitch_x.y.z_x64-setup.exe / VarSwitch_x.y.z_aarch64.dmg
+          #   VarSwitch_x.y.z_aarch64.app.tar.gz / VarSwitch_x.y.z_x64.app.tar.gz
+          releaseAssetNamePattern: '[name]_[version]_[arch][setup][ext]'
+          releaseBody: |
+            ## 下载
+
+            | 系统 | 安装包 |
+            | --- | --- |
+            | Windows 10/11 (x64) | `VarSwitch_*_x64-setup.exe` |
+            | macOS (M1/M2/M3/M4) | `VarSwitch_*_aarch64.dmg` |
+            | macOS (Intel) | `VarSwitch_*_x64.dmg` |
+
+            ## macOS 首次打开说明
+
+            安装包未经 Apple 公证，首次打开会提示「VarSwitch 已损坏，无法打开」。
+            这是 Gatekeeper 的隔离标记，不是文件损坏。把 App 拖进「应用程序」后，
+            在「终端」执行一次以下命令即可正常使用：
+
+            ```bash
+            sudo xattr -rd com.apple.quarantine /Applications/VarSwitch.app
+            ```
+
+      - name: Verify updater artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            dir="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          else
+            dir="src-tauri/target/release/bundle/nsis"
+          fi
+          shopt -s nullglob
+          sigs=("$dir"/*.sig)
+          if [ ${#sigs[@]} -eq 0 ]; then
+            echo "::error::${dir} 下没有找到 .sig 文件，该平台的自动更新将不可用。"
+            ls -la "$dir" || true
+            exit 1
+          fi
+          printf '找到更新签名: %s\n' "${sigs[@]}"
