@@ -13,8 +13,10 @@ mod common;
 mod deeplink;
 mod gemini;
 mod grok;
+mod health;
 mod mcp;
 mod prompts;
+mod secret_store;
 mod sessions;
 mod skills;
 mod tray;
@@ -28,8 +30,10 @@ pub(crate) use common::*;
 pub(crate) use deeplink::*;
 pub(crate) use gemini::*;
 pub(crate) use grok::*;
+pub(crate) use health::*;
 pub(crate) use mcp::*;
 pub(crate) use prompts::*;
+pub(crate) use secret_store::*;
 pub(crate) use sessions::*;
 pub(crate) use skills::*;
 pub(crate) use tray::*;
@@ -375,6 +379,60 @@ source_type = "git"
             default_plugin_marketplace_url()
         );
         assert_eq!(state.mobile_remote.mode, "platform_bot");
+    }
+
+    // Toolbox 页每秒刷新一次快照，插件市场发现在 Windows 上要起 PowerShell 进程并遍历
+    // WindowsApps，没有缓存就会每秒重来一遍。用哨兵值确认 TTL 内确实走缓存、过期后重扫。
+    #[test]
+    fn plugin_marketplace_discovery_reuses_cache_within_ttl() {
+        let sentinel = vec![(
+            "sentinel-marketplace".to_string(),
+            PathBuf::from("sentinel-root"),
+        )];
+        let now = chrono_timestamp_millis() as u64;
+        if let Ok(mut guard) = PLUGIN_MARKETPLACE_CACHE.lock() {
+            *guard = Some((now, sentinel.clone()));
+        }
+        assert_eq!(
+            discover_codex_plugin_marketplaces(),
+            sentinel,
+            "TTL 内应直接复用缓存，不再扫描"
+        );
+
+        if let Ok(mut guard) = PLUGIN_MARKETPLACE_CACHE.lock() {
+            *guard = Some((now.saturating_sub(PLUGIN_MARKETPLACE_TTL_MS + 1), sentinel.clone()));
+        }
+        assert_ne!(
+            discover_codex_plugin_marketplaces(),
+            sentinel,
+            "缓存过期后必须重新扫描"
+        );
+        invalidate_plugin_marketplace_cache();
+    }
+
+    // 单次探测超时就有 1.5 秒，每秒轮询必须复用结果；换了后端地址则不能复用
+    #[test]
+    fn smart_control_probe_reuses_cache_only_for_same_backend() {
+        let backend = "http://127.0.0.1:65535".to_string();
+        set_smart_control_status_cache(SmartControlStatus {
+            available: true,
+            connected: true,
+            backend_url: backend.clone(),
+            status: "sentinel-status".into(),
+            detail: String::new(),
+            checked_at: chrono_now(),
+        });
+        assert_eq!(
+            probe_smart_control_backend_cached(&backend).status,
+            "sentinel-status",
+            "同一地址在 TTL 内应复用缓存"
+        );
+        assert_ne!(
+            probe_smart_control_backend_cached("http://127.0.0.1:65534").status,
+            "sentinel-status",
+            "地址变了必须重新探测"
+        );
+        invalidate_smart_control_probe_cache();
     }
 
     #[test]
@@ -1622,6 +1680,9 @@ pub fn run() {
                 }
             }
 
+            // 把历史遗留的明文 API Key 转成本机加密存储（内部会先备份、无明文则跳过）
+            migrate_plaintext_secrets(&app.handle());
+
             // 读取应用设置
             let settings = read_app_settings(&app.handle());
             let silent_startup = settings.silent_startup;
@@ -1861,6 +1922,7 @@ pub fn run() {
             get_site_balance_tokens,
             save_site_balance_token,
             delete_site_balance_token,
+            check_profiles_health,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

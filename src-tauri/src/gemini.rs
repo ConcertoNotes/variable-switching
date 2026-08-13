@@ -20,7 +20,7 @@ pub(crate) struct GeminiProfile {
     pub(crate) created_at: String,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct GeminiProfilesData {
     pub(crate) profiles: Vec<GeminiProfile>,
 }
@@ -46,14 +46,22 @@ pub(crate) fn read_gemini_profiles(app: &tauri::AppHandle) -> GeminiProfilesData
     if !path.exists() {
         return GeminiProfilesData::default();
     }
-    fs::read_to_string(&path)
+    let mut data: GeminiProfilesData = fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    for p in data.profiles.iter_mut() {
+        p.api_key = decrypt_secret_or_keep(&p.api_key, &format!("Gemini 配置「{}」", p.name));
+    }
+    data
 }
 
 pub(crate) fn write_gemini_profiles(app: &tauri::AppHandle, data: &GeminiProfilesData) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
+    let mut encrypted = data.clone();
+    for p in encrypted.profiles.iter_mut() {
+        p.api_key = encrypt_secret(&p.api_key);
+    }
+    let json = serde_json::to_string_pretty(&encrypted).map_err(|e| e.to_string())?;
     write_private_file(&gemini_profiles_path(app), &json)?;
     refresh_tray_menu(app);
     Ok(())
@@ -244,6 +252,7 @@ pub(crate) fn switch_gemini_profile(app: tauri::AppHandle, id: String) -> Result
         .find(|profile| profile.id == id)
         .ok_or("配置未找到")?
         .clone();
+    ensure_secret_usable(&profile.api_key, &format!("Gemini 配置「{}」", profile.name))?;
 
     auto_backup_configs(&app);
     write_gemini_settings(&profile)?;

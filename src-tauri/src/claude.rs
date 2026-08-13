@@ -79,7 +79,7 @@ fn profile_as_proxy_target(profile: &Profile) -> claude_proxy::ProxyTarget {
     }
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct ProfilesData {
     pub(crate) profiles: Vec<Profile>,
 }
@@ -145,6 +145,10 @@ pub(crate) fn read_profiles(app: &tauri::AppHandle) -> ProfilesData {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    // 落盘的 API Key 是密文，读出后立即还原成明文，内存与前端始终拿明文
+    for p in data.profiles.iter_mut() {
+        p.api_key = decrypt_secret_or_keep(&p.api_key, &format!("Claude 配置「{}」", p.name));
+    }
     // 修复空 id/createdAt 的历史数据
     let mut fixed = false;
     for p in data.profiles.iter_mut() {
@@ -164,7 +168,11 @@ pub(crate) fn read_profiles(app: &tauri::AppHandle) -> ProfilesData {
 }
 
 pub(crate) fn write_profiles_to_path(path: &PathBuf, data: &ProfilesData) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
+    let mut encrypted = data.clone();
+    for p in encrypted.profiles.iter_mut() {
+        p.api_key = encrypt_secret(&p.api_key);
+    }
+    let json = serde_json::to_string_pretty(&encrypted).map_err(|e| e.to_string())?;
     write_private_file(path, &json)
 }
 
@@ -448,8 +456,19 @@ pub(crate) fn get_profiles(app: tauri::AppHandle) -> ProfilesData {
     read_profiles(&app)
 }
 
+/// 主线程会 join 所有测速线程，最坏等到最慢的那个超时（可达 30 秒），
+/// 因此整体放到阻塞线程池
 #[tauri::command]
-pub(crate) fn test_api_endpoints(
+pub(crate) async fn test_api_endpoints(
+    urls: Vec<String>,
+    timeout_secs: Option<u64>,
+) -> Result<Vec<EndpointLatency>, String> {
+    tauri::async_runtime::spawn_blocking(move || test_api_endpoints_blocking(urls, timeout_secs))
+        .await
+        .map_err(|e| format!("接口测速失败: {e}"))?
+}
+
+fn test_api_endpoints_blocking(
     urls: Vec<String>,
     timeout_secs: Option<u64>,
 ) -> Result<Vec<EndpointLatency>, String> {
@@ -494,8 +513,23 @@ pub(crate) fn test_api_endpoints(
     Ok(results.into_iter().flatten().collect())
 }
 
+/// 逐个候选地址试探，单次超时最长 30 秒，因此放到阻塞线程池执行，
+/// 否则点一次「拉取模型」窗口就会僵住
 #[tauri::command]
-pub(crate) fn fetch_available_models(
+pub(crate) async fn fetch_available_models(
+    base_url: String,
+    api_key: String,
+    timeout_secs: Option<u64>,
+    protocol: Option<String>,
+) -> Result<Vec<AvailableModel>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fetch_available_models_blocking(base_url, api_key, timeout_secs, protocol)
+    })
+    .await
+    .map_err(|e| format!("拉取模型列表失败: {e}"))?
+}
+
+fn fetch_available_models_blocking(
     base_url: String,
     api_key: String,
     timeout_secs: Option<u64>,
@@ -994,6 +1028,7 @@ pub(crate) fn switch_profile(
         .find(|x| x.id == id)
         .ok_or("配置未找到")?
         .clone();
+    ensure_secret_usable(&profile.api_key, &format!("配置「{}」", profile.name))?;
 
     state.cancel_flag.store(false, Ordering::SeqCst);
 

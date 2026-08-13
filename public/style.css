@@ -8637,6 +8637,134 @@ body::before {
   word-break: break-all;
 }
 
+/* ---------- 配置体检：逐项检测配置可用性后在设置页内展示结果 ---------- */
+
+/* 说明文字较长，窄窗口下让按钮换行到下一行，避免把文案挤变形 */
+.settings-health-items .settings-row {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+#settingsHealthResult {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 18px 14px;
+  border-top: 0.5px solid var(--line);
+}
+
+/* 上面的 display 会覆盖浏览器默认的 [hidden]，未体检时必须显式隐藏 */
+#settingsHealthResult[hidden] {
+  display: none;
+}
+
+.health-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* 配置可能有几十条，列表内部滚动，避免把设置页撑得过长 */
+.health-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 0.5px solid var(--line-subtle);
+  border-radius: 8px;
+}
+
+.health-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.health-row + .health-row {
+  border-top: 0.5px solid var(--line-subtle);
+}
+
+.health-badge {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 100px;
+  border: 0.5px solid transparent;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 五种状态配色，与 .health-badge 组合使用 */
+.health-ok {
+  background: var(--success-bg);
+  color: var(--success-text);
+  border-color: var(--success-border);
+}
+
+.health-warn {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  border-color: var(--warning-border);
+}
+
+.health-bad {
+  background: var(--error-bg);
+  color: var(--error-text);
+  border-color: var(--error-border);
+}
+
+/* 已失效：同为红色但不填充底色，与「本次检测失败」区分开 */
+.health-dead {
+  background: var(--surface-hover);
+  color: var(--error-text);
+  border-color: var(--line);
+}
+
+.health-skipped {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  border-color: var(--line-subtle);
+}
+
+.health-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-host {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: "SF Mono", ui-monospace, "JetBrains Mono", "Cascadia Code", monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 原因说明放在行尾，空间不足时整段换行独占一行 */
+.health-message {
+  flex: 1 1 180px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
 /* ---------- P7. 添加统一供应商 ---------- */
 
 .provider-builder-section {

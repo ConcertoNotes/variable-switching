@@ -39,6 +39,8 @@ pub(crate) static TOOLBOX_STATE_WRITE_LOCK: Mutex<()> = Mutex::new(());
 // B18: QQ msg_seq 递增计数器，避免同毫秒并发时碰撞导致平台去重吞消息
 pub(crate) static QQ_MSG_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 pub(crate) static SMART_CONTROL_STATUS_CACHE: Mutex<Option<SmartControlStatus>> = Mutex::new(None);
+/// 上次探测完成的时间戳（Unix 毫秒），0 表示缓存无效
+pub(crate) static SMART_CONTROL_PROBE_AT: AtomicU64 = AtomicU64::new(0);
 pub(crate) static SMART_CONTROL_SERVER_ACTIVE: AtomicBool = AtomicBool::new(false);
 pub(crate) static SMART_CONTROL_SERVER_CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
 pub(crate) static SMART_CONTROL_REMOTE_CONNECTED: AtomicBool = AtomicBool::new(false);
@@ -382,7 +384,6 @@ pub(crate) fn normalize_smart_control_backend_url(value: &str) -> String {
     raw.trim_end_matches('/').to_string()
 }
 
-#[allow(dead_code)]
 pub(crate) fn smart_control_status_from_cache() -> Option<SmartControlStatus> {
     SMART_CONTROL_STATUS_CACHE
         .lock()
@@ -394,6 +395,31 @@ pub(crate) fn set_smart_control_status_cache(status: SmartControlStatus) {
     if let Ok(mut guard) = SMART_CONTROL_STATUS_CACHE.lock() {
         *guard = Some(status);
     }
+    SMART_CONTROL_PROBE_AT.store(chrono_timestamp_millis() as u64, Ordering::SeqCst);
+}
+
+/// 探测结果的有效期。Toolbox 页每秒刷新一次快照，而单次探测超时就有 1.5 秒，
+/// 每次都真发请求会让探测互相追尾；窗口内复用上次结果，状态变化最多晚 3 秒可见。
+pub(crate) const SMART_CONTROL_PROBE_TTL_MS: u64 = 3_000;
+
+/// 带时间窗的探测：同一后端地址在 TTL 内直接复用缓存。
+/// 地址变了或缓存过期才真正发请求。
+pub(crate) fn probe_smart_control_backend_cached(backend_url: &str) -> SmartControlStatus {
+    let last_at = SMART_CONTROL_PROBE_AT.load(Ordering::SeqCst);
+    let now = chrono_timestamp_millis() as u64;
+    if last_at > 0 && now.saturating_sub(last_at) < SMART_CONTROL_PROBE_TTL_MS {
+        if let Some(cached) = smart_control_status_from_cache() {
+            if cached.backend_url == backend_url {
+                return cached;
+            }
+        }
+    }
+    probe_smart_control_backend(backend_url)
+}
+
+/// 启停控制服务后状态会立刻变化，作废缓存让下一次快照拿到真实结果
+pub(crate) fn invalidate_smart_control_probe_cache() {
+    SMART_CONTROL_PROBE_AT.store(0, Ordering::SeqCst);
 }
 
 pub(crate) fn probe_smart_control_backend(base_url: &str) -> SmartControlStatus {
@@ -513,7 +539,7 @@ pub(crate) fn probe_smart_control_backend(base_url: &str) -> SmartControlStatus 
 pub(crate) fn refresh_smart_control_status_for_state(state: &mut ToolboxState) -> SmartControlStatus {
     let backend_url =
         normalize_smart_control_backend_url(&state.mobile_remote.remote_control_backend_url);
-    let status = probe_smart_control_backend(&backend_url);
+    let status = probe_smart_control_backend_cached(&backend_url);
     state.mobile_remote.remote_control_backend_url = status.backend_url.clone();
     state.mobile_remote.remote_control_connected = status.connected;
     state.mobile_remote.remote_control_status = status.status.clone();
@@ -1745,6 +1771,8 @@ pub(crate) fn start_smart_control_server(app: tauri::AppHandle, backend_url: Str
     if SMART_CONTROL_SERVER_ACTIVE.swap(true, Ordering::SeqCst) {
         return;
     }
+    // 服务状态即将改变，作废探测缓存，让下一次快照拿到真实结果
+    invalidate_smart_control_probe_cache();
     SMART_CONTROL_SERVER_CANCEL_REQUESTED.store(false, Ordering::SeqCst);
     std::thread::spawn(move || {
         let bind_addr = smart_control_bind_addr_from_url(&backend_url);
@@ -1810,6 +1838,7 @@ pub(crate) fn start_smart_control_server(app: tauri::AppHandle, backend_url: Str
 
 pub(crate) fn stop_smart_control_server() {
     SMART_CONTROL_SERVER_CANCEL_REQUESTED.store(true, Ordering::SeqCst);
+    invalidate_smart_control_probe_cache();
 }
 
 pub(crate) fn smart_control_backend_api_url() -> String {
@@ -2372,7 +2401,37 @@ pub(crate) fn find_openai_bundled_marketplace_root() -> Option<PathBuf> {
         })
 }
 
+/// 插件市场发现结果的有效期。Windows 上这一步要起一个 PowerShell 进程查 Appx，
+/// 还要遍历 WindowsApps 目录，开销以百毫秒计；而 Codex App 的安装路径在应用运行期间
+/// 基本不变，因此缓存 60 秒，避免 Toolbox 页每秒轮询都重扫一遍。
+pub(crate) const PLUGIN_MARKETPLACE_TTL_MS: u64 = 60_000;
+pub(crate) static PLUGIN_MARKETPLACE_CACHE: Mutex<Option<(u64, Vec<(String, PathBuf)>)>> =
+    Mutex::new(None);
+
+/// 安装/修复插件市场后目录结构会变，作废缓存让下一次发现重新扫描
+pub(crate) fn invalidate_plugin_marketplace_cache() {
+    if let Ok(mut guard) = PLUGIN_MARKETPLACE_CACHE.lock() {
+        *guard = None;
+    }
+}
+
 pub(crate) fn discover_codex_plugin_marketplaces() -> Vec<(String, PathBuf)> {
+    let now = chrono_timestamp_millis() as u64;
+    if let Ok(guard) = PLUGIN_MARKETPLACE_CACHE.lock() {
+        if let Some((cached_at, cached)) = guard.as_ref() {
+            if now.saturating_sub(*cached_at) < PLUGIN_MARKETPLACE_TTL_MS {
+                return cached.clone();
+            }
+        }
+    }
+    let discovered = discover_codex_plugin_marketplaces_uncached();
+    if let Ok(mut guard) = PLUGIN_MARKETPLACE_CACHE.lock() {
+        *guard = Some((now, discovered.clone()));
+    }
+    discovered
+}
+
+fn discover_codex_plugin_marketplaces_uncached() -> Vec<(String, PathBuf)> {
     let mut marketplaces = Vec::new();
     if let Some(root) = find_openai_bundled_marketplace_root() {
         marketplaces.push((OPENAI_BUNDLED_MARKETPLACE_NAME.to_string(), root));
@@ -3667,7 +3726,7 @@ pub(crate) fn qq_qr_runner_text() -> &'static str {
     r#"import { startQrConnect } from '@tencent-connect/qqbot-connector';
 import QRCode from 'qrcode';
 
-pub(crate) const emit = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
+const emit = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
 
 let stop = null;
 try {
@@ -3704,7 +3763,7 @@ try {
   process.exit(1);
 }
 
-pub(crate) const shutdown = () => {
+const shutdown = () => {
   try {
     if (typeof stop === 'function') stop();
   } catch {}
@@ -3720,10 +3779,10 @@ pub(crate) fn qq_gateway_runner_text() -> &'static str {
     r#"import WebSocket from 'ws';
 import https from 'node:https';
 
-pub(crate) const emit = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
-pub(crate) const appId = process.env.QQ_APP_ID || '';
-pub(crate) const appSecret = process.env.QQ_APP_SECRET || '';
-pub(crate) const intents = Number(process.env.QQ_INTENTS || '33554432');
+const emit = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
+const appId = process.env.QQ_APP_ID || '';
+const appSecret = process.env.QQ_APP_SECRET || '';
+const intents = Number(process.env.QQ_INTENTS || '33554432');
 let accessToken = '';
 let expiresAt = 0;
 let stopping = false;
@@ -3922,7 +3981,7 @@ async function main() {
   }
 }
 
-pub(crate) const shutdown = () => {
+const shutdown = () => {
   stopping = true;
   clearHeartbeat();
   try { ws?.close(); } catch {}
@@ -3942,24 +4001,24 @@ pub(crate) fn lark_bridge_runner_text() -> &'static str {
     r#"import WebSocket from 'ws';
 import https from 'node:https';
 
-pub(crate) const emit = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
+const emit = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`);
 
-pub(crate) const appId = String(process.env.LARK_APP_ID || '').trim();
-pub(crate) const appSecret = String(process.env.LARK_APP_SECRET || '').trim();
-pub(crate) const baseUrl = String(process.env.LARK_BASE_URL || 'https://open.feishu.cn').replace(/\/+$/, '');
-pub(crate) const botOpenId = String(process.env.LARK_BOT_OPEN_ID || '').trim();
-pub(crate) const WS_METHOD_CONTROL = 0;
-pub(crate) const WS_METHOD_DATA = 1;
-pub(crate) const WS_EVENT_TYPE = 'event';
-pub(crate) const WS_CARD_TYPE = 'card';
-pub(crate) const WS_PING_TYPE = 'ping';
-pub(crate) const WS_PONG_TYPE = 'pong';
+const appId = String(process.env.LARK_APP_ID || '').trim();
+const appSecret = String(process.env.LARK_APP_SECRET || '').trim();
+const baseUrl = String(process.env.LARK_BASE_URL || 'https://open.feishu.cn').replace(/\/+$/, '');
+const botOpenId = String(process.env.LARK_BOT_OPEN_ID || '').trim();
+const WS_METHOD_CONTROL = 0;
+const WS_METHOD_DATA = 1;
+const WS_EVENT_TYPE = 'event';
+const WS_CARD_TYPE = 'card';
+const WS_PING_TYPE = 'ping';
+const WS_PONG_TYPE = 'pong';
 let stopping = false;
 let ws = null;
 let pingTimer = null;
 let pingIntervalMs = 30000;
 let serviceId = 0;
-pub(crate) const chunkCache = new Map();
+const chunkCache = new Map();
 
 if (!appId || !appSecret) {
   emit({ type: 'failure', message: '缺少飞书 AppID/AppSecret' });
@@ -4396,7 +4455,7 @@ async function main() {
   }
 }
 
-pub(crate) const shutdown = () => {
+const shutdown = () => {
   stopping = true;
   if (pingTimer) clearInterval(pingTimer);
   try { ws?.close(); } catch {}
@@ -6326,6 +6385,24 @@ pub(crate) fn codex_capture_reply_from_session(thread_id: &str, baseline: usize)
 /// - 消息「可能已发出」（连接中断/回复未捕获）→ 绝不重发（防止 Codex 重复执行），
 ///   从会话文件捕获本轮新回复；文件不可用时再退回只读抓取 DOM。
 pub(crate) fn dispatch_codex_reply(thread_id: &str, text: &str, cwd: &str) -> Result<String, String> {
+    // 高级控制通道走的是官方协议链路，比向桌面 App 注入 GUI 可靠得多，因此优先尝试。
+    // 远端没连上时它直接返回 None，协议出错时也只记警告，两种情况都继续走下面的兼容路径，
+    // 所以未启用高级控制的用户行为完全不变。
+    match try_smart_control_dispatch(thread_id, text) {
+        Ok(Some(reply)) => {
+            log_info!(
+                "[mobile-control][smart-control] reply produced over protocol channel: thread_id={}",
+                thread_id
+            );
+            return Ok(reply);
+        }
+        Ok(None) => {}
+        Err(error) => log_warn!(
+            "[mobile-control][smart-control] 协议通道转发失败，改用兼容路径: thread_id={}, error={}",
+            thread_id,
+            error
+        ),
+    }
     // 发送前记录会话文件里的 final_answer 基线，用于识别「本次新增」的回复。
     let baseline = codex_session_reply_state(thread_id)
         .map(|(count, _)| count)
@@ -7627,20 +7704,29 @@ pub(crate) fn build_toolbox_snapshot(app: &tauri::AppHandle) -> ToolboxSnapshot 
     }
 }
 
+/// 快照构建包含 HTTP 探测、PowerShell 调用与目录扫描，最坏要数秒。
+/// Tauri 的同步命令跑在主线程上，而本命令在启动时自动调用、Toolbox 页还会每秒轮询，
+/// 同步执行会持续冻结窗口，因此交给阻塞线程池。
 #[tauri::command]
-pub(crate) fn get_codex_toolbox(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
-    Ok(build_toolbox_snapshot(&app))
+pub(crate) async fn get_codex_toolbox(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || build_toolbox_snapshot(&app))
+        .await
+        .map_err(|e| format!("读取 Codex 工具箱状态失败: {e}"))
 }
 
 #[tauri::command]
-pub(crate) fn start_smart_control(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
-    let state = read_toolbox_state(&app);
-    start_smart_control_server(
-        app.clone(),
-        state.mobile_remote.remote_control_backend_url.clone(),
-    );
-    std::thread::sleep(Duration::from_millis(120));
-    Ok(build_toolbox_snapshot(&app))
+pub(crate) async fn start_smart_control(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = read_toolbox_state(&app);
+        start_smart_control_server(
+            app.clone(),
+            state.mobile_remote.remote_control_backend_url.clone(),
+        );
+        std::thread::sleep(Duration::from_millis(120));
+        build_toolbox_snapshot(&app)
+    })
+    .await
+    .map_err(|e| format!("启动高级控制通道失败: {e}"))
 }
 
 
@@ -7675,7 +7761,17 @@ pub(crate) fn submit_smart_control_approval(request_id: String, decision: String
 }
 
 #[tauri::command]
-pub(crate) fn repair_openai_bundled_plugins(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+pub(crate) async fn repair_openai_bundled_plugins(
+    app: tauri::AppHandle,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || repair_openai_bundled_plugins_blocking(app))
+        .await
+        .map_err(|e| format!("修复内置插件市场失败: {e}"))?
+}
+
+fn repair_openai_bundled_plugins_blocking(
+    app: tauri::AppHandle,
+) -> Result<ToolboxSnapshot, String> {
     auto_backup_configs(&app);
     let config_path = codex_config_path();
     let existing = fs::read_to_string(&config_path).unwrap_or_default();
@@ -7685,11 +7781,21 @@ pub(crate) fn repair_openai_bundled_plugins(app: tauri::AppHandle) -> Result<Too
     }
     write_file_atomic(&config_path, &next)
         .map_err(|e| format!("写入 openai-bundled 插件市场失败: {e}"))?;
+    invalidate_plugin_marketplace_cache();
     Ok(build_toolbox_snapshot(&app))
 }
 
 #[tauri::command]
-pub(crate) fn enable_codex_builtin_plugin(
+pub(crate) async fn enable_codex_builtin_plugin(
+    app: tauri::AppHandle,
+    plugin_id: String,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || enable_codex_builtin_plugin_blocking(app, plugin_id))
+        .await
+        .map_err(|e| format!("启用内置插件失败: {e}"))?
+}
+
+fn enable_codex_builtin_plugin_blocking(
     app: tauri::AppHandle,
     plugin_id: String,
 ) -> Result<ToolboxSnapshot, String> {
@@ -7710,7 +7816,17 @@ pub(crate) fn enable_codex_builtin_plugin(
 }
 
 #[tauri::command]
-pub(crate) fn enable_important_codex_builtin_plugins(
+pub(crate) async fn enable_important_codex_builtin_plugins(
+    app: tauri::AppHandle,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        enable_important_codex_builtin_plugins_blocking(app)
+    })
+    .await
+    .map_err(|e| format!("批量启用内置插件失败: {e}"))?
+}
+
+fn enable_important_codex_builtin_plugins_blocking(
     app: tauri::AppHandle,
 ) -> Result<ToolboxSnapshot, String> {
     auto_backup_configs(&app);
@@ -7811,25 +7927,41 @@ pub(crate) fn apply_plugin_marketplace_blocking(
     state.plugin_marketplace_input = trimmed.to_string();
     write_toolbox_state(&app, &state)?;
     emit_plugin_marketplace_progress(&app, 6, "done");
+    invalidate_plugin_marketplace_cache();
     Ok(build_toolbox_snapshot(&app))
 }
 
+/// 要读最多 200 个完整会话文件，长会话下可达十数秒，必须离开主线程
 #[tauri::command]
-pub(crate) fn sync_codex_sessions(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
-    let threads = read_codex_threads(200);
-    let mut state = read_toolbox_state(&app);
-    state.synced_codex_threads = threads;
-    refresh_selected_mobile_thread_after_session_change(&mut state);
-    state.session_sync = CodexSessionSyncState {
-        last_synced_at: chrono_now(),
-        total: visible_codex_threads(&state).len(),
-    };
-    write_toolbox_state(&app, &state)?;
-    Ok(build_toolbox_snapshot(&app))
+pub(crate) async fn sync_codex_sessions(app: tauri::AppHandle) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let threads = read_codex_threads(200);
+        let mut state = read_toolbox_state(&app);
+        state.synced_codex_threads = threads;
+        refresh_selected_mobile_thread_after_session_change(&mut state);
+        state.session_sync = CodexSessionSyncState {
+            last_synced_at: chrono_now(),
+            total: visible_codex_threads(&state).len(),
+        };
+        write_toolbox_state(&app, &state)?;
+        Ok(build_toolbox_snapshot(&app))
+    })
+    .await
+    .map_err(|e| format!("同步 Codex 会话失败: {e}"))?
 }
 
+/// 回退到磁盘查找时要读最多 500 个会话文件，同样离开主线程
 #[tauri::command]
-pub(crate) fn trash_codex_sessions(
+pub(crate) async fn trash_codex_sessions(
+    app: tauri::AppHandle,
+    thread_ids: Vec<String>,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || trash_codex_sessions_blocking(app, thread_ids))
+        .await
+        .map_err(|e| format!("移入回收站失败: {e}"))?
+}
+
+fn trash_codex_sessions_blocking(
     app: tauri::AppHandle,
     thread_ids: Vec<String>,
 ) -> Result<ToolboxSnapshot, String> {
@@ -7881,7 +8013,16 @@ pub(crate) fn trash_codex_sessions(
 }
 
 #[tauri::command]
-pub(crate) fn restore_codex_sessions(
+pub(crate) async fn restore_codex_sessions(
+    app: tauri::AppHandle,
+    thread_ids: Vec<String>,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || restore_codex_sessions_blocking(app, thread_ids))
+        .await
+        .map_err(|e| format!("恢复会话失败: {e}"))?
+}
+
+fn restore_codex_sessions_blocking(
     app: tauri::AppHandle,
     thread_ids: Vec<String>,
 ) -> Result<ToolboxSnapshot, String> {
@@ -7927,7 +8068,16 @@ pub(crate) fn restore_codex_sessions(
 }
 
 #[tauri::command]
-pub(crate) fn select_mobile_thread(
+pub(crate) async fn select_mobile_thread(
+    app: tauri::AppHandle,
+    thread_id: String,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || select_mobile_thread_blocking(app, thread_id))
+        .await
+        .map_err(|e| format!("选择会话失败: {e}"))?
+}
+
+fn select_mobile_thread_blocking(
     app: tauri::AppHandle,
     thread_id: String,
 ) -> Result<ToolboxSnapshot, String> {
@@ -7953,7 +8103,37 @@ pub(crate) fn select_mobile_thread(
 }
 
 #[tauri::command]
-pub(crate) fn configure_mobile_channel(
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn configure_mobile_channel(
+    app: tauri::AppHandle,
+    channel: String,
+    app_id: String,
+    app_secret: String,
+    bot_token: String,
+    account_id: String,
+    base_url: String,
+    user_id: String,
+    bot_open_id: String,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        configure_mobile_channel_blocking(
+            app,
+            channel,
+            app_id,
+            app_secret,
+            bot_token,
+            account_id,
+            base_url,
+            user_id,
+            bot_open_id,
+        )
+    })
+    .await
+    .map_err(|e| format!("保存手机通道配置失败: {e}"))?
+}
+
+#[allow(clippy::too_many_arguments)]
+fn configure_mobile_channel_blocking(
     app: tauri::AppHandle,
     channel: String,
     app_id: String,
@@ -8800,7 +8980,21 @@ pub(crate) fn poll_wechat_qr_binding_blocking(
 }
 
 #[tauri::command]
-pub(crate) fn bind_codex_thread(
+pub(crate) async fn bind_codex_thread(
+    app: tauri::AppHandle,
+    channel: String,
+    thread_id: String,
+    sync_enabled: bool,
+    note: Option<String>,
+) -> Result<ToolboxSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        bind_codex_thread_blocking(app, channel, thread_id, sync_enabled, note)
+    })
+    .await
+    .map_err(|e| format!("绑定会话失败: {e}"))?
+}
+
+fn bind_codex_thread_blocking(
     app: tauri::AppHandle,
     channel: String,
     thread_id: String,

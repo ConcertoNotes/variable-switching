@@ -68,7 +68,7 @@ pub(crate) struct OpenCodeProfile {
     pub created_at: String,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct OpenCodeProfilesData {
     pub profiles: Vec<OpenCodeProfile>,
 }
@@ -252,17 +252,26 @@ pub(crate) fn read_opencode_profiles(app: &tauri::AppHandle) -> OpenCodeProfiles
     if !path.exists() {
         return OpenCodeProfilesData::default();
     }
-    fs::read_to_string(&path)
+    let mut data: OpenCodeProfilesData = fs::read_to_string(&path)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    for p in data.profiles.iter_mut() {
+        p.api_key =
+            crate::decrypt_secret_or_keep(&p.api_key, &format!("OpenCode 配置「{}」", p.name));
+    }
+    data
 }
 
 fn write_opencode_profiles(
     app: &tauri::AppHandle,
     data: &OpenCodeProfilesData,
 ) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
+    let mut encrypted = data.clone();
+    for p in encrypted.profiles.iter_mut() {
+        p.api_key = crate::encrypt_secret(&p.api_key);
+    }
+    let json = serde_json::to_string_pretty(&encrypted).map_err(|e| e.to_string())?;
     crate::write_file_atomic(&opencode_profiles_path(app), &json)?;
     // 与其他四个应用保持一致：列表变化后刷新托盘快速切换菜单
     crate::refresh_tray_menu(app);
@@ -477,6 +486,7 @@ pub fn switch_opencode_profile(app: tauri::AppHandle, id: String) -> Result<(), 
         .find(|profile| profile.id == id)
         .ok_or("配置未找到")?
         .clone();
+    crate::ensure_secret_usable(&profile.api_key, &format!("OpenCode 配置「{}」", profile.name))?;
 
     let path = opencode_config_path();
     let mut config = read_opencode_config(&path)?;

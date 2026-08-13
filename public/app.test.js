@@ -882,3 +882,33 @@ test("resolveUsageRange custom defaults to last 24h and honors live end", () => 
     endTs: null,
   });
 });
+
+// 手机控制的桥接脚本以 Rust 原始字符串内嵌在 codex_toolbox.rs 里，rustc 不会检查其中的
+// JS 语法。曾有一次批量替换把模板里的 `const x =` 一并改成 `pub(crate) const x =`，
+// 编译照样通过，运行时飞书/QQ 桥接进程却启动即崩溃，看门狗每 30 秒重启一次。
+test("embedded mobile bridge JS templates stay valid JavaScript", () => {
+  const os = require("node:os");
+  const { execFileSync } = require("node:child_process");
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src-tauri", "src", "codex_toolbox.rs"),
+    "utf8"
+  );
+  const templates = ["qq_qr_runner_text", "qq_gateway_runner_text", "lark_bridge_runner_text"];
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "varswitch-runner-"));
+  try {
+    for (const name of templates) {
+      const start = source.indexOf(`fn ${name}()`);
+      assert.ok(start >= 0, `${name} 未找到`);
+      const open = source.indexOf('r#"', start);
+      const close = source.indexOf('"#', open + 3);
+      assert.ok(open >= 0 && close > open, `${name} 的原始字符串边界解析失败`);
+      const script = source.slice(open + 3, close);
+      assert.ok(!script.includes("pub(crate)"), `${name} 里混入了 Rust 语法`);
+      const file = path.join(tmpDir, `${name}.mjs`);
+      fs.writeFileSync(file, script, "utf8");
+      execFileSync(process.execPath, ["--check", file], { stdio: "pipe" });
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

@@ -347,8 +347,19 @@ pub(crate) fn scan_codex_cli_sessions() -> Vec<CliSessionEntry> {
 
 /// 会话管理器：列出本机 Claude Code / Codex 历史会话，按更新时间降序。
 /// query 对 title/cwd/id 做不区分大小写子串过滤；app 过滤来源；limit 默认 200。
+/// 要递归遍历会话目录并读取每个文件的开头，会话多时可达数秒，故在阻塞线程池执行。
 #[tauri::command]
-pub(crate) fn list_cli_sessions(
+pub(crate) async fn list_cli_sessions(
+    query: Option<String>,
+    app: Option<String>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || list_cli_sessions_blocking(query, app, limit))
+        .await
+        .map_err(|e| format!("扫描本机会话失败: {e}"))?
+}
+
+fn list_cli_sessions_blocking(
     query: Option<String>,
     app: Option<String>,
     limit: Option<usize>,

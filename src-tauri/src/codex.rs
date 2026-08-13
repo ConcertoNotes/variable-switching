@@ -40,7 +40,7 @@ pub(crate) struct CodexProfile {
     pub(crate) created_at: String,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct CodexProfilesData {
     pub(crate) profiles: Vec<CodexProfile>,
     /// 首次读取旧档案时清理历史默认图片地址；迁移完成后保留用户手动填写的 URL。
@@ -84,6 +84,11 @@ pub(crate) fn read_codex_profiles(app: &tauri::AppHandle) -> CodexProfilesData {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    for p in data.profiles.iter_mut() {
+        let label = format!("Codex 配置「{}」", p.name);
+        p.api_key = decrypt_secret_or_keep(&p.api_key, &label);
+        p.image_api_key = decrypt_secret_or_keep(&p.image_api_key, &label);
+    }
     // 图片 Base URL 不设默认值。旧档案只在首次读取时清理一次，确保历史默认值
     // 为空；迁移完成后用户主动填写的自定义 URL 可以正常保留。
     let migrated = if data.image_base_url_migrated {
@@ -112,7 +117,12 @@ pub(crate) fn clear_codex_image_base_urls(data: &mut CodexProfilesData) -> bool 
 
 pub(crate) fn write_codex_profiles(app: &tauri::AppHandle, data: &CodexProfilesData) -> Result<(), String> {
     let path = codex_profiles_path(app);
-    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
+    let mut encrypted = data.clone();
+    for p in encrypted.profiles.iter_mut() {
+        p.api_key = encrypt_secret(&p.api_key);
+        p.image_api_key = encrypt_secret(&p.image_api_key);
+    }
+    let json = serde_json::to_string_pretty(&encrypted).map_err(|e| e.to_string())?;
     write_private_file(&path, &json)?;
     refresh_tray_menu(app);
     Ok(())
@@ -1028,6 +1038,7 @@ pub(crate) fn switch_codex_profile(app: tauri::AppHandle, id: String) -> Result<
         .find(|x| x.id == id)
         .ok_or("配置未找到")?
         .clone();
+    ensure_secret_usable(&profile.api_key, &format!("Codex 配置「{}」", profile.name))?;
 
     // 切换前自动备份当前配置
     auto_backup_configs(&app);

@@ -212,7 +212,7 @@ pub(crate) struct SiteBalanceToken {
     pub(crate) user_id: String,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct SiteBalanceTokensData {
     #[serde(default)]
     pub(crate) tokens: HashMap<String, SiteBalanceToken>,
@@ -237,14 +237,22 @@ fn read_site_tokens(app: &tauri::AppHandle) -> SiteBalanceTokensData {
     if !path.exists() {
         return SiteBalanceTokensData::default();
     }
-    fs::read_to_string(&path)
+    let mut data: SiteBalanceTokensData = fs::read_to_string(&path)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    for (host, entry) in data.tokens.iter_mut() {
+        entry.token = decrypt_secret_or_keep(&entry.token, &format!("{host} 的站点令牌"));
+    }
+    data
 }
 
 fn write_site_tokens(app: &tauri::AppHandle, data: &SiteBalanceTokensData) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
+    let mut encrypted = data.clone();
+    for entry in encrypted.tokens.values_mut() {
+        entry.token = encrypt_secret(&entry.token);
+    }
+    let json = serde_json::to_string_pretty(&encrypted).map_err(|e| e.to_string())?;
     write_private_file(&site_tokens_path(app), &json)
 }
 

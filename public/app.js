@@ -918,6 +918,19 @@ const I18N = {
     settingsHotkeyNeedModifier: "The shortcut must include Ctrl, Alt or Win",
     settingsHotkeySaved: "Global shortcut set to {keys}",
     settingsHotkeyCleared: "Global shortcut disabled",
+    // 配置体检
+    healthCheckGroup: "Health Check",
+    healthCheckLabel: "Check whether every profile still works",
+    healthCheckDesc: "Probes the Base URL of each profile one by one and reports why a profile fails. No profile is modified or deleted.",
+    healthCheckBtn: "Start check",
+    healthChecking: "Checking...",
+    healthSummary: "{total} profile(s) checked: {ok} healthy, {bad} with problems, {dead} unreachable",
+    healthLevelOk: "Healthy",
+    healthLevelWarn: "Suspicious",
+    healthLevelBad: "Problem",
+    healthLevelDead: "Unreachable",
+    healthLevelSkipped: "Skipped",
+    healthFailed: "Health check failed",
     balanceLabel: "Balance",
     balanceCheck: "Check balance",
     balanceLoading: "Checking...",
@@ -1531,6 +1544,19 @@ const I18N = {
     settingsHotkeyNeedModifier: "快捷键需要包含 Ctrl、Alt 或 Win 键",
     settingsHotkeySaved: "全局快捷键已设为 {keys}",
     settingsHotkeyCleared: "已关闭全局快捷键",
+    // 配置体检
+    healthCheckGroup: "配置体检",
+    healthCheckLabel: "检测所有配置是否可用",
+    healthCheckDesc: "逐个探测各配置的 Base URL，标出失效原因；不会修改或删除任何配置。",
+    healthCheckBtn: "开始检测",
+    healthChecking: "检测中...",
+    healthSummary: "共 {total} 项：{ok} 可用、{bad} 有问题、{dead} 不可达",
+    healthLevelOk: "可用",
+    healthLevelWarn: "可疑",
+    healthLevelBad: "有问题",
+    healthLevelDead: "不可达",
+    healthLevelSkipped: "已跳过",
+    healthFailed: "体检失败",
     balanceLabel: "余额",
     balanceCheck: "查询余额",
     balanceLoading: "查询中...",
@@ -3046,6 +3072,12 @@ function applyLanguage() {
   setText("settingsHotkeyClear", t("settingsHotkeyClear"));
   const hotkeyInput = $("settingsHotkeyInput");
   if (hotkeyInput) hotkeyInput.placeholder = t("settingsHotkeyPlaceholder");
+  // 配置体检区块
+  setText("settingsGroupHealth", t("healthCheckGroup"));
+  setText("settingsHealthLabel", t("healthCheckLabel"));
+  setText("settingsHealthDesc", t("healthCheckDesc"));
+  // 检测途中按钮上是「检测中...」，此时覆盖会让 setButtonBusy 还原出错误文案
+  if (!healthCheckBusy) setText("settingsHealthCheckBtn", t("healthCheckBtn"));
   // 数据目录（多设备同步）区块
   setText("settingsGroupDataDir", t("settingsGroupDataDir"));
   setText("settingsDataDirLabel", t("settingsDataDirLabel"));
@@ -10370,6 +10402,91 @@ on("settingsBackupList", "click", async (event) => {
     setButtonBusy(btn, false);
   }
 });
+
+// ── 配置体检 ────────────────────────────────────────
+// 后端逐个探测各应用配置的 Base URL 并给出结论，全程只读，不会改动任何配置。
+
+// 越严重排越前，用户一眼就能看到要处理的项
+const HEALTH_LEVEL_ORDER = ["dead", "bad", "warn", "skipped", "ok"];
+
+const HEALTH_LEVEL_LABEL_KEYS = {
+  ok: "healthLevelOk",
+  warn: "healthLevelWarn",
+  bad: "healthLevelBad",
+  dead: "healthLevelDead",
+  skipped: "healthLevelSkipped",
+};
+
+const HEALTH_APP_LABELS = {
+  claude: "Claude",
+  codex: "Codex",
+  grok: "Grok",
+  gemini: "Gemini",
+  opencode: "OpenCode",
+};
+
+let healthCheckBusy = false;
+
+// 后端将来新增等级时兜底为「已跳过」，免得徽标掉类名、排序落到未知位置
+function healthLevelOf(item) {
+  const level = String(item?.level || "");
+  return HEALTH_LEVEL_LABEL_KEYS[level] ? level : "skipped";
+}
+
+function healthRowHtml(item) {
+  const level = healthLevelOf(item);
+  const appLabel = HEALTH_APP_LABELS[item.app] || item.app || "";
+  const name = item.name || item.id || "--";
+  const details = [];
+  if (item.message) details.push(String(item.message));
+  // 只有连通的配置延迟才有参考价值，失败项的耗时基本就是超时上限
+  if (level === "ok" && Number.isFinite(item.latencyMs)) details.push(`${item.latencyMs}ms`);
+  return `
+      <div class="health-row">
+        <span class="health-badge health-${level}">${t(HEALTH_LEVEL_LABEL_KEYS[level])}</span>
+        <span class="health-name">${esc(appLabel ? `${appLabel} · ${name}` : name)}</span>
+        <span class="health-host">${esc(item.host || "--")}</span>
+        <span class="health-message">${esc(details.join(" · "))}</span>
+      </div>`;
+}
+
+function renderProfilesHealth(list) {
+  const box = $("settingsHealthResult");
+  if (!box) return;
+  const rows = list
+    .slice()
+    .sort((a, b) => HEALTH_LEVEL_ORDER.indexOf(healthLevelOf(a)) - HEALTH_LEVEL_ORDER.indexOf(healthLevelOf(b)));
+  const counts = { ok: 0, warn: 0, bad: 0, dead: 0, skipped: 0 };
+  for (const item of rows) counts[healthLevelOf(item)] += 1;
+  box.innerHTML = `
+    <div class="health-summary">${t("healthSummary", { total: rows.length, ok: counts.ok, bad: counts.bad, dead: counts.dead })}</div>
+    <div class="health-list">${rows.map((item) => healthRowHtml(item)).join("")}</div>`;
+  box.hidden = false;
+}
+
+async function runProfilesHealthCheck() {
+  if (healthCheckBusy) return;
+  const btn = $("settingsHealthCheckBtn");
+  healthCheckBusy = true;
+  setButtonBusy(btn, true, t("healthChecking"));
+  try {
+    const list = await invoke("check_profiles_health");
+    renderProfilesHealth(Array.isArray(list) ? list : []);
+  } catch (error) {
+    showToast(String(error), "error");
+    // 失败时也要盖掉结果区，否则上一轮的旧结论会被当成这次的检测结果
+    const box = $("settingsHealthResult");
+    if (box) {
+      box.innerHTML = `<div class="health-summary">${t("healthFailed")}</div>`;
+      box.hidden = false;
+    }
+  } finally {
+    healthCheckBusy = false;
+    setButtonBusy(btn, false);
+  }
+}
+
+on("settingsHealthCheckBtn", "click", runProfilesHealthCheck);
 
 // ── 数据目录（多设备同步）────────────────────────────
 // 后端用指针文件把 data_dir 重定向到网盘同步文件夹，实现多设备共享配置。

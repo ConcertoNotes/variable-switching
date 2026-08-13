@@ -215,19 +215,6 @@ fn health_map() -> &'static Mutex<HashMap<String, UpstreamHealth>> {
     HEALTH_MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// 设置备用上游池（协议翻译模式）。保留此签名供既有调用点使用。
-pub fn set_failover_upstreams(upstreams: Vec<ProxyUpstream>) {
-    set_failover_targets(
-        upstreams
-            .into_iter()
-            .map(|upstream| ProxyTarget {
-                upstream,
-                mode: UpstreamMode::OpenAiChat,
-            })
-            .collect(),
-    );
-}
-
 /// 设置备用上游池（有序，优先级从高到低），每项自带协议模式。
 /// 请求处理时的候选序列 = [主上游] + 备用池；池为空时行为与单上游一致。
 pub fn set_failover_targets(targets: Vec<ProxyTarget>) {
@@ -236,14 +223,6 @@ pub fn set_failover_targets(targets: Vec<ProxyTarget>) {
     }
     // 与 set_upstream 同理：配置变更即全量重置熔断/统计
     reset_health_state();
-}
-
-/// 当前备用上游池快照（仅上游部分）
-pub fn failover_upstreams() -> Vec<ProxyUpstream> {
-    failover_targets()
-        .into_iter()
-        .map(|target| target.upstream)
-        .collect()
 }
 
 /// 当前备用上游池快照（含协议模式）
@@ -1456,9 +1435,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_setters_default_to_translation_mode() {
+    fn set_upstream_without_mode_defaults_to_translation() {
         let _guard = lock_proxy_state();
-        // 旧签名的调用点不指定协议，必须继续按 OpenAI 翻译模式工作
+        // set_upstream 不带协议参数，必须继续按 OpenAI 翻译模式工作
         set_upstream(Some(ProxyUpstream {
             base_url: "https://legacy.example.com".into(),
             api_key: "sk-legacy".into(),
@@ -1468,19 +1447,8 @@ mod tests {
         assert_eq!(target.mode, UpstreamMode::OpenAiChat);
         assert_eq!(target.upstream.base_url, "https://legacy.example.com");
 
-        set_failover_upstreams(vec![ProxyUpstream {
-            base_url: "https://backup.example.com".into(),
-            api_key: "sk-backup".into(),
-            model: String::new(),
-        }]);
-        let pool = failover_targets();
-        assert_eq!(pool.len(), 1);
-        assert_eq!(pool[0].mode, UpstreamMode::OpenAiChat);
-        // 兼容视图仍只暴露上游本身
-        assert_eq!(failover_upstreams().len(), 1);
-
         set_upstream(None);
-        set_failover_upstreams(Vec::new());
+        set_failover_targets(Vec::new());
     }
 
     #[test]
@@ -1525,7 +1493,7 @@ mod tests {
         assert_eq!(snapshot["failoverPool"][1]["apiFormat"], "openai_chat");
 
         set_upstream(None);
-        set_failover_upstreams(Vec::new());
+        set_failover_targets(Vec::new());
     }
 
     #[test]
