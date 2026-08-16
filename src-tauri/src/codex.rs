@@ -7,6 +7,7 @@ pub(crate) const CODEX_IMAGE_BASE_URL_ENV: &str = "VARSWITCH_IMAGE_BASE_URL";
 pub(crate) const CODEX_IMAGE_MODEL_ENV: &str = "VARSWITCH_IMAGE_MODEL";
 pub(crate) const CODEX_IMAGE_MODEL: &str = "gpt-image-2";
 pub(crate) const CODEX_IMAGE_SKILL_ID: &str = "varswitch-imagegen";
+pub(crate) const CODEX_DEEPSEEK_MODEL_CATALOG_FILE: &str = "models.json";
 pub(crate) const CODEX_IMAGE_PRIORITY_START: &str = "<!-- VARSWITCH:IMAGE-SKILL-PRIORITY:START -->";
 pub(crate) const CODEX_IMAGE_PRIORITY_END: &str = "<!-- VARSWITCH:IMAGE-SKILL-PRIORITY:END -->";
 pub(crate) const CODEX_IMAGE_PRIORITY_INSTRUCTIONS: &str = r#"<!-- VARSWITCH:IMAGE-SKILL-PRIORITY:START -->
@@ -138,6 +139,88 @@ pub(crate) fn codex_auth_path() -> PathBuf {
 
 pub(crate) fn codex_config_path() -> PathBuf {
     codex_config_dir().join("config.toml")
+}
+
+pub(crate) fn codex_deepseek_model_catalog_path() -> PathBuf {
+    codex_config_dir().join(CODEX_DEEPSEEK_MODEL_CATALOG_FILE)
+}
+
+pub(crate) fn is_deepseek_native_base_url(base_url: &str) -> bool {
+    let lower = base_url.trim().to_ascii_lowercase();
+    let without_scheme = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))
+        .unwrap_or(&lower);
+    let authority = without_scheme.split('/').next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or_default();
+
+    matches!(host, "api.deepseek.com" | "api.deepseek.com:443")
+}
+
+pub(crate) fn uses_deepseek_native_model_catalog(provider: &str, base_url: &str) -> bool {
+    provider.trim() == "deepseek" && is_deepseek_native_base_url(base_url)
+}
+
+pub(crate) fn deepseek_codex_model_catalog() -> String {
+    let base_instructions = "You are Codex, an agent that collaborates with the user in the current workspace until the requested work is complete.";
+    let catalog_model = |slug: &str, display_name: &str| {
+        serde_json::json!({
+            "slug": slug,
+            "prefer_websockets": false,
+            "support_verbosity": true,
+            "default_verbosity": "low",
+            "apply_patch_tool_type": "freeform",
+            "web_search_tool_type": "text",
+            "input_modalities": ["text"],
+            "supports_image_detail_original": false,
+            "truncation_policy": { "mode": "tokens", "limit": 10000 },
+            "supports_parallel_tool_calls": true,
+            "tool_mode": null,
+            "multi_agent_version": "v2",
+            "use_responses_lite": false,
+            "include_skills_usage_instructions": false,
+            "auto_review_model_override": null,
+            "context_window": 1_048_576,
+            "max_context_window": 1_048_576,
+            "effective_context_window_percent": 95,
+            "auto_compact_token_limit": null,
+            "comp_hash": "3000",
+            "reasoning_summary_format": "experimental",
+            "default_reasoning_summary": "none",
+            "display_name": display_name,
+            "description": "DeepSeek agentic coding model.",
+            "default_reasoning_level": "high",
+            "supported_reasoning_levels": [
+                { "effort": "low", "description": "Fast responses with lighter reasoning" },
+                { "effort": "high", "description": "Extra reasoning depth for complex problems" },
+                { "effort": "max", "description": "Maximum reasoning depth for the hardest problems" }
+            ],
+            "shell_type": "shell_command",
+            "visibility": "list",
+            "minimal_client_version": "0.144.0",
+            "supported_in_api": true,
+            "availability_nux": null,
+            "upgrade": null,
+            "priority": 1,
+            "model_messages": {
+                "instructions_template": base_instructions,
+                "instructions_variables": {},
+                "approvals": null
+            },
+            "experimental_supported_tools": [],
+            "supports_search_tool": true,
+            "default_service_tier": null,
+            "supports_reasoning_summaries": true,
+            "base_instructions": base_instructions
+        })
+    };
+    serde_json::to_string_pretty(&serde_json::json!({
+        "models": [
+            catalog_model("deepseek-v4-flash", "DeepSeek-V4-Flash"),
+            catalog_model("deepseek-v4-pro", "DeepSeek-V4-Pro")
+        ]
+    }))
+    .expect("DeepSeek model catalog serialization should not fail")
 }
 
 pub(crate) fn codex_global_agents_path() -> PathBuf {
@@ -417,10 +500,24 @@ experimental_bearer_token = "{api_key}"
         );
         content
     } else {
+        let use_deepseek_catalog = uses_deepseek_native_model_catalog(provider, base_url);
+        let model_catalog_json = if use_deepseek_catalog {
+            format!(
+                "model_reasoning_effort = \"high\"\nmodel_catalog_json = \"{}\"\n",
+                CODEX_DEEPSEEK_MODEL_CATALOG_FILE
+            )
+        } else {
+            String::new()
+        };
+        let effective_wire_api = if use_deepseek_catalog {
+            "responses".to_string()
+        } else {
+            normalize_codex_wire_api(wire_api)
+        };
         let content = format!(
             r#"model_provider = "{provider}"
 model = "{model}"
-chatgpt_base_url = "{chatgpt_base_url}"
+{model_catalog_json}chatgpt_base_url = "{chatgpt_base_url}"
 
 [model_providers.{provider}]
 name = "{provider}"
@@ -430,8 +527,9 @@ requires_openai_auth = true
 "#,
             provider = provider,
             model = model,
+            model_catalog_json = model_catalog_json,
             base_url = base_url,
-            wire_api = normalize_codex_wire_api(wire_api),
+            wire_api = effective_wire_api,
             chatgpt_base_url = smart_control_backend_api_url(),
         );
         content
@@ -466,6 +564,13 @@ pub(crate) fn write_codex_config_with_base_url(profile: &CodexProfile, base_url:
     } else {
         profile.model.clone()
     };
+    if !official_account_mode && uses_deepseek_native_model_catalog(&provider, base_url) {
+        write_file_atomic(
+            &codex_deepseek_model_catalog_path(),
+            &deepseek_codex_model_catalog(),
+        )
+        .map_err(|e| format!("写入 Codex DeepSeek 模型目录失败: {}", e))?;
+    }
     let toml_content = if official_account_mode {
         codex_config_toml_content_with_image(
             &provider,
@@ -518,6 +623,39 @@ pub(crate) fn write_codex_config_with_base_url(profile: &CodexProfile, base_url:
     Ok(())
 }
 
+pub(crate) fn codex_status_from_config(
+    config_str: &str,
+    api_key: String,
+    image_api_key: String,
+    image_base_url: String,
+    image_skill_installed: bool,
+) -> LocationStatus {
+    let provider_name = toml_line_value(config_str, "model_provider");
+    let provider_base_url = if provider_name.trim().is_empty() {
+        String::new()
+    } else {
+        toml_section_value(
+            config_str,
+            &format!("model_providers.{}", provider_name.trim()),
+            "base_url",
+        )
+    };
+    let base_url = if !provider_base_url.trim().is_empty() {
+        provider_base_url
+    } else {
+        toml_line_value(config_str, "base_url")
+    };
+
+    LocationStatus {
+        api_key,
+        base_url,
+        model: toml_line_value(config_str, "model"),
+        image_api_key,
+        image_base_url,
+        image_skill_installed,
+    }
+}
+
 /// 读取当前 Codex 配置状态
 pub(crate) fn read_codex_status() -> Option<LocationStatus> {
     let config_str = fs::read_to_string(codex_config_path()).unwrap_or_default();
@@ -542,27 +680,6 @@ pub(crate) fn read_codex_status() -> Option<LocationStatus> {
         auth_api_key
     };
 
-    let provider_name = toml_line_value(&config_str, "model_provider");
-    let provider_base_url = if provider_name.trim().is_empty() {
-        String::new()
-    } else {
-        toml_section_value(
-            &config_str,
-            &format!("model_providers.{}", provider_name.trim()),
-            "base_url",
-        )
-    };
-    let base_url = if !provider_base_url.trim().is_empty() {
-        provider_base_url
-    } else {
-        config_str
-            .lines()
-            .find(|l| l.trim().starts_with("base_url"))
-            .and_then(|l| l.split('=').nth(1))
-            .map(|v| v.trim().trim_matches('"').to_string())
-            .unwrap_or_default()
-    };
-
     let image_api_key = reg_get_env_opt(CODEX_IMAGE_API_KEY_ENV)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| toml_section_value(&config_str, "gpt_image_2", "api_key"));
@@ -570,14 +687,14 @@ pub(crate) fn read_codex_status() -> Option<LocationStatus> {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| toml_section_value(&config_str, "gpt_image_2", "base_url"));
 
-    Some(LocationStatus {
+    Some(codex_status_from_config(
+        &config_str,
         api_key,
-        base_url,
         image_api_key,
         image_base_url,
-        image_skill_installed: codex_image_skill_dir().join("SKILL.md").exists()
+        codex_image_skill_dir().join("SKILL.md").exists()
             && codex_image_skill_script_path().exists(),
-    })
+    ))
 }
 
 pub(crate) fn parse_toml_string_value(raw: &str) -> String {
@@ -645,6 +762,7 @@ pub(crate) fn split_codex_config_root_and_sections(config_text: &str) -> (String
         "model_reasoning_effort",
         "disable_response_storage",
         "preferred_auth_method",
+        "model_catalog_json",
         "chatgpt_base_url",
     ];
     let lines: Vec<&str> = config_text.lines().collect();
@@ -824,6 +942,7 @@ pub(crate) fn read_codex_config_diagnostics(app: &tauri::AppHandle) -> CodexConf
     let status = read_codex_status().unwrap_or(LocationStatus {
         api_key: String::new(),
         base_url: String::new(),
+        model: String::new(),
         image_api_key: String::new(),
         image_base_url: String::new(),
         image_skill_installed: false,

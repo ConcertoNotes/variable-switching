@@ -34,6 +34,7 @@ pub(crate) fn resolve_base_url_or_default(raw: &str, default_url: &str) -> Strin
 pub(crate) struct LocationStatus {
     pub(crate) api_key: String,
     pub(crate) base_url: String,
+    pub(crate) model: String,
     pub(crate) image_api_key: String,
     pub(crate) image_base_url: String,
     pub(crate) image_skill_installed: bool,

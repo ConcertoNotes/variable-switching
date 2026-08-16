@@ -208,9 +208,10 @@ const CODEX_PRESETS = [
     id: "deepseek",
     name: "DeepSeek",
     baseUrl: "https://api.deepseek.com",
-    model: "deepseek-v4-flash",
+    model: "deepseek-v4-pro",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
     providerName: "deepseek",
-    wire: "chat",
+    wire: "responses",
   },
   {
     id: "kimi",
@@ -720,6 +721,7 @@ const I18N = {
     proxyBreakerHalfOpen: "Probing",
     codexWireApiLabel: "Upstream Protocol",
     codexWireApiHint: "Written to wire_api in ~/.codex/config.toml. Presets set this automatically.",
+    codexWireApiDeepseekHint: "DeepSeek's official endpoint uses Responses API. This value is fixed for this preset.",
     codexAdvancedTitle: "Advanced options",
     verifyOkLabel: "Verified",
     verifyModelsSuffix: "models",
@@ -1348,6 +1350,7 @@ const I18N = {
     proxyBreakerHalfOpen: "探测中",
     codexWireApiLabel: "上游协议",
     codexWireApiHint: "写入 ~/.codex/config.toml 的 wire_api 字段；选择预设时自动匹配。",
+    codexWireApiDeepseekHint: "DeepSeek 官方端点使用 Responses API，此预设已固定协议。",
     codexAdvancedTitle: "高级选项",
     verifyOkLabel: "验证通过",
     verifyModelsSuffix: "个模型",
@@ -2849,9 +2852,10 @@ function applyLanguage() {
       ? "OpenAI Responses（官方 / 兼容网关）"
       : "OpenAI Responses (official / compatible gateways)";
     codexWireSelect.options[1].textContent = currentLang === "zh"
-      ? "OpenAI Chat Completions（DeepSeek、Kimi 等）"
-      : "OpenAI Chat Completions (DeepSeek, Kimi, etc.)";
+      ? "OpenAI Chat Completions（旧网关 / 本地转换）"
+      : "OpenAI Chat Completions (legacy gateways / local translation)";
   }
+  syncCodexWireApiControl();
   setText("codexAdvancedTitle", t("codexAdvancedTitle"));
   setPlaceholder("codexBaseUrl", currentLang === "zh" ? "留空使用官方地址 https://api.openai.com/v1" : "Leave empty for official https://api.openai.com/v1");
   setText("codexNameLabel", t("codexNameLabel"));
@@ -5944,9 +5948,22 @@ function updateCodexPresetHint() {
   hint.textContent = t("codexPresetHintDefault");
 }
 
+function syncCodexWireApiControl(preset = getSelectedCodexPreset()) {
+  const wireSelect = $("codexWireApi");
+  if (!wireSelect) return;
+  const providerName = preset?.providerName || $("codexProvider")?.value || "";
+  const baseUrl = preset?.baseUrl || $("codexBaseUrl")?.value || "";
+  const locked = preset?.id === "deepseek"
+    || !!helpers.isDeepseekCodexConfig?.(providerName, baseUrl);
+  if (locked) wireSelect.value = "responses";
+  wireSelect.disabled = locked;
+  setText("codexWireApiHint", t(locked ? "codexWireApiDeepseekHint" : "codexWireApiHint"));
+}
+
 function applyCodexPreset(preset) {
   if (!preset) {
     updateCodexPresetHint();
+    syncCodexWireApiControl(null);
     return;
   }
   if (!$("codexProfileName").value.trim()) {
@@ -5958,6 +5975,8 @@ function applyCodexPreset(preset) {
   if ($("codexWireApi")) $("codexWireApi").value = preset.wire || "responses";
   clearEndpointResults("codex");
   clearModelResults("codex");
+  if (preset.models?.length) renderModelResults("codex", preset.models);
+  syncCodexWireApiControl(preset);
   updateCodexPresetHint();
   updateCodexOfficialConfigPreview();
 }
@@ -6183,7 +6202,10 @@ function openCodexModal(profile) {
   codexEnableAfterSave = false;
   $("codexModalTitle").textContent = profile ? t("codexEditConfig") : t("codexAddConfig");
   $("codexProfileId").value = editingCodexId || "";
-  if ($("codexPresetSelect")) $("codexPresetSelect").value = "";
+  const matchedPreset = profile && helpers.isDeepseekCodexConfig?.(profile.providerName, profile.baseUrl)
+    ? CODEX_PRESETS.find((preset) => preset.id === "deepseek")
+    : null;
+  if ($("codexPresetSelect")) $("codexPresetSelect").value = matchedPreset?.id || "";
   if ($("codexProfileName")) $("codexProfileName").value = profile ? profile.name : "";
   if ($("codexApiKey")) {
     $("codexApiKey").value = profile ? profile.apiKey : "";
@@ -6210,6 +6232,8 @@ function openCodexModal(profile) {
   updateCodexPresetHint();
   clearEndpointResults("codex");
   clearModelResults("codex");
+  if (matchedPreset?.models?.length) renderModelResults("codex", matchedPreset.models);
+  syncCodexWireApiControl(matchedPreset);
   $("codexModalOverlay").classList.add("open");
   document.body.classList.add("modal-open");
   setTimeout(() => {
@@ -6233,8 +6257,11 @@ async function handleCodexSubmit(event) {
   const apiKey = $("codexApiKey").value.trim();
   const baseUrl = $("codexBaseUrl").value.trim();
   const model = $("codexModel").value.trim();
-  const wireApi = $("codexWireApi")?.value === "chat" ? "chat" : "responses";
   const providerName = $("codexProvider").value.trim();
+  const deepseekNative = !!helpers.isDeepseekCodexConfig?.(providerName, baseUrl);
+  const wireApi = deepseekNative
+    ? "responses"
+    : ($("codexWireApi")?.value === "chat" ? "chat" : "responses");
   const imageApiKey = $("codexImageApiKey").value.trim();
   const imageBaseUrl = $("codexImageBaseUrl").value.trim();
   if (!name) {
@@ -9684,6 +9711,8 @@ on("codexCancelBtn", "click", closeCodexModal);
 on("codexModalClose", "click", closeCodexModal);
 on("codexProfileForm", "submit", handleCodexSubmit);
 on("codexPresetSelect", "change", () => applyCodexPreset(getSelectedCodexPreset()));
+on("codexBaseUrl", "input", () => syncCodexWireApiControl());
+on("codexProvider", "input", () => syncCodexWireApiControl());
 on("codexBaseUrl", "focus", () => tryClipboardAutoFill("url", "codexBaseUrl"));
 on("codexApiKey", "focus", () => tryClipboardAutoFill("key", "codexApiKey"));
 on("codexImageBaseUrl", "focus", () => tryClipboardAutoFill("url", "codexImageBaseUrl"));

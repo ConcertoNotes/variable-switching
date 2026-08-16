@@ -1223,6 +1223,7 @@ pub(crate) fn get_status(app: tauri::AppHandle) -> StatusResult {
     let env_vars = Some(LocationStatus {
         api_key: read_auth_from_system_env(),
         base_url: reg_get_env(BASE_URL_ENV),
+        model: String::new(),
         image_api_key: String::new(),
         image_base_url: String::new(),
         image_skill_installed: false,
@@ -1237,6 +1238,7 @@ pub(crate) fn get_status(app: tauri::AppHandle) -> StatusResult {
             Some(LocationStatus {
                 api_key: read_auth_from_env_array(arr),
                 base_url: get_env_array_value(arr, BASE_URL_ENV).unwrap_or_default(),
+                model: String::new(),
                 image_api_key: String::new(),
                 image_base_url: String::new(),
                 image_skill_installed: false,
@@ -1260,6 +1262,7 @@ pub(crate) fn get_status(app: tauri::AppHandle) -> StatusResult {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
+            model: String::new(),
             image_api_key: String::new(),
             image_base_url: String::new(),
             image_skill_installed: false,

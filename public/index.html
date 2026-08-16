@@ -106,7 +106,7 @@
       <button class="sidebar-item sidebar-settings" data-console-page="settings" type="button">
         <img src="icon-guide.svg" alt=""><span>设置</span>
       </button>
-      <div class="sidebar-version">VarSwitch <span>v3.1.3</span></div>
+      <div class="sidebar-version">VarSwitch <span>v3.1.6</span></div>
     </aside>
 
     <main class="workspace-main" id="workspaceMain">
@@ -276,7 +276,7 @@
                   <label class="form-group"><span>上游协议</span>
                     <select class="form-select" id="universalCodexWireApi">
                       <option value="responses">OpenAI Responses（官方 / 兼容网关）</option>
-                      <option value="chat">OpenAI Chat Completions（DeepSeek、Kimi 等）</option>
+                      <option value="chat">OpenAI Chat Completions（旧网关 / 本地转换）</option>
                     </select>
                   </label>
                   <label class="form-group"><span>默认模型</span><input id="universalCodexModel" type="text" value="gpt-5.5" placeholder="gpt-5.5" list="universalModelOptions"></label>
@@ -684,7 +684,7 @@
           <label id="codexWireApiLabel" for="codexWireApi">上游协议</label>
           <select class="form-select" id="codexWireApi">
             <option value="responses">OpenAI Responses（官方 / 兼容网关）</option>
-            <option value="chat">OpenAI Chat Completions（DeepSeek、Kimi 等）</option>
+            <option value="chat">OpenAI Chat Completions（旧网关 / 本地转换）</option>
           </select>
           <small id="codexWireApiHint" class="form-hint">写入 ~/.codex/config.toml 的 wire_api 字段；选择预设时自动匹配。</small>
         </div>

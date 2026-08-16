@@ -295,6 +295,7 @@ pub(crate) fn read_grok_status() -> Option<LocationStatus> {
     Some(LocationStatus {
         api_key: status.api_key,
         base_url: status.base_url,
+        model: String::new(),
         image_api_key: String::new(),
         image_base_url: String::new(),
         image_skill_installed: false,

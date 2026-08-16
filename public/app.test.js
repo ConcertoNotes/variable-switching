@@ -52,6 +52,7 @@ const {
   getGlobalConfigDisplay,
   sanitizeMobileLogValue,
   resolveUsageRange,
+  isDeepseekCodexConfig,
 } = require("./app-helpers.js");
 
 function getDirectConsolePages(html) {
@@ -194,6 +195,39 @@ test("Codex wizard keeps long forms scrollable inside the viewport", () => {
     css,
     /\.codex-wizard-modal\s*\{[^}]*max-height:\s*calc\(100vh\s*-\s*48px\);/s
   );
+});
+
+test("DeepSeek Codex preset uses the native Responses API", () => {
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  const presetsStart = app.indexOf("const CODEX_PRESETS = [");
+  const deepseekStart = app.indexOf('id: "deepseek"', presetsStart);
+  const nextPreset = app.indexOf("\n  {", deepseekStart);
+  const deepseekPreset = app.slice(deepseekStart, nextPreset);
+
+  assert.notEqual(deepseekStart, -1);
+  assert.match(deepseekPreset, /providerName:\s*"deepseek"/);
+  assert.match(deepseekPreset, /wire:\s*"responses"/);
+  assert.match(deepseekPreset, /model:\s*"deepseek-v4-pro"/);
+  assert.match(deepseekPreset, /models:\s*\["deepseek-v4-flash",\s*"deepseek-v4-pro"\]/);
+  assert.doesNotMatch(deepseekPreset, /wire:\s*"chat"/);
+});
+
+test("DeepSeek official Codex settings lock the protocol without matching spoofed hosts", () => {
+  assert.equal(typeof isDeepseekCodexConfig, "function");
+  assert.equal(isDeepseekCodexConfig("deepseek", "https://api.deepseek.com"), true);
+  assert.equal(isDeepseekCodexConfig("deepseek", "https://api.deepseek.com/v1"), true);
+  assert.equal(isDeepseekCodexConfig("deepseek", "https://api.deepseek.com.evil.test"), false);
+  assert.equal(isDeepseekCodexConfig("custom", "https://api.deepseek.com"), false);
+});
+
+test("DeepSeek preset locks Responses and exposes its built-in model choices", () => {
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+
+  assert.match(app, /function syncCodexWireApiControl\(preset/);
+  assert.match(app, /wireSelect\.disabled\s*=\s*locked/);
+  assert.match(app, /renderModelResults\("codex",\s*preset\.models\)/);
+  assert.doesNotMatch(html, /Chat Completions（DeepSeek、Kimi 等）/);
 });
 
 test("Codex runtime status uses a full-width horizontal layout", () => {

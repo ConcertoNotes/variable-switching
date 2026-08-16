@@ -676,6 +676,65 @@ enabled = false
     }
 
     #[test]
+    fn deepseek_codex_config_uses_responses_and_custom_model_catalog() {
+        let content = codex_config_toml_content_with_image(
+            "deepseek",
+            "deepseek-v4-pro",
+            "https://api.deepseek.com/",
+            "sk-test",
+            "chat",
+            false,
+            "",
+            "",
+        );
+
+        assert!(content.contains(r#"wire_api = "responses""#));
+        assert!(content.contains(r#"model_reasoning_effort = "high""#));
+        assert!(content.contains(r#"model_catalog_json = "models.json""#));
+    }
+
+    #[test]
+    fn deepseek_codex_model_catalog_exposes_both_v4_models() {
+        let catalog: serde_json::Value = serde_json::from_str(&deepseek_codex_model_catalog())
+            .expect("DeepSeek model catalog should be valid JSON");
+        let models = catalog["models"]
+            .as_array()
+            .expect("DeepSeek model catalog should contain a models array");
+        let slugs = models
+            .iter()
+            .filter_map(|model| model["slug"].as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(slugs, vec!["deepseek-v4-flash", "deepseek-v4-pro"]);
+        assert!(models.iter().all(|model| model["context_window"] == 1_048_576));
+        assert!(models.iter().all(|model| model["apply_patch_tool_type"] == "freeform"));
+    }
+
+    #[test]
+    fn codex_runtime_status_includes_model_from_config() {
+        let config = r#"
+model_provider = "custom"
+model = "gpt-5.6-sol"
+
+[model_providers.custom]
+base_url = "https://code.example.test/v1"
+"#;
+
+        let status = codex_status_from_config(
+            config,
+            "sk-test".into(),
+            String::new(),
+            String::new(),
+            false,
+        );
+        let serialized = serde_json::to_value(&status).expect("status should serialize");
+
+        assert_eq!(status.model, "gpt-5.6-sol");
+        assert_eq!(serialized["model"], "gpt-5.6-sol");
+        assert_eq!(serialized["baseUrl"], "https://code.example.test/v1");
+    }
+
+    #[test]
     fn codex_config_merge_preserves_unmanaged_sections() {
         let existing = r#"
 model_provider = "old"
@@ -882,6 +941,7 @@ trust_level = "trusted"
         let status = LocationStatus {
             api_key: "sk-chat".into(),
             base_url: "https://chat.example.test/v1".into(),
+            model: "gpt-test".into(),
             image_api_key: "sk-image".into(),
             image_base_url: "https://image.example.test/v1".into(),
             image_skill_installed: true,

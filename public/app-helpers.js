@@ -86,6 +86,17 @@
       .sort((a, b) => a.localeCompare(b));
   }
 
+  function isDeepseekCodexConfig(providerName, baseUrl) {
+    if (String(providerName || "").trim().toLowerCase() !== "deepseek") return false;
+    try {
+      const url = new URL(String(baseUrl || "").trim());
+      return (url.protocol === "https:" || url.protocol === "http:")
+        && url.hostname.toLowerCase() === "api.deepseek.com";
+    } catch (_) {
+      return false;
+    }
+  }
+
   function getCodexToolboxLayout(tab) {
     if (tab === "session") {
       return {
@@ -291,6 +302,7 @@
     validateEditorPathInput,
     resolveUniversalAppBaseUrl,
     normalizeFetchedModels,
+    isDeepseekCodexConfig,
     getCodexToolboxLayout,
     isFreshMobileQr,
     isQqAuthorizationTarget,
