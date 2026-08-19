@@ -10678,7 +10678,7 @@ async function confirmDeepLinkImport() {
     const message = await invoke("apply_deep_link_import", request);
     closeDeepLinkModal();
     showToast(String(message), "success");
-    // 刷新对应列表（导入只新增、不激活，无需刷新状态）
+    // 刷新对应列表（新增或覆盖都不激活，无需刷新运行状态）
     if (kind === "profile") {
       if (app === "claude") await loadProfiles();
       else if (app === "codex") await loadCodexProfiles();

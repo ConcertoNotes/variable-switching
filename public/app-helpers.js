@@ -298,15 +298,20 @@
     const importPayload = payload || {};
     const source = importPayload.source || "legacy";
     const hasV1Conflict = source === "cc_switch_v1" && Boolean(importPayload.conflict);
-    return {
+    const selectedConflictAction = hasV1Conflict
+      ? (conflictAction === "overwrite" ? "overwrite" : "rename")
+      : null;
+    const request = {
       kind: importPayload.kind || "",
       app: importPayload.app || "",
       data: importPayload.data || {},
       source,
-      conflictAction: hasV1Conflict
-        ? (conflictAction === "overwrite" ? "overwrite" : "rename")
-        : null,
+      conflictAction: selectedConflictAction,
     };
+    if (selectedConflictAction === "overwrite") {
+      request.conflictToken = importPayload.conflict?.confirmationToken || null;
+    }
+    return request;
   }
 
   // 用量监控时间范围（unix 秒，前后端过滤均含端点）。两个易混概念的准确语义：

@@ -853,14 +853,20 @@ test("legacy MCP deep link view keeps provider-only controls hidden", () => {
 test("deep link apply request permits only the visible v1 conflict choice", () => {
   const payload = {
     kind: "profile", app: "codex", source: "cc_switch_v1",
-    conflict: { existingName: "Team", suggestedName: "Team (2)" },
+    conflict: {
+      existingName: "Team",
+      suggestedName: "Team (2)",
+      confirmationToken: "server-token",
+    },
     data: { name: "Team" },
   };
   assert.deepEqual(buildDeepLinkApplyRequest(payload, "overwrite"), {
     kind: "profile", app: "codex", data: { name: "Team" },
-    source: "cc_switch_v1", conflictAction: "overwrite",
+    source: "cc_switch_v1", conflictAction: "overwrite", conflictToken: "server-token",
   });
-  assert.equal(buildDeepLinkApplyRequest(payload, "invalid").conflictAction, "rename");
+  const rename = buildDeepLinkApplyRequest(payload, "invalid");
+  assert.equal(rename.conflictAction, "rename");
+  assert.equal(Object.hasOwn(rename, "conflictToken"), false);
 });
 
 test("deep link confirmation dialog exposes v1 fields and an explicit conflict choice", () => {
