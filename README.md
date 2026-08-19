@@ -221,8 +221,10 @@ Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
 
 - `varswitch://import/profile?app=<claude|codex|gemini|grok>&payload=<base64url(JSON)>`：导入单条配置，payload 含 `name`、`apiKey`，可选 `baseUrl`、`model` 等字段。
 - `varswitch://import/mcp?payload=<base64url(JSON)>`：导入 MCP Server，payload 含 `name`、`config`，可选 `apps` 指定启用的应用。
+- `varswitch://v1/import?resource=provider&app=<claude|codex|gemini>&name=...&endpoint=...&apiKey=...&model=...&homepage=...&enabled=true`：兼容 CC Switch v1 Provider Import 查询参数；Claude 还可传 `haikuModel`、`sonnetModel`、`opusModel`。
 - **导入前确认**：链接只做解析与校验，随后弹出确认框展示导入内容，API Key 打码显示（仅保留前 6 位与后 4 位），并提示确认链接来源可信，防止钓鱼。
-- 确认后仅新增配置，不会自动激活或切换。
+- 旧版 Profile/MCP 深链确认后仅新增；v1 同名时按下一条规则处理；均不自动激活或切换。
+- v1 同名配置默认重命名后新增，也可在确认框中明确选择覆盖；无论 `enabled` 为 `true`，导入都不会自动激活或切换。
 
 ### 14. 更新、下载站与仓库入口
 

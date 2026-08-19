@@ -5315,6 +5315,23 @@ body::before { display: none; }
   white-space: pre-wrap;
   word-break: break-all;
 }
+.deeplink-conflict {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: 8px;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.deeplink-conflict[hidden] { display: none; }
+.deeplink-conflict legend { padding: 0 4px; font-weight: 700; }
+.deeplink-conflict p { margin: 0; }
+.deeplink-conflict label { display: flex; align-items: flex-start; gap: 7px; cursor: pointer; }
+.deeplink-conflict input { margin: 3px 0 0; }
 
 .codex-wizard-modal {
   width: min(720px, calc(100vw - 48px));

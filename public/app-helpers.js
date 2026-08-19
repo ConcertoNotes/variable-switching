@@ -247,6 +247,73 @@
     };
   }
 
+  function maskDeepLinkSecret(value) {
+    const secret = String(value || "");
+    if (!secret) return "--";
+    if (secret.length <= 12) return "****";
+    return `${secret.slice(0, 6)}...${secret.slice(-4)}`;
+  }
+
+  function getDeepLinkImportView(payload) {
+    const importPayload = payload || {};
+    const data = importPayload.data || {};
+    const isMcp = importPayload.kind === "mcp";
+    const isV1 = importPayload.source === "cc_switch_v1";
+    const conflict = importPayload.conflict || null;
+    const appLabels = {
+      claude: "Claude",
+      codex: "Codex",
+      gemini: "Gemini",
+      grok: "Grok / xAI",
+    };
+    const mcpApps = data.apps || { claude: true, codex: true, gemini: true };
+    const mcpAppLabel = ["claude", "codex", "gemini"]
+      .filter((app) => mcpApps[app])
+      .map((app) => appLabels[app])
+      .join(" / ") || "MCP";
+
+    return {
+      isMcp,
+      appLabel: isMcp ? `MCP → ${mcpAppLabel}` : appLabels[importPayload.app] || importPayload.app || "--",
+      name: data.name || "--",
+      baseUrl: data.baseUrl || "--",
+      apiKeyMasked: maskDeepLinkSecret(data.apiKey),
+      model: data.model || "--",
+      haikuModel: data.haikuModel || "--",
+      sonnetModel: data.sonnetModel || "--",
+      opusModel: data.opusModel || "--",
+      homepage: data.homepage || "--",
+      configText: isMcp ? JSON.stringify(data.config || {}, null, 2) : "",
+      showProviderDetails: !isMcp,
+      showClaudeModels: !isMcp && importPayload.app === "claude",
+      showHomepage: !isMcp && isV1,
+      showConflict: !isMcp && isV1 && Boolean(conflict),
+      existingName: conflict?.existingName || "--",
+      suggestedName: conflict?.suggestedName || "--",
+      defaultConflictAction: "rename",
+    };
+  }
+
+  function buildDeepLinkApplyRequest(payload, conflictAction) {
+    const importPayload = payload || {};
+    const source = importPayload.source || "legacy";
+    const hasV1Conflict = source === "cc_switch_v1" && Boolean(importPayload.conflict);
+    const selectedConflictAction = hasV1Conflict
+      ? (conflictAction === "overwrite" ? "overwrite" : "rename")
+      : null;
+    const request = {
+      kind: importPayload.kind || "",
+      app: importPayload.app || "",
+      data: importPayload.data || {},
+      source,
+      conflictAction: selectedConflictAction,
+    };
+    if (selectedConflictAction === "overwrite") {
+      request.conflictToken = importPayload.conflict?.confirmationToken || null;
+    }
+    return request;
+  }
+
   // 用量监控时间范围（unix 秒，前后端过滤均含端点）。两个易混概念的准确语义：
   // - today：自然日，本地今天 00:00:00 → 23:59:59（凌晨零点到当天晚上零点）
   // - 1d：滚动窗口，当前时刻往前推整 24 小时 → 当前时刻
@@ -311,6 +378,9 @@
     sanitizeMobileLogValue,
     getCodexSessionMetrics,
     getGlobalConfigDisplay,
+    maskDeepLinkSecret,
+    getDeepLinkImportView,
+    buildDeepLinkApplyRequest,
     resolveUsageRange,
   };
 });
