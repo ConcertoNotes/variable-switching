@@ -250,7 +250,7 @@
   function maskDeepLinkSecret(value) {
     const secret = String(value || "");
     if (!secret) return "--";
-    if (secret.length <= 12) return `${secret.slice(0, 2)}****`;
+    if (secret.length <= 12) return "****";
     return `${secret.slice(0, 6)}...${secret.slice(-4)}`;
   }
 

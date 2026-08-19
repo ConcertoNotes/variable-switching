@@ -53,6 +53,7 @@ const {
   sanitizeMobileLogValue,
   resolveUsageRange,
   isDeepseekCodexConfig,
+  maskDeepLinkSecret,
   getDeepLinkImportView,
   buildDeepLinkApplyRequest,
 } = require("./app-helpers.js");
@@ -831,6 +832,12 @@ test("CC Switch v1 deep link view masks secrets and exposes provider fields", ()
   assert.equal(view.showConflict, true);
   assert.equal(view.suggestedName, "Team (2)");
   assert.equal(view.defaultConflictAction, "rename");
+});
+
+test("deep link secret mask fully hides short API keys", () => {
+  assert.equal(maskDeepLinkSecret("a"), "****");
+  assert.equal(maskDeepLinkSecret("ab"), "****");
+  assert.equal(maskDeepLinkSecret("sk-12345678"), "****");
 });
 
 test("legacy MCP deep link view keeps provider-only controls hidden", () => {
