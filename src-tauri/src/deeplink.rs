@@ -159,7 +159,9 @@ fn optional_param(params: &HashMap<String, String>, key: &str) -> Option<String>
 fn parse_http_endpoint(raw: &str) -> Result<String, String> {
     let has_http_scheme = raw
         .split_once("://")
-        .map(|(scheme, _)| scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+        .map(|(scheme, _)| {
+            scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
+        })
         .unwrap_or(false);
     if !has_http_scheme {
         return Err("endpoint 必须是合法的绝对 HTTP(S) URL".into());
@@ -307,6 +309,154 @@ pub(crate) fn unique_import_name(existing: &[String], wanted: &str) -> String {
     format!("{wanted} ({})", uuid::Uuid::new_v4())
 }
 
+#[derive(Debug, PartialEq)]
+pub(crate) enum ProfileImportResolution {
+    Add(String),
+    Overwrite(String),
+}
+
+pub(crate) fn detect_profile_conflict(
+    existing: &[String],
+    wanted: &str,
+) -> Option<DeepLinkConflict> {
+    let wanted = wanted.trim();
+    existing
+        .iter()
+        .any(|name| name == wanted)
+        .then(|| DeepLinkConflict {
+            existing_name: wanted.to_string(),
+            suggested_name: unique_import_name(existing, wanted),
+        })
+}
+
+pub(crate) fn resolve_profile_import(
+    existing: &[String],
+    wanted: &str,
+    source: &str,
+    action: Option<&str>,
+) -> Result<ProfileImportResolution, String> {
+    let wanted = wanted.trim();
+    if !matches!(source, "legacy" | "cc_switch_v1") {
+        return Err("不支持的导入来源".into());
+    }
+    match action {
+        Some("overwrite") if source == "legacy" => Err("旧版深链不支持覆盖同名配置".into()),
+        Some("overwrite") if source == "cc_switch_v1" => {
+            if existing.iter().any(|name| name == wanted) {
+                Ok(ProfileImportResolution::Overwrite(wanted.to_string()))
+            } else {
+                Err("同名配置已变化，请重新发起导入".into())
+            }
+        }
+        Some("rename") | None => Ok(ProfileImportResolution::Add(unique_import_name(
+            existing, wanted,
+        ))),
+        Some(_) => Err("不支持的重名处理方式".into()),
+    }
+}
+
+fn required_profile_value(data: &serde_json::Value, key: &str) -> Result<String, String> {
+    let value = data
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    if value.is_empty() {
+        Err(format!("payload 缺少 {key} 字段"))
+    } else {
+        Ok(value.to_string())
+    }
+}
+
+fn optional_profile_value(data: &serde_json::Value, key: &str) -> String {
+    data.get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string()
+}
+
+pub(crate) fn merge_claude_v1_profile(
+    mut existing: Profile,
+    data: &serde_json::Value,
+) -> Result<Profile, String> {
+    existing.name = required_profile_value(data, "name")?;
+    existing.api_key = required_profile_value(data, "apiKey")?;
+    existing.base_url = resolve_base_url_or_default(
+        &required_profile_value(data, "baseUrl")?,
+        DEFAULT_ANTHROPIC_BASE_URL,
+    );
+    existing.model_id = required_profile_value(data, "model")?;
+    existing.sonnet_model = optional_profile_value(data, "sonnetModel");
+    existing.opus_model = optional_profile_value(data, "opusModel");
+    existing.haiku_model = optional_profile_value(data, "haikuModel");
+    Ok(existing)
+}
+
+pub(crate) fn merge_codex_v1_profile(
+    mut existing: CodexProfile,
+    data: &serde_json::Value,
+) -> Result<CodexProfile, String> {
+    existing.name = required_profile_value(data, "name")?;
+    existing.api_key = required_profile_value(data, "apiKey")?;
+    existing.base_url = resolve_base_url_or_default(
+        &required_profile_value(data, "baseUrl")?,
+        DEFAULT_OPENAI_BASE_URL,
+    );
+    existing.model = required_profile_value(data, "model")?;
+    Ok(existing)
+}
+
+pub(crate) fn merge_gemini_v1_profile(
+    mut existing: GeminiProfile,
+    data: &serde_json::Value,
+) -> Result<GeminiProfile, String> {
+    existing.name = required_profile_value(data, "name")?;
+    existing.api_key = required_profile_value(data, "apiKey")?;
+    existing.base_url = required_profile_value(data, "baseUrl")?
+        .trim_end_matches('/')
+        .to_string();
+    existing.model = required_profile_value(data, "model")?;
+    Ok(existing)
+}
+
+pub(crate) fn existing_profile_names(
+    handle: &tauri::AppHandle,
+    app: &str,
+) -> Result<Vec<String>, String> {
+    match app {
+        "claude" => Ok(read_profiles(handle)
+            .profiles
+            .iter()
+            .map(|profile| profile.name.clone())
+            .collect()),
+        "codex" => Ok(read_codex_profiles(handle)
+            .profiles
+            .iter()
+            .map(|profile| profile.name.clone())
+            .collect()),
+        "gemini" => Ok(read_gemini_profiles(handle)
+            .profiles
+            .iter()
+            .map(|profile| profile.name.clone())
+            .collect()),
+        other => Err(format!("不支持的目标应用：{other}")),
+    }
+}
+
+fn validate_cc_switch_v1_profile_payload(data: &serde_json::Value) -> Result<(), String> {
+    required_profile_value(data, "name")?;
+    required_profile_value(data, "apiKey")?;
+    let endpoint = required_profile_value(data, "baseUrl")?;
+    parse_http_endpoint(&endpoint)?;
+    required_profile_value(data, "model")?;
+    required_profile_value(data, "homepage")?;
+    if data.get("enabled").and_then(|value| value.as_bool()) != Some(true) {
+        return Err("enabled 必须为 true".into());
+    }
+    Ok(())
+}
+
 /// 处理一条运行期收到的深链 URL：
 /// 解析成功 → emit "deeplink-import" 事件交前端弹窗确认，并把主窗口拉到前台；
 /// 解析失败 → 只写日志 + emit "deeplink-import-error" 给前端 toast，绝不崩溃。
@@ -314,7 +464,16 @@ pub(crate) fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
     // 日志只记录 ? 之前的部分：query 里的 payload 含明文密钥，不能落盘
     let visible = url.split('?').next().unwrap_or(url);
     match parse_deep_link_url(url) {
-        Ok(import) => {
+        Ok(mut import) => {
+            if import.source == "cc_switch_v1" && import.kind == "profile" {
+                match existing_profile_names(app, &import.app) {
+                    Ok(existing) => {
+                        let wanted = import.data["name"].as_str().unwrap_or_default();
+                        import.conflict = detect_profile_conflict(&existing, wanted);
+                    }
+                    Err(err) => log_error!("[deep-link] 读取现有配置失败：{err}"),
+                }
+            }
             log_info!(
                 "[deep-link] 解析成功：{visible}（kind={}，app={}）",
                 import.kind,
@@ -338,18 +497,28 @@ pub(crate) fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
 
 /// 前端确认后真正执行深链导入。
 /// 复用现有 add_* / save_unified_mcp_server 命令的内部逻辑：
-/// 只新增（不激活、不切换），重名自动加后缀；返回一句可读的结果描述。
+/// 默认新增（不激活、不切换），v1 同名配置可在确认后安全覆盖；返回一句可读的结果描述。
 #[tauri::command]
 pub(crate) fn apply_deep_link_import(
     handle: tauri::AppHandle,
     kind: String,
     app: String,
     data: serde_json::Value,
+    source: Option<String>,
+    conflict_action: Option<String>,
 ) -> Result<String, String> {
     match kind.as_str() {
         "profile" => {
-            // 与解析阶段相同的校验，防止绕过事件流程直接调用时写入脏数据
-            validate_profile_payload(&data)?;
+            let source = source.unwrap_or_else(|| "legacy".into());
+            if !matches!(source.as_str(), "legacy" | "cc_switch_v1") {
+                return Err("不支持的导入来源".into());
+            }
+            // 与解析阶段相同的校验，防止绕过事件流程直接调用时写入脏数据。
+            if source == "cc_switch_v1" {
+                validate_cc_switch_v1_profile_payload(&data)?;
+            } else {
+                validate_profile_payload(&data)?;
+            }
             let obj = data.as_object().ok_or("payload 必须是 JSON 对象")?;
             let get = |key: &str| -> String {
                 obj.get(key)
@@ -368,73 +537,132 @@ pub(crate) fn apply_deep_link_import(
             };
             let api_key = get("apiKey");
             let base_url = get("baseUrl");
+            let wanted = get("name");
             match app.as_str() {
                 "claude" => {
-                    let names: Vec<String> = read_profiles(&handle)
-                        .profiles
-                        .iter()
-                        .map(|p| p.name.clone())
-                        .collect();
-                    let name = unique_import_name(&names, &get("name"));
-                    let profile = add_profile(
-                        handle.clone(),
-                        name,
-                        api_key,
-                        base_url,
-                        get_opt("model"),
-                        get_opt("apiFormat"),
-                        get_opt("sonnetModel"),
-                        get_opt("opusModel"),
-                        get_opt("haikuModel"),
-                        obj.get("proxyFailover").and_then(|v| v.as_bool()),
-                        obj.get("proxyTakeover").and_then(|v| v.as_bool()),
-                    )?;
-                    Ok(format!("已添加 Claude 配置「{}」", profile.name))
+                    let names = existing_profile_names(&handle, "claude")?;
+                    match resolve_profile_import(
+                        &names,
+                        &wanted,
+                        &source,
+                        conflict_action.as_deref(),
+                    )? {
+                        ProfileImportResolution::Add(name) => {
+                            let profile = add_profile(
+                                handle.clone(),
+                                name,
+                                api_key,
+                                base_url,
+                                get_opt("model"),
+                                get_opt("apiFormat"),
+                                get_opt("sonnetModel"),
+                                get_opt("opusModel"),
+                                get_opt("haikuModel"),
+                                obj.get("proxyFailover").and_then(|v| v.as_bool()),
+                                obj.get("proxyTakeover").and_then(|v| v.as_bool()),
+                            )?;
+                            Ok(format!("已添加 Claude 配置「{}」", profile.name))
+                        }
+                        ProfileImportResolution::Overwrite(name) => {
+                            let mut profiles = read_profiles(&handle);
+                            let profile = profiles
+                                .profiles
+                                .iter_mut()
+                                .find(|profile| profile.name == name)
+                                .ok_or("同名配置已变化，请重新发起导入")?;
+                            *profile = merge_claude_v1_profile(profile.clone(), &data)?;
+                            write_profiles(&handle, &profiles)?;
+                            Ok(format!("已覆盖 Claude 配置「{name}」"))
+                        }
+                    }
                 }
                 "codex" => {
-                    let names: Vec<String> = read_codex_profiles(&handle)
-                        .profiles
-                        .iter()
-                        .map(|p| p.name.clone())
-                        .collect();
-                    let name = unique_import_name(&names, &get("name"));
-                    let profile = add_codex_profile(
-                        handle.clone(),
-                        name,
-                        api_key,
-                        base_url,
-                        get_opt("authMode"),
-                        get_opt("wireApi"),
-                        get_opt("model"),
-                        get_opt("providerName"),
-                        get_opt("imageApiKey"),
-                        get_opt("imageBaseUrl"),
-                    )?;
-                    Ok(format!("已添加 Codex 配置「{}」", profile.name))
+                    let names = existing_profile_names(&handle, "codex")?;
+                    match resolve_profile_import(
+                        &names,
+                        &wanted,
+                        &source,
+                        conflict_action.as_deref(),
+                    )? {
+                        ProfileImportResolution::Add(name) => {
+                            let profile = add_codex_profile(
+                                handle.clone(),
+                                name,
+                                api_key,
+                                base_url,
+                                get_opt("authMode"),
+                                get_opt("wireApi"),
+                                get_opt("model"),
+                                get_opt("providerName"),
+                                get_opt("imageApiKey"),
+                                get_opt("imageBaseUrl"),
+                            )?;
+                            Ok(format!("已添加 Codex 配置「{}」", profile.name))
+                        }
+                        ProfileImportResolution::Overwrite(name) => {
+                            let mut profiles = read_codex_profiles(&handle);
+                            let profile = profiles
+                                .profiles
+                                .iter_mut()
+                                .find(|profile| profile.name == name)
+                                .ok_or("同名配置已变化，请重新发起导入")?;
+                            *profile = merge_codex_v1_profile(profile.clone(), &data)?;
+                            write_codex_profiles(&handle, &profiles)?;
+                            Ok(format!("已覆盖 Codex 配置「{name}」"))
+                        }
+                    }
                 }
                 "gemini" => {
-                    let names: Vec<String> = read_gemini_profiles(&handle)
-                        .profiles
-                        .iter()
-                        .map(|p| p.name.clone())
-                        .collect();
-                    let name = unique_import_name(&names, &get("name"));
-                    let profile = add_gemini_profile(
-                        handle.clone(),
-                        name,
-                        api_key,
-                        base_url,
-                        get_opt("model"),
-                    )?;
-                    Ok(format!("已添加 Gemini 配置「{}」", profile.name))
+                    let names = existing_profile_names(&handle, "gemini")?;
+                    match resolve_profile_import(
+                        &names,
+                        &wanted,
+                        &source,
+                        conflict_action.as_deref(),
+                    )? {
+                        ProfileImportResolution::Add(name) => {
+                            let profile = add_gemini_profile(
+                                handle.clone(),
+                                name,
+                                api_key,
+                                base_url,
+                                get_opt("model"),
+                            )?;
+                            Ok(format!("已添加 Gemini 配置「{}」", profile.name))
+                        }
+                        ProfileImportResolution::Overwrite(name) => {
+                            let mut profiles = read_gemini_profiles(&handle);
+                            let profile = profiles
+                                .profiles
+                                .iter_mut()
+                                .find(|profile| profile.name == name)
+                                .ok_or("同名配置已变化，请重新发起导入")?;
+                            *profile = merge_gemini_v1_profile(profile.clone(), &data)?;
+                            write_gemini_profiles(&handle, &profiles)?;
+                            Ok(format!("已覆盖 Gemini 配置「{name}」"))
+                        }
+                    }
                 }
                 "grok" => {
+                    if source != "legacy" {
+                        return Err("不支持的目标应用：grok".into());
+                    }
                     let names: Vec<String> = read_grok_profiles(&handle)
                         .profiles
                         .iter()
                         .map(|p| p.name.clone())
                         .collect();
-                    let name = unique_import_name(&names, &get("name"));
+                    let name = match resolve_profile_import(
+                        &names,
+                        &wanted,
+                        &source,
+                        conflict_action.as_deref(),
+                    )? {
+                        ProfileImportResolution::Add(name) => name,
+                        ProfileImportResolution::Overwrite(_) => {
+                            unreachable!("legacy 覆盖已被拒绝")
+                        }
+                    };
                     let profile = add_grok_profile(
                         handle.clone(),
                         name,
@@ -474,10 +702,9 @@ pub(crate) fn apply_deep_link_import(
                 .unwrap_or_default();
             let name = unique_import_name(&names, &raw_name);
             // 未指定 apps 时默认三个应用都写入（前端确认框里会明示目标应用）
-            let apps = obj
-                .get("apps")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({ "claude": true, "codex": true, "gemini": true }));
+            let apps = obj.get("apps").cloned().unwrap_or_else(
+                || serde_json::json!({ "claude": true, "codex": true, "gemini": true }),
+            );
             save_unified_mcp_server(name.clone(), config, apps.clone())?;
             let mut targets: Vec<&str> = Vec::new();
             let enabled = |key: &str| apps.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
@@ -515,7 +742,9 @@ mod deep_link_tests {
 
     #[test]
     fn parse_valid_profile_url() {
-        let payload = b64(r#"{"name":"公司中转","apiKey":"sk-test-123","baseUrl":"https://api.example.com","model":"claude-sonnet-4"}"#);
+        let payload = b64(
+            r#"{"name":"公司中转","apiKey":"sk-test-123","baseUrl":"https://api.example.com","model":"claude-sonnet-4"}"#,
+        );
         let url = format!("varswitch://import/profile?app=claude&payload={payload}");
         let import = parse_deep_link_url(&url).expect("合法 profile 深链应解析成功");
         assert_eq!(import.kind, "profile");
@@ -553,7 +782,10 @@ mod deep_link_tests {
     fn reject_bad_base64() {
         let url = "varswitch://import/profile?app=claude&payload=%%%not-base64!!";
         let err = parse_deep_link_url(url).unwrap_err();
-        assert!(err.contains("base64url"), "错误信息应指出 base64url 问题：{err}");
+        assert!(
+            err.contains("base64url"),
+            "错误信息应指出 base64url 问题：{err}"
+        );
     }
 
     #[test]
@@ -609,6 +841,138 @@ mod deep_link_tests {
         assert_eq!(unique_import_name(&existing, "新配置"), "新配置");
         assert_eq!(unique_import_name(&existing, "默认"), "默认 (3)");
         assert_eq!(unique_import_name(&existing, " 默认 "), "默认 (3)");
+    }
+
+    #[test]
+    fn v1_conflict_defaults_to_unique_rename_and_requires_existing_overwrite_target() {
+        let existing = vec!["Team".to_string(), "Team (2)".to_string()];
+        assert_eq!(
+            resolve_profile_import(&existing, "Team", "cc_switch_v1", Some("rename")).unwrap(),
+            ProfileImportResolution::Add("Team (3)".into())
+        );
+        assert_eq!(
+            resolve_profile_import(&existing, "Team", "cc_switch_v1", Some("overwrite")).unwrap(),
+            ProfileImportResolution::Overwrite("Team".into())
+        );
+        assert!(resolve_profile_import(
+            &["Other".into()],
+            "Team",
+            "cc_switch_v1",
+            Some("overwrite")
+        )
+        .unwrap_err()
+        .contains("已变化"));
+        assert!(resolve_profile_import(&existing, "Team", "legacy", Some("overwrite")).is_err());
+    }
+
+    #[test]
+    fn conflict_metadata_exposes_only_names() {
+        assert_eq!(
+            detect_profile_conflict(&["Team".into(), "Team (2)".into()], "Team"),
+            Some(DeepLinkConflict {
+                existing_name: "Team".into(),
+                suggested_name: "Team (3)".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn overwrite_codex_fields_preserves_identity_activation_and_local_options() {
+        let existing = CodexProfile {
+            id: "id-1".into(),
+            name: "Team".into(),
+            api_key: "old-key".into(),
+            base_url: "https://old.example.com/v1".into(),
+            auth_mode: "api_key".into(),
+            wire_api: "responses".into(),
+            model: "old-model".into(),
+            provider_name: "local-provider".into(),
+            image_api_key: "image-key".into(),
+            image_base_url: "https://images.example.com".into(),
+            is_active: true,
+            created_at: "2026-08-19 10:00:00".into(),
+        };
+        let updated = merge_codex_v1_profile(
+            existing,
+            &serde_json::json!({
+                "name": "Team", "apiKey": "new-key",
+                "baseUrl": "https://new.example.com/v1", "model": "gpt-5-codex"
+            }),
+        )
+        .unwrap();
+        assert_eq!(updated.id, "id-1");
+        assert_eq!(updated.created_at, "2026-08-19 10:00:00");
+        assert!(updated.is_active);
+        assert_eq!(updated.api_key, "new-key");
+        assert_eq!(updated.base_url, "https://new.example.com/v1");
+        assert_eq!(updated.model, "gpt-5-codex");
+        assert_eq!(updated.provider_name, "local-provider");
+        assert_eq!(updated.image_api_key, "image-key");
+    }
+
+    #[test]
+    fn overwrite_claude_fields_preserves_identity_activation_and_proxy_options() {
+        let existing = Profile {
+            id: "claude-id".into(),
+            name: "Team".into(),
+            api_key: "old".into(),
+            base_url: "https://old.example.com".into(),
+            model_id: "old-model".into(),
+            sonnet_model: "old-sonnet".into(),
+            opus_model: "old-opus".into(),
+            haiku_model: "old-haiku".into(),
+            api_format: "openai_chat".into(),
+            proxy_failover: true,
+            proxy_takeover: true,
+            is_active: true,
+            created_at: "2026-08-19 10:00:00".into(),
+        };
+        let updated = merge_claude_v1_profile(
+            existing,
+            &serde_json::json!({
+                "name": "Team", "apiKey": "new", "baseUrl": "https://new.example.com/",
+                "model": "primary", "sonnetModel": "sonnet", "opusModel": "opus",
+                "haikuModel": "haiku"
+            }),
+        )
+        .unwrap();
+        assert_eq!(updated.id, "claude-id");
+        assert_eq!(updated.created_at, "2026-08-19 10:00:00");
+        assert!(updated.is_active);
+        assert_eq!(updated.api_format, "openai_chat");
+        assert!(updated.proxy_failover);
+        assert!(updated.proxy_takeover);
+        assert_eq!(updated.model_id, "primary");
+        assert_eq!(updated.sonnet_model, "sonnet");
+        assert_eq!(updated.opus_model, "opus");
+        assert_eq!(updated.haiku_model, "haiku");
+    }
+
+    #[test]
+    fn overwrite_gemini_fields_preserves_identity_and_activation() {
+        let existing = GeminiProfile {
+            id: "gemini-id".into(),
+            name: "Team".into(),
+            api_key: "old".into(),
+            base_url: "https://old.example.com".into(),
+            model: "old-model".into(),
+            is_active: true,
+            created_at: "2026-08-19 10:00:00".into(),
+        };
+        let updated = merge_gemini_v1_profile(
+            existing,
+            &serde_json::json!({
+                "name": "Team", "apiKey": "new", "baseUrl": "https://new.example.com/",
+                "model": "gemini-2.5-pro"
+            }),
+        )
+        .unwrap();
+        assert_eq!(updated.id, "gemini-id");
+        assert_eq!(updated.created_at, "2026-08-19 10:00:00");
+        assert!(updated.is_active);
+        assert_eq!(updated.api_key, "new");
+        assert_eq!(updated.base_url, "https://new.example.com");
+        assert_eq!(updated.model, "gemini-2.5-pro");
     }
 
     #[test]
@@ -675,17 +1039,24 @@ mod deep_link_tests {
             let raw = format!(
                 "varswitch://v1/import?resource=provider&app=codex&name=n&endpoint={endpoint}&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true"
             );
-            assert!(parse_deep_link_url(&raw).is_err(), "应拒绝非绝对 URL：{endpoint}");
+            assert!(
+                parse_deep_link_url(&raw).is_err(),
+                "应拒绝非绝对 URL：{endpoint}"
+            );
         }
     }
 
     #[test]
     fn cc_switch_v1_accepts_case_insensitive_http_endpoint_scheme() {
-        for endpoint in ["HTTPS%3A%2F%2Fapi.example.com", "HTTP%3A%2F%2Fapi.example.com"] {
+        for endpoint in [
+            "HTTPS%3A%2F%2Fapi.example.com",
+            "HTTP%3A%2F%2Fapi.example.com",
+        ] {
             let raw = format!(
                 "varswitch://v1/import?resource=provider&app=codex&name=n&endpoint={endpoint}&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true"
             );
-            let import = parse_deep_link_url(&raw).expect("HTTP(S) scheme 大小写不应影响绝对 URL 合法性");
+            let import =
+                parse_deep_link_url(&raw).expect("HTTP(S) scheme 大小写不应影响绝对 URL 合法性");
             assert!(import.data["baseUrl"].as_str().unwrap().starts_with("http"));
         }
     }
