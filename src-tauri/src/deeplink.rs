@@ -157,7 +157,11 @@ fn optional_param(params: &HashMap<String, String>, key: &str) -> Option<String>
 }
 
 fn parse_http_endpoint(raw: &str) -> Result<String, String> {
-    if !raw.starts_with("http://") && !raw.starts_with("https://") {
+    let has_http_scheme = raw
+        .split_once("://")
+        .map(|(scheme, _)| scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+        .unwrap_or(false);
+    if !has_http_scheme {
         return Err("endpoint 必须是合法的绝对 HTTP(S) URL".into());
     }
     let endpoint = reqwest::Url::parse(raw)
@@ -672,6 +676,17 @@ mod deep_link_tests {
                 "varswitch://v1/import?resource=provider&app=codex&name=n&endpoint={endpoint}&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true"
             );
             assert!(parse_deep_link_url(&raw).is_err(), "应拒绝非绝对 URL：{endpoint}");
+        }
+    }
+
+    #[test]
+    fn cc_switch_v1_accepts_case_insensitive_http_endpoint_scheme() {
+        for endpoint in ["HTTPS%3A%2F%2Fapi.example.com", "HTTP%3A%2F%2Fapi.example.com"] {
+            let raw = format!(
+                "varswitch://v1/import?resource=provider&app=codex&name=n&endpoint={endpoint}&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true"
+            );
+            let import = parse_deep_link_url(&raw).expect("HTTP(S) scheme 大小写不应影响绝对 URL 合法性");
+            assert!(import.data["baseUrl"].as_str().unwrap().starts_with("http"));
         }
     }
 
