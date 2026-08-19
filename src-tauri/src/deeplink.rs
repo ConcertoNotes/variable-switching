@@ -157,6 +157,9 @@ fn optional_param(params: &HashMap<String, String>, key: &str) -> Option<String>
 }
 
 fn parse_http_endpoint(raw: &str) -> Result<String, String> {
+    if !raw.starts_with("http://") && !raw.starts_with("https://") {
+        return Err("endpoint 必须是合法的绝对 HTTP(S) URL".into());
+    }
     let endpoint = reqwest::Url::parse(raw)
         .map_err(|_| "endpoint 必须是合法的绝对 HTTP(S) URL".to_string())?;
     if !matches!(endpoint.scheme(), "http" | "https") {
@@ -660,6 +663,16 @@ mod deep_link_tests {
         assert!(parse_deep_link_url(
             "varswitch://v1/import?resource=provider&app=codex&name=n&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=false"
         ).unwrap_err().contains("enabled"));
+    }
+
+    #[test]
+    fn cc_switch_v1_rejects_http_endpoints_without_double_slash() {
+        for endpoint in ["https%3Aapi.example.com", "https%3A%2Fapi.example.com"] {
+            let raw = format!(
+                "varswitch://v1/import?resource=provider&app=codex&name=n&endpoint={endpoint}&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true"
+            );
+            assert!(parse_deep_link_url(&raw).is_err(), "应拒绝非绝对 URL：{endpoint}");
+        }
     }
 
     #[test]
