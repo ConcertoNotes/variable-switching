@@ -53,6 +53,8 @@ const {
   sanitizeMobileLogValue,
   resolveUsageRange,
   isDeepseekCodexConfig,
+  getDeepLinkImportView,
+  buildDeepLinkApplyRequest,
 } = require("./app-helpers.js");
 
 function getDirectConsolePages(html) {
@@ -804,6 +806,66 @@ test("getCodexToolboxLayout keeps channel binding out of session sync", () => {
     showRemoteBindings: false,
   });
   assert.equal(getCodexToolboxLayout("remote").showRemoteBindings, true);
+});
+
+test("CC Switch v1 deep link view masks secrets and exposes provider fields", () => {
+  const view = getDeepLinkImportView({
+    kind: "profile",
+    app: "claude",
+    source: "cc_switch_v1",
+    conflict: { existingName: "Team", suggestedName: "Team (2)" },
+    data: {
+      name: "Team",
+      apiKey: "sk-1234567890abcd",
+      baseUrl: "https://api.example.com/",
+      model: "claude-sonnet-4",
+      haikuModel: "claude-haiku-4",
+      sonnetModel: "claude-sonnet-4",
+      opusModel: "claude-opus-4",
+      homepage: "https://api.example.com",
+    },
+  });
+  assert.equal(view.apiKeyMasked, "sk-123...abcd");
+  assert.equal(view.showProviderDetails, true);
+  assert.equal(view.showClaudeModels, true);
+  assert.equal(view.showConflict, true);
+  assert.equal(view.suggestedName, "Team (2)");
+  assert.equal(view.defaultConflictAction, "rename");
+});
+
+test("legacy MCP deep link view keeps provider-only controls hidden", () => {
+  const view = getDeepLinkImportView({
+    kind: "mcp", app: "", source: "legacy",
+    data: { name: "context7", config: { command: "npx" } },
+  });
+  assert.equal(view.showProviderDetails, false);
+  assert.equal(view.showClaudeModels, false);
+  assert.equal(view.showConflict, false);
+});
+
+test("deep link apply request permits only the visible v1 conflict choice", () => {
+  const payload = {
+    kind: "profile", app: "codex", source: "cc_switch_v1",
+    conflict: { existingName: "Team", suggestedName: "Team (2)" },
+    data: { name: "Team" },
+  };
+  assert.deepEqual(buildDeepLinkApplyRequest(payload, "overwrite"), {
+    kind: "profile", app: "codex", data: { name: "Team" },
+    source: "cc_switch_v1", conflictAction: "overwrite",
+  });
+  assert.equal(buildDeepLinkApplyRequest(payload, "invalid").conflictAction, "rename");
+});
+
+test("deep link confirmation dialog exposes v1 fields and an explicit conflict choice", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  for (const id of [
+    "deeplinkModelRow", "deeplinkHaikuModelRow", "deeplinkSonnetModelRow",
+    "deeplinkOpusModelRow", "deeplinkHomepageRow", "deeplinkConflictGroup",
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(html, /name="deeplinkConflictAction"[^>]*value="rename"[^>]*checked/);
+  assert.match(html, /name="deeplinkConflictAction"[^>]*value="overwrite"/);
 });
 
 test("shouldRenderChannelQr rejects stale QQ text QR cache", () => {

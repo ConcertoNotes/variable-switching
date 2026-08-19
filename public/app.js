@@ -10595,70 +10595,87 @@ on("settingsDataDirResetBtn", "click", handleResetDataDir);
 // 后端解析深链后 emit "deeplink-import"，这里弹确认框，用户点确认才真正写入。
 let pendingDeepLinkImport = null;
 
-const DEEPLINK_APP_LABELS = {
-  claude: "Claude",
-  codex: "Codex",
-  gemini: "Gemini",
-  grok: "Grok / xAI",
-};
+function setDeepLinkRowHidden(id, hidden) {
+  const row = $(id);
+  if (row) row.hidden = hidden;
+}
 
-// API Key 打码显示：前 6 后 4，太短则只留前 2 位
-function maskDeepLinkSecret(value) {
-  const s = String(value || "");
-  if (!s) return "--";
-  if (s.length <= 12) return `${s.slice(0, 2)}****`;
-  return `${s.slice(0, 6)}...${s.slice(-4)}`;
+function resetDeepLinkModalContent() {
+  [
+    "deeplinkAppValue", "deeplinkNameValue", "deeplinkBaseUrlValue", "deeplinkApiKeyValue",
+    "deeplinkModelValue", "deeplinkHaikuModelValue", "deeplinkSonnetModelValue",
+    "deeplinkOpusModelValue", "deeplinkHomepageValue", "deeplinkExistingName",
+    "deeplinkSuggestedName",
+  ].forEach((id) => setText(id, "--"));
+  setText("deeplinkConfigPreview", "");
+  const rename = document.querySelector('input[name="deeplinkConflictAction"][value="rename"]');
+  if (rename) rename.checked = true;
+  setDeepLinkRowHidden("deeplinkBaseUrlRow", false);
+  setDeepLinkRowHidden("deeplinkApiKeyRow", false);
+  setDeepLinkRowHidden("deeplinkModelRow", false);
+  setDeepLinkRowHidden("deeplinkHaikuModelRow", true);
+  setDeepLinkRowHidden("deeplinkSonnetModelRow", true);
+  setDeepLinkRowHidden("deeplinkOpusModelRow", true);
+  setDeepLinkRowHidden("deeplinkHomepageRow", true);
+  const configGroup = $("deeplinkConfigGroup");
+  if (configGroup) configGroup.hidden = true;
+  const conflictGroup = $("deeplinkConflictGroup");
+  if (conflictGroup) conflictGroup.hidden = true;
 }
 
 function openDeepLinkModal(payload) {
   const overlay = $("deeplinkOverlay");
   if (!overlay || !payload) return;
   pendingDeepLinkImport = payload;
-  const data = payload.data || {};
-  const isMcp = payload.kind === "mcp";
-  let appLabel;
-  if (isMcp) {
-    // 未指定 apps 时后端默认写入三个应用，这里同步显示
-    const apps = data.apps || { claude: true, codex: true, gemini: true };
-    appLabel = ["claude", "codex", "gemini"]
-      .filter((key) => apps[key])
-      .map((key) => DEEPLINK_APP_LABELS[key])
-      .join(" / ") || "MCP";
-  } else {
-    appLabel = DEEPLINK_APP_LABELS[payload.app] || payload.app || "--";
-  }
-  setText("deeplinkAppValue", isMcp ? `MCP → ${appLabel}` : appLabel);
-  setText("deeplinkNameValue", data.name || "--");
-  const baseRow = $("deeplinkBaseUrlRow");
-  const keyRow = $("deeplinkApiKeyRow");
+  const view = helpers.getDeepLinkImportView(payload);
+  setText("deeplinkAppValue", view.appLabel);
+  setText("deeplinkNameValue", view.name);
+  setText("deeplinkBaseUrlValue", view.baseUrl);
+  setText("deeplinkApiKeyValue", view.apiKeyMasked);
+  setText("deeplinkModelValue", view.model);
+  setText("deeplinkHaikuModelValue", view.haikuModel);
+  setText("deeplinkSonnetModelValue", view.sonnetModel);
+  setText("deeplinkOpusModelValue", view.opusModel);
+  setText("deeplinkHomepageValue", view.homepage);
+  setText("deeplinkExistingName", view.existingName);
+  setText("deeplinkSuggestedName", view.suggestedName);
+  setDeepLinkRowHidden("deeplinkBaseUrlRow", !view.showProviderDetails);
+  setDeepLinkRowHidden("deeplinkApiKeyRow", !view.showProviderDetails);
+  setDeepLinkRowHidden("deeplinkModelRow", !view.showProviderDetails);
+  setDeepLinkRowHidden("deeplinkHaikuModelRow", !view.showClaudeModels);
+  setDeepLinkRowHidden("deeplinkSonnetModelRow", !view.showClaudeModels);
+  setDeepLinkRowHidden("deeplinkOpusModelRow", !view.showClaudeModels);
+  setDeepLinkRowHidden("deeplinkHomepageRow", !view.showHomepage);
   const configGroup = $("deeplinkConfigGroup");
-  if (baseRow) baseRow.hidden = isMcp;
-  if (keyRow) keyRow.hidden = isMcp;
-  if (configGroup) configGroup.hidden = !isMcp;
-  if (isMcp) {
-    const pre = $("deeplinkConfigPreview");
-    if (pre) pre.textContent = JSON.stringify(data.config || {}, null, 2);
-  } else {
-    setText("deeplinkBaseUrlValue", data.baseUrl || "--");
-    setText("deeplinkApiKeyValue", maskDeepLinkSecret(data.apiKey));
-  }
+  if (configGroup) configGroup.hidden = !view.isMcp;
+  setText("deeplinkConfigPreview", view.configText);
+  const conflictGroup = $("deeplinkConflictGroup");
+  if (conflictGroup) conflictGroup.hidden = !view.showConflict;
+  const rename = document.querySelector('input[name="deeplinkConflictAction"][value="rename"]');
+  if (rename) rename.checked = view.defaultConflictAction === "rename";
   overlay.classList.add("open");
   document.body.classList.add("modal-open");
 }
 
 function closeDeepLinkModal() {
   pendingDeepLinkImport = null;
+  resetDeepLinkModalContent();
   $("deeplinkOverlay")?.classList.remove("open");
   document.body.classList.remove("modal-open");
 }
 
 async function confirmDeepLinkImport() {
   if (!pendingDeepLinkImport) return;
-  const { kind, app, data } = pendingDeepLinkImport;
+  const payload = pendingDeepLinkImport;
+  const { kind, app } = payload;
   const btn = $("deeplinkConfirm");
   setButtonBusy(btn, true, t("deeplinkImporting"));
   try {
-    const message = await invoke("apply_deep_link_import", { kind, app: app || "", data });
+    const request = helpers.buildDeepLinkApplyRequest(
+      payload,
+      document.querySelector('input[name="deeplinkConflictAction"]:checked')?.value
+    );
+    const message = await invoke("apply_deep_link_import", request);
     closeDeepLinkModal();
     showToast(String(message), "success");
     // 刷新对应列表（导入只新增、不激活，无需刷新状态）

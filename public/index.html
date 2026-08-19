@@ -1484,11 +1484,22 @@
         <div class="deeplink-field"><span class="deeplink-field-label" id="deeplinkNameLabel">名称</span><span class="deeplink-field-value" id="deeplinkNameValue">--</span></div>
         <div class="deeplink-field" id="deeplinkBaseUrlRow"><span class="deeplink-field-label" id="deeplinkBaseUrlLabel">Base URL</span><span class="deeplink-field-value" id="deeplinkBaseUrlValue">--</span></div>
         <div class="deeplink-field" id="deeplinkApiKeyRow"><span class="deeplink-field-label" id="deeplinkApiKeyLabel">API Key</span><span class="deeplink-field-value deeplink-masked" id="deeplinkApiKeyValue">--</span></div>
+        <div class="deeplink-field" id="deeplinkModelRow"><span class="deeplink-field-label">主模型</span><span class="deeplink-field-value" id="deeplinkModelValue">--</span></div>
+        <div class="deeplink-field" id="deeplinkHaikuModelRow"><span class="deeplink-field-label">Haiku 模型</span><span class="deeplink-field-value" id="deeplinkHaikuModelValue">--</span></div>
+        <div class="deeplink-field" id="deeplinkSonnetModelRow"><span class="deeplink-field-label">Sonnet 模型</span><span class="deeplink-field-value" id="deeplinkSonnetModelValue">--</span></div>
+        <div class="deeplink-field" id="deeplinkOpusModelRow"><span class="deeplink-field-label">Opus 模型</span><span class="deeplink-field-value" id="deeplinkOpusModelValue">--</span></div>
+        <div class="deeplink-field" id="deeplinkHomepageRow"><span class="deeplink-field-label">Homepage</span><span class="deeplink-field-value" id="deeplinkHomepageValue">--</span></div>
       </div>
       <div id="deeplinkConfigGroup" hidden>
         <div class="deeplink-field-label" id="deeplinkConfigLabel">MCP 配置预览</div>
         <pre class="deeplink-config-preview" id="deeplinkConfigPreview"></pre>
       </div>
+      <fieldset class="deeplink-conflict" id="deeplinkConflictGroup" hidden>
+        <legend>检测到同名配置</legend>
+        <p>现有配置“<span id="deeplinkExistingName">--</span>”与导入名称相同。</p>
+        <label><input type="radio" name="deeplinkConflictAction" value="rename" checked> 使用建议名称“<span id="deeplinkSuggestedName">--</span>”导入</label>
+        <label><input type="radio" name="deeplinkConflictAction" value="overwrite"> 覆盖现有配置（将替换其 Provider 设置）</label>
+      </fieldset>
       <div class="form-actions">
         <button class="btn btn-secondary" id="deeplinkCancel" type="button">取消</button>
         <button class="btn btn-primary" id="deeplinkConfirm" type="button">确认导入</button>
