@@ -20,6 +20,16 @@ pub(crate) struct DeepLinkImport {
     pub(crate) app: String,
     /// 解码后的 payload JSON
     pub(crate) data: serde_json::Value,
+    pub(crate) source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) conflict: Option<DeepLinkConflict>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeepLinkConflict {
+    pub(crate) existing_name: String,
+    pub(crate) suggested_name: String,
 }
 
 /// 极简 percent 解码：只处理 %XX 十六进制序列，其余字节原样保留。
@@ -124,10 +134,94 @@ pub(crate) fn validate_mcp_payload(data: &serde_json::Value) -> Result<(), Strin
     Ok(())
 }
 
+fn query_params(url: &reqwest::Url) -> HashMap<String, String> {
+    url.query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect()
+}
+
+fn required_param(params: &HashMap<String, String>, key: &str) -> Result<String, String> {
+    let value = params.get(key).map(|value| value.trim()).unwrap_or("");
+    if value.is_empty() {
+        Err(format!("缺少必填参数 {key}"))
+    } else {
+        Ok(value.to_string())
+    }
+}
+
+fn optional_param(params: &HashMap<String, String>, key: &str) -> Option<String> {
+    params
+        .get(key)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn parse_http_endpoint(raw: &str) -> Result<String, String> {
+    let endpoint = reqwest::Url::parse(raw)
+        .map_err(|_| "endpoint 必须是合法的绝对 HTTP(S) URL".to_string())?;
+    if !matches!(endpoint.scheme(), "http" | "https") {
+        return Err("endpoint 必须使用 HTTP 或 HTTPS".into());
+    }
+    Ok(endpoint.to_string())
+}
+
+fn parse_cc_switch_v1_provider(url: &reqwest::Url) -> Result<DeepLinkImport, String> {
+    let params = query_params(url);
+    if required_param(&params, "resource")? != "provider" {
+        return Err("resource 必须是 provider".into());
+    }
+    let app = required_param(&params, "app")?.to_ascii_lowercase();
+    if !matches!(app.as_str(), "claude" | "codex" | "gemini") {
+        return Err(format!("不支持的目标应用：{app}"));
+    }
+    let name = required_param(&params, "name")?;
+    let endpoint = parse_http_endpoint(&required_param(&params, "endpoint")?)?;
+    let api_key = required_param(&params, "apiKey")?;
+    let model = required_param(&params, "model")?;
+    let homepage = required_param(&params, "homepage")?;
+    if required_param(&params, "enabled")? != "true" {
+        return Err("enabled 必须为 true".into());
+    }
+    Ok(DeepLinkImport {
+        kind: "profile".into(),
+        app,
+        data: serde_json::json!({
+            "name": name,
+            "apiKey": api_key,
+            "baseUrl": endpoint,
+            "model": model,
+            "haikuModel": optional_param(&params, "haikuModel"),
+            "sonnetModel": optional_param(&params, "sonnetModel"),
+            "opusModel": optional_param(&params, "opusModel"),
+            "homepage": homepage,
+            "enabled": true,
+        }),
+        source: "cc_switch_v1".into(),
+        conflict: None,
+    })
+}
+
 /// 解析并校验一条 varswitch:// 深链（纯函数，便于单测）。
 /// 容忍大小写 scheme、尾部斜杠与 #fragment；解析失败返回可读的中文错误。
 pub(crate) fn parse_deep_link_url(url: &str) -> Result<DeepLinkImport, String> {
     let url = url.trim();
+    let parsed =
+        reqwest::Url::parse(url).map_err(|_| "不是合法的 varswitch:// 协议链接".to_string())?;
+    if !parsed.scheme().eq_ignore_ascii_case("varswitch") {
+        return Err("不是 varswitch:// 协议链接".into());
+    }
+    if parsed.host_str() == Some("v1") {
+        if parsed.path() != "/import" {
+            return Err("不支持的 v1 深链路径或 action".into());
+        }
+        return parse_cc_switch_v1_provider(&parsed);
+    }
+    if parsed
+        .host_str()
+        .is_some_and(|host| host.starts_with('v') && host[1..].parse::<u32>().is_ok())
+    {
+        return Err("不支持的深链版本".into());
+    }
     // scheme 校验（大小写不敏感）
     let scheme_prefix = "varswitch:";
     if url.len() < scheme_prefix.len()
@@ -171,6 +265,8 @@ pub(crate) fn parse_deep_link_url(url: &str) -> Result<DeepLinkImport, String> {
                 kind: "profile".into(),
                 app,
                 data,
+                source: "legacy".into(),
+                conflict: None,
             })
         }
         "import/mcp" => {
@@ -179,6 +275,8 @@ pub(crate) fn parse_deep_link_url(url: &str) -> Result<DeepLinkImport, String> {
                 kind: "mcp".into(),
                 app: String::new(),
                 data,
+                source: "legacy".into(),
+                conflict: None,
             })
         }
         other => Err(format!("不支持的深链路径：{other}")),
@@ -504,5 +602,84 @@ mod deep_link_tests {
         assert_eq!(unique_import_name(&existing, "新配置"), "新配置");
         assert_eq!(unique_import_name(&existing, "默认"), "默认 (3)");
         assert_eq!(unique_import_name(&existing, " 默认 "), "默认 (3)");
+    }
+
+    #[test]
+    fn parse_cc_switch_v1_provider_urls() {
+        let claude = parse_deep_link_url(
+            "varswitch://v1/import?resource=provider&app=claude&name=Team+Claude&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-test-claude&model=claude-sonnet-4&haikuModel=claude-haiku-4&sonnetModel=claude-sonnet-4&opusModel=claude-opus-4&homepage=https%3A%2F%2Fapi.example.com&enabled=true",
+        ).expect("合法 Claude v1 深链应解析成功");
+        assert_eq!(claude.source, "cc_switch_v1");
+        assert_eq!(claude.kind, "profile");
+        assert_eq!(claude.app, "claude");
+        assert_eq!(claude.data["name"], "Team Claude");
+        assert_eq!(claude.data["baseUrl"], "https://api.example.com/");
+        assert_eq!(claude.data["apiKey"], "sk-test-claude");
+        assert_eq!(claude.data["model"], "claude-sonnet-4");
+        assert_eq!(claude.data["haikuModel"], "claude-haiku-4");
+        assert_eq!(claude.data["sonnetModel"], "claude-sonnet-4");
+        assert_eq!(claude.data["opusModel"], "claude-opus-4");
+        assert_eq!(claude.data["homepage"], "https://api.example.com");
+        assert_eq!(claude.data["enabled"], true);
+
+        for app in ["codex", "gemini"] {
+            let raw = format!(
+                "varswitch://v1/import?resource=provider&app={app}&name=Provider&endpoint=https%3A%2F%2Fapi.example.com%2Fv1&apiKey=sk-test&model=model-1&homepage=https%3A%2F%2Fapi.example.com&enabled=true"
+            );
+            let import = parse_deep_link_url(&raw).expect("合法 v1 深链应解析成功");
+            assert_eq!(import.source, "cc_switch_v1");
+            assert_eq!(import.app, app);
+            assert_eq!(import.data["baseUrl"], "https://api.example.com/v1");
+        }
+    }
+
+    #[test]
+    fn cc_switch_v1_decodes_form_query_once() {
+        let import = parse_deep_link_url(
+            "varswitch://v1/import?resource=provider&app=gemini&name=%E4%B8%AD%E6%96%87+%25+Provider&endpoint=https%3A%2F%2Fapi.example.com%2F%252Fkeep&apiKey=sk-test%2525key&model=gemini-2.5-pro&homepage=https%3A%2F%2Fapi.example.com&enabled=true",
+        ).expect("form query 应正确解码");
+        assert_eq!(import.data["name"], "中文 % Provider");
+        assert_eq!(import.data["baseUrl"], "https://api.example.com/%2Fkeep");
+        assert_eq!(import.data["apiKey"], "sk-test%25key");
+    }
+
+    #[test]
+    fn cc_switch_v1_rejects_invalid_contract_values() {
+        let valid = "name=n&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true";
+        for prefix in [
+            "varswitch://v2/import?resource=provider&app=claude",
+            "varswitch://v1/export?resource=provider&app=claude",
+            "varswitch://v1/import?resource=mcp&app=claude",
+            "varswitch://v1/import?resource=provider&app=grok",
+        ] {
+            assert!(parse_deep_link_url(&format!("{prefix}&{valid}")).is_err());
+        }
+        assert!(parse_deep_link_url(
+            "varswitch://v1/import?resource=provider&app=codex&name=n&endpoint=file%3A%2F%2F%2FC%3A%2Fevil&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true"
+        ).unwrap_err().contains("HTTP"));
+        assert!(parse_deep_link_url(
+            "varswitch://v1/import?resource=provider&app=codex&name=n&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=false"
+        ).unwrap_err().contains("enabled"));
+    }
+
+    #[test]
+    fn cc_switch_v1_requires_every_contract_field_and_ignores_unknown_fields() {
+        let cases = [
+            ("name", "resource=provider&app=claude&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true"),
+            ("endpoint", "resource=provider&app=claude&name=n&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true"),
+            ("apiKey", "resource=provider&app=claude&name=n&endpoint=https%3A%2F%2Fapi.example.com&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true"),
+            ("model", "resource=provider&app=claude&name=n&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-test&homepage=https%3A%2F%2Fapi.example.com&enabled=true"),
+            ("homepage", "resource=provider&app=claude&name=n&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-test&model=m&enabled=true"),
+            ("enabled", "resource=provider&app=claude&name=n&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com"),
+        ];
+        for (field, query) in cases {
+            let error = parse_deep_link_url(&format!("varswitch://v1/import?{query}"))
+                .expect_err("缺少必填参数必须拒绝");
+            assert!(error.contains(field), "{field} 的错误应点明字段：{error}");
+        }
+        let accepted = parse_deep_link_url(
+            "varswitch://v1/import?resource=provider&app=claude&name=n&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-test&model=m&homepage=https%3A%2F%2Fapi.example.com&enabled=true&futureField=ignored",
+        );
+        assert!(accepted.is_ok(), "未知参数必须被忽略");
     }
 }
