@@ -875,6 +875,16 @@ test("deep link confirmation dialog exposes v1 fields and an explicit conflict c
   assert.match(html, /name="deeplinkConflictAction"[^>]*value="overwrite"/);
 });
 
+test("initially hidden deep link conflict fieldset is not rendered by project CSS", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const fieldset = html.match(/<fieldset\b[^>]*id="deeplinkConflictGroup"[^>]*>/)?.[0] || "";
+  assert.match(fieldset, /\bhidden\b/);
+
+  const hiddenRule = css.match(/\.deeplink-conflict\[hidden\]\s*\{([^}]*)\}/)?.[1] || "";
+  assert.match(hiddenRule, /\bdisplay\s*:\s*none\s*;/);
+});
+
 test("shouldRenderChannelQr rejects stale QQ text QR cache", () => {
   const now = 1_700_000_000_000;
   assert.equal(

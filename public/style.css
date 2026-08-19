@@ -5327,6 +5327,7 @@ body::before { display: none; }
   font-size: 12px;
   line-height: 1.55;
 }
+.deeplink-conflict[hidden] { display: none; }
 .deeplink-conflict legend { padding: 0 4px; font-weight: 700; }
 .deeplink-conflict p { margin: 0; }
 .deeplink-conflict label { display: flex; align-items: flex-start; gap: 7px; cursor: pointer; }
