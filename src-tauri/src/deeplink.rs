@@ -450,11 +450,22 @@ fn validate_cc_switch_v1_profile_payload(data: &serde_json::Value) -> Result<(),
     let endpoint = required_profile_value(data, "baseUrl")?;
     parse_http_endpoint(&endpoint)?;
     required_profile_value(data, "model")?;
-    required_profile_value(data, "homepage")?;
+    let homepage = required_profile_value(data, "homepage")?;
+    parse_http_endpoint(&homepage)?;
     if data.get("enabled").and_then(|value| value.as_bool()) != Some(true) {
         return Err("enabled 必须为 true".into());
     }
     Ok(())
+}
+
+fn validate_import_source(kind: &str, source: &str) -> Result<(), String> {
+    match (kind, source) {
+        ("profile", "legacy" | "cc_switch_v1") => Ok(()),
+        ("profile", _) => Err("不支持的导入来源".into()),
+        ("mcp", "legacy") => Ok(()),
+        ("mcp", _) => Err("MCP 导入仅支持 legacy 来源".into()),
+        _ => Ok(()),
+    }
 }
 
 /// 处理一条运行期收到的深链 URL：
@@ -510,9 +521,7 @@ pub(crate) fn apply_deep_link_import(
     match kind.as_str() {
         "profile" => {
             let source = source.unwrap_or_else(|| "legacy".into());
-            if !matches!(source.as_str(), "legacy" | "cc_switch_v1") {
-                return Err("不支持的导入来源".into());
-            }
+            validate_import_source("profile", &source)?;
             // 与解析阶段相同的校验，防止绕过事件流程直接调用时写入脏数据。
             if source == "cc_switch_v1" {
                 validate_cc_switch_v1_profile_payload(&data)?;
@@ -677,6 +686,8 @@ pub(crate) fn apply_deep_link_import(
             }
         }
         "mcp" => {
+            let source = source.unwrap_or_else(|| "legacy".into());
+            validate_import_source("mcp", &source)?;
             validate_mcp_payload(&data)?;
             let obj = data.as_object().ok_or("payload 必须是 JSON 对象")?;
             let raw_name = obj
@@ -874,6 +885,22 @@ mod deep_link_tests {
                 suggested_name: "Team (3)".into(),
             })
         );
+    }
+
+    #[test]
+    fn v1_revalidation_rejects_non_http_homepage() {
+        let data = serde_json::json!({
+            "name": "Team", "apiKey": "test-key", "baseUrl": "https://api.example.com/v1",
+            "model": "model-1", "homepage": "file:///C:/evil", "enabled": true,
+        });
+        let error = validate_cc_switch_v1_profile_payload(&data).unwrap_err();
+        assert!(error.contains("HTTP"), "应拒绝非 HTTP(S) homepage：{error}");
+    }
+
+    #[test]
+    fn v1_mcp_source_is_rejected_before_write() {
+        assert!(validate_import_source("mcp", "legacy").is_ok());
+        assert!(validate_import_source("mcp", "cc_switch_v1").is_err());
     }
 
     #[test]
