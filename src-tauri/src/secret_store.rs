@@ -183,6 +183,8 @@ pub(crate) fn ensure_secret_usable(value: &str, label: &str) -> Result<(), Strin
 /// 不影响其余文件，也不阻断启动。
 pub(crate) fn migrate_plaintext_secrets(app: &tauri::AppHandle) {
     let claude = read_profiles(app);
+    let claude_desktop =
+        claude_desktop_provider::read_stored_claude_desktop_profiles_checked(app);
     let codex = read_codex_profiles(app);
     let grok = read_grok_profiles(app);
     let gemini = read_gemini_profiles(app);
@@ -191,6 +193,10 @@ pub(crate) fn migrate_plaintext_secrets(app: &tauri::AppHandle) {
     // 读出来已是明文，所以要判断「磁盘上是否还是明文」得看原始文件内容
     let pending: Vec<&str> = [
         (profiles_path(app), "profiles.json"),
+        (
+            claude_desktop_provider::claude_desktop_profiles_path(app),
+            "claude_desktop_profiles.json",
+        ),
         (codex_profiles_path(app), "codex_profiles.json"),
         (grok_profiles_path(app), "grok_profiles.json"),
         (gemini_profiles_path(app), "gemini_profiles.json"),
@@ -209,6 +215,18 @@ pub(crate) fn migrate_plaintext_secrets(app: &tauri::AppHandle) {
 
     if let Err(error) = write_profiles(app, &claude) {
         log_error!("[secret] 迁移 Claude 配置失败：{error}");
+    }
+    match claude_desktop {
+        Ok(claude_desktop) => {
+            if let Err(error) =
+                claude_desktop_provider::write_claude_desktop_profiles(app, &claude_desktop)
+            {
+                log_error!("[secret] 迁移 Claude Desktop 配置失败：{error}");
+            }
+        }
+        Err(error) => {
+            log_error!("[secret] 读取 Claude Desktop 配置失败，已跳过迁移且未覆盖原文件：{error}");
+        }
     }
     if let Err(error) = write_codex_profiles(app, &codex) {
         log_error!("[secret] 迁移 Codex 配置失败：{error}");

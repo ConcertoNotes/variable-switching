@@ -88,6 +88,7 @@ test("all console pages are direct children of workspaceMain", () => {
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
   assert.deepEqual(getDirectConsolePages(html), [
     "claude",
+    "claude-desktop",
     "codex",
     "grok",
     "gemini",
@@ -630,6 +631,52 @@ test("Claude profile actions use the same equal-width buttons as Codex", () => {
   assert.doesNotMatch(renderProfiles, /profile-delete-btn/);
   assert.match(css, /\.profile-actions\s+\.btn\s*\{[^}]*flex:\s*1;/s);
   assert.doesNotMatch(css, /#pageClaudeCode\s+\.profile-actions/);
+});
+
+test("Claude Desktop has a first-class provider page and gateway form", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  assert.match(html, /id="claudeDesktopNav"[^>]*data-console-page="claude-desktop"/);
+  assert.match(html, /id="pageClaudeDesktop"[^>]*data-console-page-panel="claude-desktop"/);
+  assert.match(html, /id="claudeDesktopStatusGrid"/);
+  assert.match(html, /id="claudeDesktopProfilesList"/);
+  assert.match(html, /id="claudeDesktopImportBtn"/);
+  assert.match(html, /id="claudeDesktopProfileConnectionMode"/);
+  assert.match(html, /value="gateway"/);
+  assert.match(html, /value="direct"/);
+  assert.match(html, /id="claudeDesktopProfileSonnetModel"/);
+  assert.match(html, /id="claudeDesktopProfileOpusModel"/);
+  assert.match(html, /id="claudeDesktopProfileHaikuModel"/);
+});
+
+test("Claude Desktop frontend wires independent provider commands", () => {
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  for (const command of [
+    "get_claude_desktop_profiles",
+    "get_claude_desktop_provider_status",
+    "add_claude_desktop_profile",
+    "update_claude_desktop_profile",
+    "delete_claude_desktop_profile",
+    "reorder_claude_desktop_profiles",
+    "switch_claude_desktop_profile",
+    "sync_claude_desktop_profile",
+    "import_claude_profiles_to_desktop",
+    "get_claude_desktop_gateway_health",
+    "claude_desktop_gateway_reset_breaker",
+  ]) assert.match(app, new RegExp(`invoke\\(["']${command}["']`));
+  assert.match(app, /function loadClaudeDesktopPage/);
+  assert.match(app, /function renderClaudeDesktopStatus/);
+  assert.match(app, /function renderClaudeDesktopProfiles/);
+  assert.match(app, /function updateClaudeDesktopProfileFormState/);
+});
+
+test("Claude Desktop confirmations use the in-app async dialog", () => {
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  const deleteFlow = app.match(/async function deleteClaudeDesktopProfile[\s\S]*?\n}/)?.[0] || "";
+  const importFlow = app.match(/async function importClaudeProfilesToDesktop[\s\S]*?\n}/)?.[0] || "";
+  assert.match(deleteFlow, /await appConfirm\(/);
+  assert.match(importFlow, /await appConfirm\(/);
+  assert.doesNotMatch(deleteFlow, /\bconfirm\(/);
+  assert.doesNotMatch(importFlow, /\bconfirm\(/);
 });
 
 test("getCodexSessionMetrics reads the current toolbox response fields", () => {

@@ -1,8 +1,8 @@
 # VarSwitch
 
-VarSwitch 是一个面向 Claude Code、Codex CLI、Grok CLI、Gemini CLI 和 API 用户的桌面配置管理工具。它通过可视化界面集中管理 API Key / Token、Base URL、模型、编辑器设置、四个应用的多套配置、Skills、Prompts 预设、MCP Server、本机历史会话、Codex 插件市场与移动端控制能力，并提供托盘快速切换、本地代理故障转移、`varswitch://` 深链导入与多设备数据同步。
+VarSwitch 是一个面向 Claude Code、Claude Desktop、Codex CLI、Grok CLI、Gemini CLI 和 API 用户的桌面配置管理工具。它通过可视化界面集中管理 API Key / Token、Base URL、模型、编辑器设置、多套应用配置、Skills、Prompts 预设、MCP Server、本机历史会话、Codex 插件市场与移动端控制能力，并提供托盘快速切换、本地代理故障转移、`varswitch://` 深链导入与多设备数据同步。
 
-当前应用版本：`3.1.6`。
+当前应用版本：`3.1.8`。
 
 ## 主要功能
 
@@ -30,7 +30,17 @@ VarSwitch 是一个面向 Claude Code、Codex CLI、Grok CLI、Gemini CLI 和 AP
   - 查询在后台线程执行并限制并发，不会阻塞界面；识别不出计费接口的站点显示「不支持」，Key 失效则显示具体的 HTTP 错误。
 - **拖拽排序**：配置卡片提供拖拽手柄，可调整列表顺序并自动保存；Codex、Grok、Gemini 配置列表同样支持。
 
-### 2. 本地代理故障转移
+### 2. Claude Desktop 第三方 API
+
+- **独立配置列表**：在 `Claude Desktop` 页面维护专用供应商，也可以从 Claude Code 配置复制导入；导入后两边独立管理，后续编辑互不影响。
+- **三种连接模式**：Official 恢复 Claude 官方连接；Direct 将 Anthropic Messages 上游直接写入 Claude Desktop；Gateway 由 VarSwitch 在本机转换并转发 Anthropic Messages 或 OpenAI Chat Completions 上游。
+- **角色模型映射**：可分别配置默认、Sonnet、Opus、Haiku 上游模型；Claude Desktop 请求稳定的 Claude 角色模型名称，本地 Gateway 再映射到供应商模型。
+- **独立高可用状态**：Gateway 使用独立于 Claude Code 的主上游、备用池、熔断器和健康统计，互不覆盖运行状态。
+- **本地鉴权**：Gateway 使用 VarSwitch 随机生成并持久化的本地路由凭据，不使用 `PROXY_MANAGED`，也不会把本地路由凭据转发给第三方上游。
+- **事务写入**：启用或同步配置时保留 Claude Desktop 文件中的未知字段和其他 Profile；任一文件写入失败会恢复全部相关文件及原活动状态。
+- **平台限制**：Windows 和 macOS 支持写入并启用 Claude Desktop 3P Profile；Linux 可保存供应商，但不支持启用 3P Profile。
+
+### 3. 本地代理故障转移
 
 针对经本地协议转换代理的 OpenAI 兼容配置，提供高可用能力：
 
@@ -39,7 +49,7 @@ VarSwitch 是一个面向 Claude Code、Codex CLI、Grok CLI、Gemini CLI 和 AP
 - **熔断器**：单个上游连续失败 3 次后熔断 60 秒，期间跳过该上游；到期进入半开状态放行一个探测请求，成功则恢复，失败则重新熔断。
 - **代理健康面板**：激活配置走本地代理时，Claude 页显示代理运行状态、主/备上游、失败与总请求数、自动转移次数、最近错误，并支持一键重置熔断器。
 
-### 3. 编辑器同步
+### 4. 编辑器同步
 
 VarSwitch 会自动检测并同步下列编辑器的 Claude Code 设置：
 
@@ -52,7 +62,7 @@ VarSwitch 会自动检测并同步下列编辑器的 Claude Code 设置：
 
 在「Settings / 设置」中可以为每个编辑器手动指定 `settings.json` 路径；也可以填写用户配置目录，应用会自动补全为 `settings.json`。
 
-### 4. Codex CLI 配置管理
+### 5. Codex CLI 配置管理
 
 - **Codex 独立配置列表**：在 `Codex CLI` 页面维护 Codex 专用配置。
 - **配置字段**：配置名称、API Key、Base URL、模型、Provider、写入方式。
@@ -65,13 +75,13 @@ VarSwitch 会自动检测并同步下列编辑器的 Claude Code 设置：
 - **Codex 运行时备份**：可一键备份 `config.toml` 和 `auth.json`。
 - **手动同步**：当前有活动 Codex 配置时，可使用 `Sync Now` 重新写入。
 
-### 5. Grok CLI 与 Gemini CLI 配置管理
+### 6. Grok CLI 与 Gemini CLI 配置管理
 
 - **Grok 独立配置列表**：内置 4 个 xAI 预设（Official、Grok Fast、Grok 4.5、Grok Build），也支持自定义。切换时写入 `~/.grok/config.toml`（把默认模型指向 VarSwitch 托管的模型段，保留文件中的其他内容），并同步 `XAI_API_KEY` / `XAI_BASE_URL`、`GROK_API_KEY` / `GROK_BASE_URL` 等系统环境变量。
 - **Gemini 独立配置列表**：切换时写入 `~/.gemini/settings.json`（认证方式与模型），并同步 `GEMINI_API_KEY`、`GOOGLE_GEMINI_BASE_URL`、`GEMINI_MODEL` 系统环境变量。
 - **当前状态**：读取并展示 Grok / Gemini 当前生效的配置来源、Base URL 与模型。
 
-### 6. Codex Toolbox
+### 7. Codex Toolbox
 
 Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
 
@@ -107,7 +117,7 @@ Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
 - 支持启动/停止平台监听。
 - 支持高级控制状态检测、协议事件日志和待审批请求提交。
 
-### 7. 会话管理器
+### 8. 会话管理器
 
 「会话（Sessions）」页面用于管理本机 CLI 历史会话：
 
@@ -116,7 +126,7 @@ Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
 - 支持按标题、目录或会话 ID 搜索，并按来源（全部 / Claude / Codex）筛选。
 - **一键恢复**：Claude 会话在新终端窗口执行 `claude -r <会话ID>`（原工作目录仍存在时先切换过去）；Codex 会话通过 `codex://threads/<ID>` 深链在桌面应用中打开。
 
-### 8. Skills 管理
+### 9. Skills 管理
 
 顶部工具栏的 Skills 入口用于管理 Claude Code 扩展能力：
 
@@ -130,7 +140,7 @@ Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
 - 支持从 URL 安装 skill。
 - **从 ZIP 安装**：选择本地 ZIP 一键安装 Skill，自动定位包内 `SKILL.md`（支持位于根目录、唯一顶层目录或子目录），内置 zip-slip 路径穿越防护；可同时安装到 Claude（`~/.claude/skills/`）与 Codex（`~/.codex/skills/`），同名技能已存在时确认后覆盖。
 
-### 9. Prompts 预设库与编辑
+### 10. Prompts 预设库与编辑
 
 顶部工具栏的 Prompts 入口用于维护多套提示词并跨应用同步：
 
@@ -158,7 +168,7 @@ Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
   - 项目脚手架
   - 重构指南
 
-### 10. MCP Server 跨应用管理
+### 11. MCP Server 跨应用管理
 
 顶部工具栏的 MCP 入口统一管理三个应用的 MCP Server：
 
@@ -171,7 +181,7 @@ Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
 - 支持在 GitHub 搜索 MCP Server。
 - 支持打开相关 GitHub 页面。
 
-### 11. 设置、备份与恢复
+### 12. 设置、备份与恢复
 
 在 Settings 中可以管理应用行为与路径：
 
@@ -204,7 +214,7 @@ Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
 - Codex 运行时文件备份：`~/.codex/config.toml`、`~/.codex/auth.json`
 - Grok 运行时文件备份：`~/.grok/config.toml`
 
-### 12. 数据可靠性与多设备同步
+### 13. 数据可靠性与多设备同步
 
 - **API Key 加密存储**：配置文件里的 API Key、Codex 图片 Key、站点访问令牌不再明文落盘，而是用 AES-256-GCM 加密后写成 `enc:v1:...`。主密钥（32 字节随机）保存在系统凭据库（Windows 凭据管理器 / macOS 钥匙串），从不写入数据目录。
   - **自动迁移**：升级后首次启动会把历史明文就地转成密文，转换前先做一次完整备份；没有明文则跳过。
@@ -215,7 +225,7 @@ Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
 - **智能复制**：切换目录时把现有 `*.json` 配置与 `backups` 目录复制到目标位置，目标已存在同名文件时跳过、绝不覆盖，避免冲掉其他设备同步来的更新数据。
 - **指针文件**：指向关系记录在默认数据目录下的 `data_dir_override.txt`；目标目录不可用（如网盘未挂载）时自动回落默认目录，不影响启动。
 
-### 13. Deep Link 一键导入
+### 14. Deep Link 一键导入
 
 应用注册 `varswitch://` 协议，支持从网页、文档或聊天中一键导入：
 
@@ -226,7 +236,7 @@ Codex 页面提供 `Codex Toolbox`，包含三个主要模块。
 - 旧版 Profile/MCP 深链确认后仅新增；v1 同名时按下一条规则处理；均不自动激活或切换。
 - v1 同名配置默认重命名后新增，也可在确认框中明确选择覆盖；无论 `enabled` 为 `true`，导入都不会自动激活或切换。
 
-### 14. 更新、下载站与仓库入口
+### 15. 更新、下载站与仓库入口
 
 首页快捷入口包括：
 
@@ -248,7 +258,7 @@ https://download.varswitch.strova.top/latest.json
 https://download.varswitch.strova.top/
 ```
 
-### 15. 系统托盘
+### 16. 系统托盘
 
 - 启动后创建系统托盘图标。
 - 左键点击托盘图标可恢复主窗口。
@@ -274,6 +284,20 @@ https://download.varswitch.strova.top/
 8. 重启终端和编辑器，让新的环境变量生效。
 
 如果本机已经有可用配置，可以点击顶部 `导入当前配置`，从现有系统/Claude/编辑器配置中导入。
+
+### Claude Desktop 第三方 API
+
+1. 打开 VarSwitch，进入 `Claude Desktop` 页面。
+2. 点击 `+ 添加配置`，或点击 `从 Claude Code 导入` 后再独立编辑配置。
+3. 选择连接模式：
+   - `Gateway`：支持 Anthropic Messages 和 OpenAI Chat Completions；本地地址固定为 `http://127.0.0.1:25789/claude-desktop`，使用期间必须保持 VarSwitch 运行。
+   - `Direct`：仅支持 Anthropic Messages；切换成功后不需要保持 VarSwitch 运行。
+   - `Official`：恢复 Claude 官方连接。
+4. 填写供应商 Base URL、API Key，以及默认/Sonnet/Opus/Haiku 模型映射并保存。
+5. 在配置卡片上点击 `启用`。
+6. 完全退出 Claude Desktop（包括托盘或后台进程）后重新启动，使 3P Profile 生效。
+
+启用或同步不会直接展示本地 Gateway 凭据。不要把第三方 API Key 填成 `PROXY_MANAGED`；Gateway 会使用配置中真实的第三方 Key 请求上游。
 
 ### Codex CLI 配置切换
 
@@ -334,6 +358,19 @@ https://download.varswitch.strova.top/
 | Claude 设置 | `~/.claude/settings.json` 的 `env`（含角色模型映射） |
 | 编辑器设置 | `claudeCode.environmentVariables`（含角色模型映射） |
 | VarSwitch 配置 | 数据目录中的 profiles 数据 |
+
+### Claude Desktop
+
+| 平台/位置 | 写入内容 |
+| --- | --- |
+| Windows `%LOCALAPPDATA%/Claude/claude_desktop_config.json` | Claude Desktop 部署模式与当前 Profile 引用 |
+| Windows `%LOCALAPPDATA%/Claude-3p/claude_desktop_config.json` | Claude Desktop 3P 部署配置 |
+| Windows `%LOCALAPPDATA%/Claude-3p/configLibrary/_meta.json` | 3P Profile 元数据与当前 Profile 引用 |
+| Windows `%LOCALAPPDATA%/Claude-3p/configLibrary/<VarSwitch Profile ID>.json` | VarSwitch 管理的 Gateway 或 Direct Profile |
+| macOS `~/Library/Application Support/Claude/` | Claude Desktop 配置根目录 |
+| macOS `~/Library/Application Support/Claude-3p/` | Claude Desktop 3P 配置与 Profile 库根目录 |
+| Linux | 仅保存 VarSwitch 供应商；不支持启用 Claude Desktop 3P Profile |
+| VarSwitch 数据目录 | 独立加密保存 Claude Desktop suppliers 与本地 Gateway 状态 |
 
 ### Codex CLI
 
@@ -525,6 +562,8 @@ openssl base64 -A -in certificate.p12 -out certificate-base64.txt
 ├── src-tauri/           # Tauri / Rust 后端
 │   ├── src/lib.rs       # 核心逻辑：配置读写、环境变量同步、托盘、会话、Codex Toolbox、Skills、Prompts、MCP、Deep Link
 │   ├── src/claude_proxy.rs  # 本地协议转换代理：Anthropic/OpenAI 双向翻译、故障转移与熔断
+│   ├── src/claude_desktop_provider.rs  # Claude Desktop 供应商、加密存储与 3P Profile 事务投影
+│   ├── src/claude_desktop_gateway.rs   # Claude Desktop 本地鉴权、模型映射、转发与独立健康状态
 │   ├── src/main.rs      # Tauri 入口
 │   ├── Cargo.toml       # Rust 依赖
 │   ├── tauri.conf.json  # Tauri 配置

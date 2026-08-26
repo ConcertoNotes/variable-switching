@@ -75,6 +75,9 @@
         <button class="sidebar-item" data-console-page="claude" data-provider-nav="claude" type="button" hidden>
           <img src="anthropic-color.svg" alt=""><span>Claude Code</span><span class="nav-state-dot" id="claudeNavState"></span>
         </button>
+        <button class="sidebar-item" id="claudeDesktopNav" data-console-page="claude-desktop" type="button">
+          <img src="anthropic-color.svg" alt=""><span>Claude Desktop</span><span class="nav-state-dot" id="claudeDesktopNavState"></span>
+        </button>
         <button class="sidebar-item" data-console-page="codex" data-provider-nav="codex" type="button" hidden>
           <img src="OpenAI-black-monoblossom.svg" alt=""><span>Codex</span><span class="nav-state-dot" id="codexNavState"></span>
         </button>
@@ -106,7 +109,7 @@
       <button class="sidebar-item sidebar-settings" data-console-page="settings" type="button">
         <img src="icon-guide.svg" alt=""><span>设置</span>
       </button>
-      <div class="sidebar-version">VarSwitch <span>v3.1.6</span></div>
+      <div class="sidebar-version">VarSwitch <span>v3.1.8</span></div>
     </aside>
 
     <main class="workspace-main" id="workspaceMain">
@@ -138,6 +141,37 @@
     </section>
   </div>
   </div><!-- end pageClaudeCode -->
+
+  <div class="page-content console-page" id="pageClaudeDesktop" data-console-page-panel="claude-desktop">
+  <div class="app">
+    <header class="page-header">
+      <div><h1 id="claudeDesktopPageTitle">Claude Desktop</h1><p id="claudeDesktopPageSubtitle">通过独立的 3P Profile 使用第三方 API，支持 Gateway 与直连。</p></div>
+      <div class="page-header-actions">
+        <button class="btn btn-secondary" id="claudeDesktopSyncBtn" type="button">立即同步</button>
+        <button class="btn btn-secondary" id="claudeDesktopImportBtn" type="button">从 Claude Code 导入</button>
+        <button class="btn btn-primary" id="claudeDesktopAddBtn" type="button">添加 Desktop 配置</button>
+      </div>
+    </header>
+    <section class="support-section control-panel-section console-hint-section claude-desktop-dependency-warning" id="claudeDesktopDependencyWarning" hidden>
+      <p class="support-hint" id="claudeDesktopDependencyWarningText">Gateway 模式需要保持 VarSwitch 运行；切换后请完全退出并重启 Claude Desktop。</p>
+    </section>
+    <section class="status-section">
+      <div class="section-header-row"><h2 class="section-title" id="claudeDesktopStatusTitle">Claude Desktop 状态</h2></div>
+      <div class="status-grid" id="claudeDesktopStatusGrid"></div>
+    </section>
+    <section class="status-section proxy-health-section" id="claudeDesktopGatewayHealthSection" hidden>
+      <div class="section-header-row">
+        <h2 class="section-title" id="claudeDesktopGatewayHealthTitle">Desktop Gateway 健康</h2>
+        <button class="btn btn-secondary btn-sm" id="claudeDesktopGatewayResetBtn" type="button">重置熔断</button>
+      </div>
+      <div class="status-grid" id="claudeDesktopGatewayHealthGrid"></div>
+    </section>
+    <section class="profiles-section">
+      <h2 class="section-title" id="claudeDesktopProfilesTitle">Claude Desktop 配置列表</h2>
+      <div class="profiles-grid" id="claudeDesktopProfilesList"></div>
+    </section>
+  </div>
+  </div><!-- end pageClaudeDesktop -->
 
   <div class="page-content console-page" id="pageCodex" data-console-page-panel="codex">
   <div class="app">
@@ -660,6 +694,76 @@
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
           <button type="submit" class="btn btn-primary" id="submitBtn">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="claudeDesktopProfileOverlay">
+    <div class="modal claude-desktop-profile-modal">
+      <div class="modal-header">
+        <h2 id="claudeDesktopProfileTitle">添加 Claude Desktop 配置</h2>
+        <button class="modal-close" id="claudeDesktopProfileClose" type="button">&times;</button>
+      </div>
+      <form id="claudeDesktopProfileForm">
+        <input type="hidden" id="claudeDesktopProfileId">
+        <div class="form-group">
+          <label id="claudeDesktopProfileNameLabel" for="claudeDesktopProfileName">配置名称</label>
+          <input type="text" id="claudeDesktopProfileName" required autocomplete="off" placeholder="例如：公司 Gateway">
+        </div>
+        <div class="form-group">
+          <label id="claudeDesktopProfileConnectionModeLabel" for="claudeDesktopProfileConnectionMode">连接模式</label>
+          <select class="form-select claude-desktop-mode-select" id="claudeDesktopProfileConnectionMode">
+            <option value="gateway">Gateway（推荐）</option>
+            <option value="direct">直连 Anthropic</option>
+          </select>
+          <small class="form-hint" id="claudeDesktopProfileConnectionModeHint">Gateway 支持模型映射、OpenAI Chat 转换与故障转移，需要保持 VarSwitch 运行。</small>
+        </div>
+        <div class="form-group">
+          <label id="claudeDesktopProfileApiFormatLabel" for="claudeDesktopProfileApiFormat">API 格式</label>
+          <select class="form-select" id="claudeDesktopProfileApiFormat">
+            <option value="anthropic">Anthropic Messages</option>
+            <option value="openai_chat">OpenAI Chat Completions</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label id="claudeDesktopProfileBaseUrlLabel" for="claudeDesktopProfileBaseUrl">Base URL</label>
+          <input type="text" id="claudeDesktopProfileBaseUrl" required autocomplete="off" spellcheck="false" placeholder="https://api.example.com">
+        </div>
+        <div class="form-group">
+          <label id="claudeDesktopProfileApiKeyLabel" for="claudeDesktopProfileApiKey">API Key</label>
+          <input type="password" id="claudeDesktopProfileApiKey" required autocomplete="off" spellcheck="false" placeholder="sk-...">
+        </div>
+        <div class="form-group">
+          <label id="claudeDesktopProfileModelIdLabel" for="claudeDesktopProfileModelId">默认模型</label>
+          <input type="text" id="claudeDesktopProfileModelId" autocomplete="off" spellcheck="false" placeholder="角色模型留空时使用">
+        </div>
+        <details class="model-mapping-section" open>
+          <summary id="claudeDesktopProfileModelMappingTitle">角色模型映射</summary>
+          <div class="model-mapping-body">
+            <div class="form-group">
+              <label id="claudeDesktopProfileSonnetModelLabel" for="claudeDesktopProfileSonnetModel">Sonnet 模型</label>
+              <input type="text" id="claudeDesktopProfileSonnetModel" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group">
+              <label id="claudeDesktopProfileOpusModelLabel" for="claudeDesktopProfileOpusModel">Opus 模型</label>
+              <input type="text" id="claudeDesktopProfileOpusModel" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group">
+              <label id="claudeDesktopProfileHaikuModelLabel" for="claudeDesktopProfileHaikuModel">Haiku 模型</label>
+              <input type="text" id="claudeDesktopProfileHaikuModel" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+        </details>
+        <div class="form-group proxy-failover-group" id="claudeDesktopProfileFailoverGroup">
+          <label class="proxy-failover-checkbox" for="claudeDesktopProfileProxyFailover">
+            <input type="checkbox" id="claudeDesktopProfileProxyFailover">
+            <span id="claudeDesktopProfileProxyFailoverText">加入 Desktop Gateway 故障转移池</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" id="claudeDesktopProfileCancel">取消</button>
+          <button type="submit" class="btn btn-primary" id="claudeDesktopProfileSubmit">保存</button>
         </div>
       </form>
     </div>

@@ -1,5 +1,7 @@
 mod claude_proxy;
 mod claude_desktop;
+mod claude_desktop_gateway;
+mod claude_desktop_provider;
 mod usage_stats;
 mod opencode;
 
@@ -1740,6 +1742,14 @@ pub fn run() {
                 }
             }
 
+            // Claude Desktop 使用独立上游与故障转移池；仅复用监听进程，不能覆盖
+            // 上面的 Claude Code 运行态。恢复失败只记状态，不阻断其他应用启动。
+            if let Err(error) =
+                claude_desktop_provider::restore_claude_desktop_runtime(&app.handle())
+            {
+                log_error!("[claude-desktop-gateway] 启动恢复失败：{error}");
+            }
+
             // 把历史遗留的明文 API Key 转成本机加密存储（内部会先备份、无明文则跳过）
             migrate_plaintext_secrets(&app.handle());
 
@@ -1857,6 +1867,17 @@ pub fn run() {
             update_profile,
             delete_profile,
             get_claude_proxy_status,
+            claude_desktop_provider::get_claude_desktop_profiles,
+            claude_desktop_provider::add_claude_desktop_profile,
+            claude_desktop_provider::update_claude_desktop_profile,
+            claude_desktop_provider::delete_claude_desktop_profile,
+            claude_desktop_provider::reorder_claude_desktop_profiles,
+            claude_desktop_provider::import_claude_profiles_to_desktop,
+            claude_desktop_provider::switch_claude_desktop_profile,
+            claude_desktop_provider::sync_claude_desktop_profile,
+            claude_desktop_provider::get_claude_desktop_provider_status,
+            claude_desktop_gateway::get_claude_desktop_gateway_health,
+            claude_desktop_gateway::claude_desktop_gateway_reset_breaker,
             switch_profile,
             get_status,
             get_detected_editors,

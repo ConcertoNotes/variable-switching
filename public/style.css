@@ -5908,6 +5908,52 @@ body {
 
 .sidebar-item[hidden] { display: none !important; }
 
+/* Claude Desktop 3P Profile / Gateway */
+.claude-desktop-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 21px;
+  padding: 2px 8px;
+  border: 1px solid var(--console-line);
+  border-radius: 999px;
+  color: var(--console-weak);
+  background: var(--console-card-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.claude-desktop-mode-badge.mode-gateway {
+  color: #2563eb;
+  border-color: color-mix(in srgb, #2563eb 35%, var(--console-line));
+  background: color-mix(in srgb, #2563eb 9%, var(--console-card));
+}
+
+.claude-desktop-mode-badge.mode-direct {
+  color: #0f766e;
+  border-color: color-mix(in srgb, #0f766e 35%, var(--console-line));
+  background: color-mix(in srgb, #0f766e 9%, var(--console-card));
+}
+
+.claude-desktop-dependency-warning {
+  border-color: color-mix(in srgb, #d97706 38%, var(--console-line));
+  background: color-mix(in srgb, #d97706 7%, var(--console-card));
+}
+
+.claude-desktop-profile-modal {
+  max-height: min(860px, calc(100vh - 34px));
+  overflow-y: auto;
+}
+
+.claude-desktop-mode-select { min-height: 42px; }
+.claude-desktop-official-card { cursor: default; }
+.claude-desktop-official-card .product-icon { flex: 0 0 auto; }
+#claudeDesktopGatewayHealthGrid .proxy-upstream-list { margin-top: 10px; }
+
+@media (max-width: 760px) {
+  .claude-desktop-mode-badge { padding-inline: 6px; }
+  .claude-desktop-profile-modal { max-height: calc(100vh - 18px); }
+}
+
 .provider-onboarding-header { margin-bottom: 24px; }
 
 .provider-builder {

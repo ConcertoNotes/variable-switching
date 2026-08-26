@@ -442,21 +442,26 @@ fn anthropic_error_body(error_type: &str, message: &str) -> String {
     json!({"type": "error", "error": {"type": error_type, "message": message}}).to_string()
 }
 
-fn respond_error(request: tiny_http::Request, status: u16, error_type: &str, message: &str) {
+pub(crate) fn respond_error(
+    request: tiny_http::Request,
+    status: u16,
+    error_type: &str,
+    message: &str,
+) {
     let response = tiny_http::Response::from_string(anthropic_error_body(error_type, message))
         .with_status_code(status)
         .with_header(json_content_type());
     let _ = request.respond(response);
 }
 
-fn respond_json(request: tiny_http::Request, status: u16, body: String) {
+pub(crate) fn respond_json(request: tiny_http::Request, status: u16, body: String) {
     let response = tiny_http::Response::from_string(body)
         .with_status_code(status)
         .with_header(json_content_type());
     let _ = request.respond(response);
 }
 
-fn read_body(request: &mut tiny_http::Request) -> Result<Value, String> {
+pub(crate) fn read_body(request: &mut tiny_http::Request) -> Result<Value, String> {
     let mut body = String::new();
     request
         .as_reader()
@@ -472,6 +477,10 @@ fn handle_request(request: tiny_http::Request) {
         .next()
         .unwrap_or_default()
         .to_string();
+    if path.starts_with("/claude-desktop/") {
+        crate::claude_desktop_gateway::handle_request(request);
+        return;
+    }
     if *request.method() != tiny_http::Method::Post {
         respond_error(
             request,
@@ -528,7 +537,7 @@ fn handle_count_tokens(mut request: tiny_http::Request) {
 }
 
 /// 单次上游尝试的结果分类
-enum AttemptOutcome {
+pub(crate) enum AttemptOutcome {
     /// 2xx：拿到可转发的上游响应
     Success(reqwest::blocking::Response),
     /// 可转移失败（TCP 连接失败/超时、5xx、429）：记熔断并尝试下一候选
@@ -550,7 +559,7 @@ fn rewrite_model(body: &Value, model: &str) -> Value {
 
 /// 向单个上游发起一次转发尝试。此阶段尚未向客户端写回任何字节，
 /// 因此失败可以安全地换下一个候选重试。
-fn try_upstream(target: &ProxyTarget, body: &Value) -> AttemptOutcome {
+pub(crate) fn try_upstream(target: &ProxyTarget, body: &Value) -> AttemptOutcome {
     let upstream = &target.upstream;
     let base = upstream.base_url.trim_end_matches('/');
     // 各候选的重写模型可能不同，请求体按候选分别生成
@@ -594,7 +603,7 @@ fn try_upstream(target: &ProxyTarget, body: &Value) -> AttemptOutcome {
 
 /// 把上游成功响应转发给客户端（流式 / 非流式两条路径）。
 /// 从这里开始向客户端写字节，之后不能再切换上游。
-fn deliver_response(
+pub(crate) fn deliver_response(
     request: tiny_http::Request,
     upstream_resp: reqwest::blocking::Response,
     stream: bool,
