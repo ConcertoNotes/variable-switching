@@ -1085,7 +1085,19 @@ const I18N = {
     claudeDesktopFetchingModels: "Fetching models...",
     claudeDesktopModelsFetched: "Fetched {count} Claude-compatible model(s)",
     claudeDesktopModelsFiltered: "Filtered {count} non-Claude model(s)",
-    claudeDesktopModelsFetchFailed: "Failed to fetch models: {error}"
+    claudeDesktopModelsFetchFailed: "Failed to fetch models: {error}",
+    claudeDesktopLocalizationTitle: "Claude Desktop Chinese",
+    claudeDesktopLocalizationStatus: "Status",
+    claudeDesktopLocalizationPatch: "Translate",
+    claudeDesktopLocalizationRestore: "Restore English",
+    claudeDesktopLocalizationProject: "Project",
+    claudeDesktopLocalizationHint: "Based on claude-desktop-zh-simple. Fully quit Claude Desktop before running.",
+    claudeDesktopLocalizationConfirmPatch: "Claude Desktop must be fully quit. Continue with backup and translation?",
+    claudeDesktopLocalizationConfirmRestore: "Restore Claude Desktop English resources from the managed backup?",
+    claudeDesktopLocalizationRunning: "Running localization tool...",
+    claudeDesktopLocalizationSuccess: "Localization tool finished",
+    claudeDesktopLocalizationFailed: "Localization tool failed: {error}",
+    claudeDesktopLocalizationProjectOpened: "Localization project opened"
   },
   zh: {
     appTitle: "VarSwitch",
@@ -1760,7 +1772,19 @@ const I18N = {
     claudeDesktopFetchingModels: "正在获取模型...",
     claudeDesktopModelsFetched: "已获取 {count} 个 Claude 可用模型",
     claudeDesktopModelsFiltered: "已过滤 {count} 个非 Claude 模型",
-    claudeDesktopModelsFetchFailed: "获取模型失败：{error}"
+    claudeDesktopModelsFetchFailed: "获取模型失败：{error}",
+    claudeDesktopLocalizationTitle: "Claude Desktop 汉化",
+    claudeDesktopLocalizationStatus: "查看状态",
+    claudeDesktopLocalizationPatch: "一键汉化",
+    claudeDesktopLocalizationRestore: "还原英文",
+    claudeDesktopLocalizationProject: "项目主页",
+    claudeDesktopLocalizationHint: "基于 claude-desktop-zh-simple；操作前请完全退出 Claude Desktop。",
+    claudeDesktopLocalizationConfirmPatch: "需要完全退出 Claude Desktop。现在备份并执行汉化吗？",
+    claudeDesktopLocalizationConfirmRestore: "要从已管理的备份还原 Claude Desktop 英文资源吗？",
+    claudeDesktopLocalizationRunning: "正在执行汉化工具...",
+    claudeDesktopLocalizationSuccess: "汉化工具执行完成",
+    claudeDesktopLocalizationFailed: "汉化工具执行失败：{error}",
+    claudeDesktopLocalizationProjectOpened: "已打开汉化项目主页"
   }
 };
 
@@ -2916,6 +2940,12 @@ function applyLanguage() {
   setText("claudeDesktopStatusTitle", t("claudeDesktopStatusTitle"));
   setText("claudeDesktopProfilesTitle", t("claudeDesktopProfilesTitle"));
   setText("claudeDesktopGatewayHealthTitle", t("claudeDesktopGatewayHealthTitle"));
+  setText("claudeDesktopLocalizationTitle", t("claudeDesktopLocalizationTitle"));
+  setText("claudeDesktopLocalizationStatusBtn", t("claudeDesktopLocalizationStatus"));
+  setText("claudeDesktopLocalizationPatchBtn", t("claudeDesktopLocalizationPatch"));
+  setText("claudeDesktopLocalizationRestoreBtn", t("claudeDesktopLocalizationRestore"));
+  setText("claudeDesktopLocalizationProjectBtn", t("claudeDesktopLocalizationProject"));
+  setText("claudeDesktopLocalizationHint", t("claudeDesktopLocalizationHint"));
   setText("claudeDesktopDependencyWarningText", t("claudeDesktopGatewayDependencyWarning"));
   setText("claudeDesktopProfileNameLabel", currentLang === "zh" ? "配置名称" : "Profile Name");
   setText("claudeDesktopProfileConnectionModeLabel", currentLang === "zh" ? "连接模式" : "Connection Mode");
@@ -4704,6 +4734,62 @@ async function loadClaudeDesktopGatewayHealth() {
   }
 }
 
+function renderClaudeDesktopLocalizationResult(result) {
+  const container = $("claudeDesktopLocalizationResult");
+  if (!container) return;
+  const output = String(result?.output || "").trim();
+  const state = result?.success ? t("claudeDesktopLocalizationSuccess") : t("claudeDesktopLocalizationFailed", { error: output || "unknown error" });
+  container.innerHTML = '<div class="endpoint-row"><span class="endpoint-url">' + esc(state) + '</span><span class="endpoint-meta ' + (result?.success ? "fast" : "failed") + '">' + esc(output.slice(-1200)) + '</span></div>';
+  container.classList.add("open");
+}
+
+async function loadClaudeDesktopLocalizationStatus() {
+  try {
+    const result = await invoke("get_claude_desktop_localization_status");
+    renderClaudeDesktopLocalizationResult(result);
+  } catch (error) {
+    console.debug("get_claude_desktop_localization_status unavailable:", sanitizeForLog(error));
+  }
+}
+
+async function runClaudeDesktopLocalization(action) {
+  if (!["patch", "restore"].includes(action)) return;
+  const message = action === "patch"
+    ? t("claudeDesktopLocalizationConfirmPatch")
+    : t("claudeDesktopLocalizationConfirmRestore");
+  if (!(await appConfirm(message, { title: t("claudeDesktopLocalizationTitle"), danger: action === "restore" }))) return;
+  const buttons = [
+    $("claudeDesktopLocalizationStatusBtn"),
+    $("claudeDesktopLocalizationPatchBtn"),
+    $("claudeDesktopLocalizationRestoreBtn"),
+    $("claudeDesktopLocalizationProjectBtn"),
+  ].filter(Boolean);
+  buttons.forEach((button) => { button.disabled = true; });
+  const activeButton = action === "patch" ? $("claudeDesktopLocalizationPatchBtn") : $("claudeDesktopLocalizationRestoreBtn");
+  if (activeButton) activeButton.textContent = t("claudeDesktopLocalizationRunning");
+  try {
+    const result = await invoke("run_claude_desktop_localization", { action });
+    renderClaudeDesktopLocalizationResult(result);
+    showToast(result?.success ? t("claudeDesktopLocalizationSuccess") : t("claudeDesktopLocalizationFailed", { error: result?.output || "unknown error" }), result?.success ? "success" : "error");
+  } catch (error) {
+    const messageText = t("claudeDesktopLocalizationFailed", { error: String(error) });
+    renderClaudeDesktopLocalizationResult({ success: false, output: String(error) });
+    showToast(messageText, "error");
+  } finally {
+    buttons.forEach((button) => { button.disabled = false; });
+    if (activeButton) activeButton.textContent = action === "patch" ? t("claudeDesktopLocalizationPatch") : t("claudeDesktopLocalizationRestore");
+  }
+}
+
+async function openClaudeDesktopLocalizationProject() {
+  try {
+    await invoke("open_claude_desktop_localization_project");
+    showToast(t("claudeDesktopLocalizationProjectOpened"), "success");
+  } catch (error) {
+    showToast(String(error), "error");
+  }
+}
+
 async function loadClaudeDesktopPage() {
   try {
     const [profilesData, status] = await Promise.all([
@@ -4715,6 +4801,7 @@ async function loadClaudeDesktopPage() {
     renderClaudeDesktopProfiles();
     renderClaudeDesktopStatus(claudeDesktopStatus);
     if (status?.mode === "gateway") await loadClaudeDesktopGatewayHealth();
+    await loadClaudeDesktopLocalizationStatus();
   } catch (error) {
     showToast(t("claudeDesktopLoadFailed", { error: String(error) }), "error");
   }
@@ -10085,6 +10172,10 @@ function bindConsoleUiOnce() {
   $("claudeDesktopImportBtn")?.addEventListener("click", importClaudeProfilesToDesktop);
   $("claudeDesktopSyncBtn")?.addEventListener("click", syncClaudeDesktopProfile);
   $("claudeDesktopGatewayResetBtn")?.addEventListener("click", resetClaudeDesktopGatewayBreaker);
+  $("claudeDesktopLocalizationStatusBtn")?.addEventListener("click", loadClaudeDesktopLocalizationStatus);
+  $("claudeDesktopLocalizationPatchBtn")?.addEventListener("click", () => runClaudeDesktopLocalization("patch"));
+  $("claudeDesktopLocalizationRestoreBtn")?.addEventListener("click", () => runClaudeDesktopLocalization("restore"));
+  $("claudeDesktopLocalizationProjectBtn")?.addEventListener("click", openClaudeDesktopLocalizationProject);
   $("claudeDesktopProfileConnectionMode")?.addEventListener("change", updateClaudeDesktopProfileFormState);
   $("claudeDesktopProfileModelFetchBtn")?.addEventListener("click", () => fetchClaudeDesktopModels());
   $("claudeDesktopProfileClose")?.addEventListener("click", closeClaudeDesktopProfileDialog);
