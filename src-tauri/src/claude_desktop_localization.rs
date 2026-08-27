@@ -9,7 +9,6 @@ use tauri::Manager;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-const LOCALIZATION_PROJECT_URL: &str = "https://github.com/GMYXDS/claude-desktop-zh-simple";
 const LOCALIZATION_DIR_NAME: &str = "claude-desktop-zh-simple";
 const LOCALIZATION_SCRIPT_RELATIVE: &str = "scripts/claude-desktop-zh-simple.ps1";
 const LOCALIZATION_STATIC_FILES: &[&str] = &[
@@ -127,7 +126,7 @@ fn execute_localization_action(
         .collect::<Vec<_>>()
         .join(",");
     let command = format!(
-        "$p = Start-Process -FilePath 'powershell.exe' -ArgumentList {} -Verb RunAs -Wait -PassThru; exit $p.ExitCode",
+        "$p = Start-Process -FilePath 'powershell.exe' -ArgumentList {} -WindowStyle Hidden -Verb RunAs -Wait -PassThru; exit $p.ExitCode",
         ps_args
     );
     let mut process = Command::new("powershell.exe");
@@ -156,23 +155,11 @@ fn execute_localization_action(
 }
 
 #[tauri::command]
-pub(crate) fn get_claude_desktop_localization_status(
-    app: tauri::AppHandle,
-) -> Result<serde_json::Value, String> {
-    execute_localization_action(&app, "status")
-}
-
-#[tauri::command]
 pub(crate) fn run_claude_desktop_localization(
     app: tauri::AppHandle,
     action: String,
 ) -> Result<serde_json::Value, String> {
     execute_localization_action(&app, &action)
-}
-
-#[tauri::command]
-pub(crate) fn open_claude_desktop_localization_project() -> Result<(), String> {
-    crate::open_with_system(LOCALIZATION_PROJECT_URL)
 }
 
 #[cfg(test)]
@@ -195,6 +182,8 @@ mod tests {
             .any(|pair| pair == ["-Action".to_string(), "patch".to_string()]));
         assert!(args.iter().any(|arg| arg == "-Yes"));
         assert!(args.iter().any(|arg| arg == "-SkipUpdateCheck"));
+        let source = include_str!("claude_desktop_localization.rs");
+        assert!(source.contains("-WindowStyle Hidden"));
     }
 
     #[test]

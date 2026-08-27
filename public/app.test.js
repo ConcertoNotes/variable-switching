@@ -663,16 +663,18 @@ test("Claude Desktop exposes reversible localization actions", () => {
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
   for (const id of [
-    "claudeDesktopLocalizationStatusBtn",
     "claudeDesktopLocalizationPatchBtn",
     "claudeDesktopLocalizationRestoreBtn",
-    "claudeDesktopLocalizationProjectBtn",
-    "claudeDesktopLocalizationResult",
+    "claudeDesktopLocalizationProgress",
   ]) assert.match(html, new RegExp('id="' + id + '"'));
-  assert.match(app, /get_claude_desktop_localization_status/);
+  assert.doesNotMatch(html, /claudeDesktopLocalizationProjectBtn/);
+  assert.match(html, /claudeDesktopLocalizationActions/);
+  assert.doesNotMatch(app, /claudeDesktopLocalizationProjectBtn/);
+  const pageLoad = app.match(/async function loadClaudeDesktopPage\(\)[\s\S]*?\n}/)?.[0] || "";
+  assert.doesNotMatch(pageLoad, /get_claude_desktop_localization_status/);
   assert.match(app, /run_claude_desktop_localization/);
-  assert.match(app, /open_claude_desktop_localization_project/);
   assert.match(app, /function runClaudeDesktopLocalization/);
+  assert.match(app, /claudeDesktopLocalizationProgress/);
 });
 
 test("Claude Desktop frontend wires independent provider commands", () => {
@@ -704,6 +706,29 @@ test("Claude Desktop confirmations use the in-app async dialog", () => {
   assert.match(importFlow, /await appConfirm\(/);
   assert.doesNotMatch(deleteFlow, /\bconfirm\(/);
   assert.doesNotMatch(importFlow, /\bconfirm\(/);
+});
+
+test("download page exposes a shared download counter and clickable sparkle", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "varswitch-download-site", "index.html"), "utf8");
+  const script = fs.readFileSync(path.join(__dirname, "..", "varswitch-download-site", "download-site.js"), "utf8");
+  assert.match(html, /id="downloadCount"/);
+  assert.match(html, /id="downloadCountButton"/);
+  assert.match(html, /data-download-track/);
+  assert.match(html, /download-site\.js/);
+  assert.match(script, /const endpoint = ["']\/api\/download-count["']/);
+});
+
+test("download counter helper formats counts and posts the selected metric", async () => {
+  const counter = require(path.join(__dirname, "..", "varswitch-download-site", "download-site.js"));
+  assert.equal(counter.formatCount(1234), "1.2K");
+  let request;
+  const result = await counter.requestCount(async (url, options) => {
+    request = { url, options };
+    return { ok: true, json: async () => ({ metric: "sparkles", count: 7 }) };
+  }, "sparkles", "POST");
+  assert.deepEqual(result, { metric: "sparkles", count: 7 });
+  assert.equal(request.url, "/api/download-count?metric=sparkles");
+  assert.equal(request.options.method, "POST");
 });
 
 test("getCodexSessionMetrics reads the current toolbox response fields", () => {

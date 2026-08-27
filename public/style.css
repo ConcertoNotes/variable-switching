@@ -5909,6 +5909,65 @@ body {
 .sidebar-item[hidden] { display: none !important; }
 
 /* Claude Desktop 3P Profile / Gateway */
+.claude-desktop-status-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.claude-desktop-status-row > .status-section {
+  min-width: 0;
+}
+
+.claude-desktop-status-row .status-grid {
+  grid-template-columns: 1fr;
+}
+
+.localization-progress {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--console-line);
+  border-radius: 8px;
+  background: var(--console-card-muted);
+}
+
+.localization-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--console-muted);
+  font-size: 12px;
+}
+
+.localization-progress-track {
+  height: 5px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--console-line) 72%, transparent);
+}
+
+.localization-progress-track > span {
+  display: block;
+  width: 35%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--console-blue, #2563eb);
+  animation: localization-progress-pulse 1.25s ease-in-out infinite;
+}
+
+.localization-progress-track.is-complete > span {
+  width: 100%;
+  animation: none;
+}
+
+@keyframes localization-progress-pulse {
+  0%, 100% { transform: translateX(-55%); opacity: 0.55; }
+  50% { transform: translateX(185%); opacity: 1; }
+}
+
 .claude-desktop-mode-badge {
   display: inline-flex;
   align-items: center;
@@ -5950,6 +6009,7 @@ body {
 #claudeDesktopGatewayHealthGrid .proxy-upstream-list { margin-top: 10px; }
 
 @media (max-width: 760px) {
+  .claude-desktop-status-row { grid-template-columns: 1fr; }
   .claude-desktop-mode-badge { padding-inline: 6px; }
   .claude-desktop-profile-modal { max-height: calc(100vh - 18px); }
 }

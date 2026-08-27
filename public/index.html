@@ -109,7 +109,7 @@
       <button class="sidebar-item sidebar-settings" data-console-page="settings" type="button">
         <img src="icon-guide.svg" alt=""><span>设置</span>
       </button>
-      <div class="sidebar-version">VarSwitch <span>v3.1.9</span></div>
+      <div class="sidebar-version">VarSwitch <span>v3.1.11</span></div>
     </aside>
 
     <main class="workspace-main" id="workspaceMain">
@@ -158,27 +158,35 @@
     <section class="support-section control-panel-section" id="claudeDesktopLocalizationSection">
       <div class="section-header-row">
         <h2 class="section-title" id="claudeDesktopLocalizationTitle">Claude Desktop 汉化</h2>
-        <div class="section-header-actions">
-          <button class="btn btn-secondary btn-sm" id="claudeDesktopLocalizationStatusBtn" type="button">查看状态</button>
+        <div class="section-header-actions claudeDesktopLocalizationActions" id="claudeDesktopLocalizationActions">
           <button class="btn btn-primary btn-sm" id="claudeDesktopLocalizationPatchBtn" type="button">一键汉化</button>
           <button class="btn btn-secondary btn-sm" id="claudeDesktopLocalizationRestoreBtn" type="button">还原英文</button>
-          <button class="btn btn-secondary btn-sm" id="claudeDesktopLocalizationProjectBtn" type="button">项目主页</button>
         </div>
       </div>
       <p class="support-hint" id="claudeDesktopLocalizationHint">基于 claude-desktop-zh-simple；操作前请完全退出 Claude Desktop。</p>
-      <div class="endpoint-results" id="claudeDesktopLocalizationResult"></div>
-    </section>
-    <section class="status-section">
-      <div class="section-header-row"><h2 class="section-title" id="claudeDesktopStatusTitle">Claude Desktop 状态</h2></div>
-      <div class="status-grid" id="claudeDesktopStatusGrid"></div>
-    </section>
-    <section class="status-section proxy-health-section" id="claudeDesktopGatewayHealthSection" hidden>
-      <div class="section-header-row">
-        <h2 class="section-title" id="claudeDesktopGatewayHealthTitle">Desktop Gateway 健康</h2>
-        <button class="btn btn-secondary btn-sm" id="claudeDesktopGatewayResetBtn" type="button">重置熔断</button>
+      <div class="localization-progress" id="claudeDesktopLocalizationProgress" hidden>
+        <div class="localization-progress-head">
+          <span id="claudeDesktopLocalizationProgressText">准备就绪</span>
+          <span id="claudeDesktopLocalizationProgressPercent">0%</span>
+        </div>
+        <div class="localization-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="claudeDesktopLocalizationProgressBar">
+          <span></span>
+        </div>
       </div>
-      <div class="status-grid" id="claudeDesktopGatewayHealthGrid"></div>
     </section>
+    <div class="claude-desktop-status-row">
+      <section class="status-section">
+        <div class="section-header-row"><h2 class="section-title" id="claudeDesktopStatusTitle">Claude Desktop 状态</h2></div>
+        <div class="status-grid" id="claudeDesktopStatusGrid"></div>
+      </section>
+      <section class="status-section proxy-health-section" id="claudeDesktopGatewayHealthSection" hidden>
+        <div class="section-header-row">
+          <h2 class="section-title" id="claudeDesktopGatewayHealthTitle">Desktop Gateway 健康</h2>
+          <button class="btn btn-secondary btn-sm" id="claudeDesktopGatewayResetBtn" type="button">重置熔断</button>
+        </div>
+        <div class="status-grid" id="claudeDesktopGatewayHealthGrid"></div>
+      </section>
+    </div>
     <section class="profiles-section">
       <h2 class="section-title" id="claudeDesktopProfilesTitle">Claude Desktop 配置列表</h2>
       <div class="profiles-grid" id="claudeDesktopProfilesList"></div>

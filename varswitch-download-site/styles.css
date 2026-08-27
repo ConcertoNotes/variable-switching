@@ -282,6 +282,46 @@ img {
   font-size: 13px;
 }
 
+.hero-metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  color: var(--faint);
+  font-size: 13px;
+}
+
+.sparkle-button,
+.download-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.sparkle-button {
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease, transform .18s ease;
+}
+
+.sparkle-button:hover,
+.sparkle-button:focus-visible,
+.sparkle-button.is-selected {
+  border-color: #f0b429;
+  background: #fff8df;
+  transform: translateY(-1px);
+}
+
+.sparkle-button:disabled { cursor: wait; opacity: .65; }
+.sparkle-button strong,
+.download-metric strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
 .hero-device {
   margin-top: 76px;
   padding-bottom: 8px;
