@@ -648,6 +648,33 @@ test("Claude Desktop has a first-class provider page and gateway form", () => {
   assert.match(html, /id="claudeDesktopProfileHaikuModel"/);
 });
 
+test("Claude Desktop gateway form exposes model discovery controls", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.match(html, /id="claudeDesktopProfileModelFetchBtn"/);
+  assert.match(html, /id="claudeDesktopProfileModelFetchResults"/);
+  assert.match(html, /list="claudeDesktopModelOptions"/);
+  assert.match(app, /function fetchClaudeDesktopModels/);
+  assert.match(app, /fetch_available_models/);
+  assert.match(app, /claudeDesktopProfileModelId/);
+});
+
+test("Claude Desktop exposes reversible localization actions", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  for (const id of [
+    "claudeDesktopLocalizationStatusBtn",
+    "claudeDesktopLocalizationPatchBtn",
+    "claudeDesktopLocalizationRestoreBtn",
+    "claudeDesktopLocalizationProjectBtn",
+    "claudeDesktopLocalizationResult",
+  ]) assert.match(html, new RegExp('id="' + id + '"'));
+  assert.match(app, /get_claude_desktop_localization_status/);
+  assert.match(app, /run_claude_desktop_localization/);
+  assert.match(app, /open_claude_desktop_localization_project/);
+  assert.match(app, /function runClaudeDesktopLocalization/);
+});
+
 test("Claude Desktop frontend wires independent provider commands", () => {
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
   for (const command of [
