@@ -68,6 +68,33 @@ fn quote_powershell(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
+fn build_elevated_command(
+    script: &Path,
+    action: &str,
+    stdout_path: &Path,
+    stderr_path: &Path,
+) -> String {
+    let args = powershell_script_args(action).expect("action must be allowlisted before execution");
+    let ps_args = args
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            if index == 4 {
+                quote_powershell(&script.to_string_lossy())
+            } else {
+                quote_powershell(value)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let stdout = quote_powershell(&stdout_path.to_string_lossy());
+    let stderr = quote_powershell(&stderr_path.to_string_lossy());
+    format!(
+        "$p = Start-Process -FilePath 'powershell.exe' -ArgumentList {} -WindowStyle Hidden -Verb RunAs -Wait -PassThru -RedirectStandardOutput {} -RedirectStandardError {}; $stdoutText = if (Test-Path -LiteralPath {}) {{ Get-Content -LiteralPath {} -Raw }} else {{ '' }}; $stderrText = if (Test-Path -LiteralPath {}) {{ Get-Content -LiteralPath {} -Raw }} else {{ '' }}; Remove-Item -LiteralPath {},{} -Force -ErrorAction SilentlyContinue; [Console]::Out.Write($stdoutText); [Console]::Error.Write($stderrText); exit $p.ExitCode",
+        ps_args, stdout, stderr, stdout, stdout, stderr, stderr, stdout, stderr
+    )
+}
+
 fn localization_paths(
     resource_root: &Path,
     writable_root: &Path,
@@ -112,29 +139,25 @@ fn execute_localization_action(
     let writable_root = crate::data_dir(app);
     let project_root = initialize_localization_bundle(&resource_root, &writable_root)?;
     let script = project_root.join(LOCALIZATION_SCRIPT_RELATIVE);
-    let args = powershell_script_args(&action[0])?;
-    let ps_args = args
-        .iter()
-        .enumerate()
-        .map(|(index, value)| {
-            if index == 4 {
-                quote_powershell(&script.to_string_lossy())
-            } else {
-                quote_powershell(value)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let command = format!(
-        "$p = Start-Process -FilePath 'powershell.exe' -ArgumentList {} -WindowStyle Hidden -Verb RunAs -Wait -PassThru; exit $p.ExitCode",
-        ps_args
+    let unique = format!(
+        "varswitch-claude-localization-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
     );
+    let stdout_path = std::env::temp_dir().join(format!("{unique}.out"));
+    let stderr_path = std::env::temp_dir().join(format!("{unique}.err"));
+    let command = build_elevated_command(&script, &action[0], &stdout_path, &stderr_path);
     let mut process = Command::new("powershell.exe");
     process.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &command]);
     process.creation_flags(crate::CREATE_NO_WINDOW);
     let output = process
         .output()
         .map_err(|error| format!("启动汉化脚本失败: {error}"))?;
+    let _ = fs::remove_file(&stdout_path);
+    let _ = fs::remove_file(&stderr_path);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     Ok(json!({
@@ -182,8 +205,21 @@ mod tests {
             .any(|pair| pair == ["-Action".to_string(), "patch".to_string()]));
         assert!(args.iter().any(|arg| arg == "-Yes"));
         assert!(args.iter().any(|arg| arg == "-SkipUpdateCheck"));
-        let source = include_str!("claude_desktop_localization.rs");
-        assert!(source.contains("-WindowStyle Hidden"));
+    }
+
+    #[test]
+    fn elevated_command_captures_child_output() {
+        let command = build_elevated_command(
+            Path::new("C:/claude/script.ps1"),
+            "status",
+            Path::new("C:/temp/stdout.txt"),
+            Path::new("C:/temp/stderr.txt"),
+        );
+        assert!(command.contains("-WindowStyle Hidden"));
+        assert!(command.contains("-RedirectStandardOutput"));
+        assert!(command.contains("-RedirectStandardError"));
+        assert!(command.contains("Get-Content -LiteralPath"));
+        assert!(command.contains("-Raw"));
     }
 
     #[test]
