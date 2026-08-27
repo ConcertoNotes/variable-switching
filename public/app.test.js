@@ -648,6 +648,17 @@ test("Claude Desktop has a first-class provider page and gateway form", () => {
   assert.match(html, /id="claudeDesktopProfileHaikuModel"/);
 });
 
+test("Claude Desktop gateway form exposes model discovery controls", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.match(html, /id="claudeDesktopProfileModelFetchBtn"/);
+  assert.match(html, /id="claudeDesktopProfileModelFetchResults"/);
+  assert.match(html, /list="claudeDesktopModelOptions"/);
+  assert.match(app, /function fetchClaudeDesktopModels/);
+  assert.match(app, /fetch_available_models/);
+  assert.match(app, /claudeDesktopProfileModelId/);
+});
+
 test("Claude Desktop frontend wires independent provider commands", () => {
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
   for (const command of [

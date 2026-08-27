@@ -31,6 +31,8 @@ pub(crate) struct ClaudeDesktopProfile {
     pub(crate) sonnet_model: String,
     pub(crate) opus_model: String,
     pub(crate) haiku_model: String,
+    #[serde(default)]
+    pub(crate) available_models: Vec<String>,
     pub(crate) proxy_failover: bool,
     pub(crate) is_active: bool,
     pub(crate) created_at: String,
@@ -57,6 +59,8 @@ pub(crate) struct ClaudeDesktopProfileInput {
     pub(crate) opus_model: String,
     #[serde(default)]
     pub(crate) haiku_model: String,
+    #[serde(default)]
+    pub(crate) available_models: Vec<String>,
     #[serde(default)]
     pub(crate) proxy_failover: bool,
 }
@@ -164,6 +168,7 @@ fn official_profile(is_active: bool) -> ClaudeDesktopProfile {
         sonnet_model: String::new(),
         opus_model: String::new(),
         haiku_model: String::new(),
+        available_models: Vec::new(),
         proxy_failover: false,
         is_active,
         created_at: "0".into(),
@@ -628,6 +633,7 @@ fn import_from_claude_profiles(
             sonnet_model: profile.sonnet_model.clone(),
             opus_model: profile.opus_model.clone(),
             haiku_model: profile.haiku_model.clone(),
+            available_models: Vec::new(),
             proxy_failover: profile.proxy_failover,
             is_active: false,
             created_at: chrono_now(),
@@ -663,6 +669,7 @@ fn profile_from_input(input: ClaudeDesktopProfileInput) -> ClaudeDesktopProfile 
         sonnet_model: input.sonnet_model.trim().to_string(),
         opus_model: input.opus_model.trim().to_string(),
         haiku_model: input.haiku_model.trim().to_string(),
+        available_models: input.available_models,
         proxy_failover: input.proxy_failover,
         is_active: false,
         created_at: chrono_now(),
@@ -1033,7 +1040,8 @@ mod tests {
             model_id: "upstream-default".into(),
             sonnet_model: "upstream-sonnet".into(),
             opus_model: "upstream-opus".into(),
-            haiku_model: String::new(),
+        haiku_model: String::new(),
+        available_models: Vec::new(),
             proxy_failover: false,
             is_active: false,
             created_at: "2026-08-26T00:00:00Z".into(),

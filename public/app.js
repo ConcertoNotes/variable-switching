@@ -1080,7 +1080,12 @@ const I18N = {
     claudeDesktopImportConfirm: "Copy all current Claude Code providers into the independent Claude Desktop list?",
     claudeDesktopImported: "Imported {count} Claude Desktop profile(s)",
     claudeDesktopRestartRequired: "Fully quit and restart Claude Desktop to apply the profile.",
-    claudeDesktopBreakerReset: "Desktop Gateway breaker reset"
+    claudeDesktopBreakerReset: "Desktop Gateway breaker reset",
+    claudeDesktopFetchModels: "Fetch models",
+    claudeDesktopFetchingModels: "Fetching models...",
+    claudeDesktopModelsFetched: "Fetched {count} Claude-compatible model(s)",
+    claudeDesktopModelsFiltered: "Filtered {count} non-Claude model(s)",
+    claudeDesktopModelsFetchFailed: "Failed to fetch models: {error}"
   },
   zh: {
     appTitle: "VarSwitch",
@@ -1750,7 +1755,12 @@ const I18N = {
     claudeDesktopImportConfirm: "把当前全部 Claude Code 供应商复制到独立的 Claude Desktop 列表？",
     claudeDesktopImported: "已导入 {count} 个 Claude Desktop 配置",
     claudeDesktopRestartRequired: "请完全退出并重启 Claude Desktop 使配置生效。",
-    claudeDesktopBreakerReset: "Desktop Gateway 熔断状态已重置"
+    claudeDesktopBreakerReset: "Desktop Gateway 熔断状态已重置",
+    claudeDesktopFetchModels: "获取模型",
+    claudeDesktopFetchingModels: "正在获取模型...",
+    claudeDesktopModelsFetched: "已获取 {count} 个 Claude 可用模型",
+    claudeDesktopModelsFiltered: "已过滤 {count} 个非 Claude 模型",
+    claudeDesktopModelsFetchFailed: "获取模型失败：{error}"
   }
 };
 
@@ -1776,6 +1786,7 @@ let claudeDesktopGatewayHealth = null;
 let editingClaudeDesktopProfileId = null;
 let claudeDesktopSaving = false;
 let claudeDesktopHealthTimer = null;
+let claudeDesktopModelCatalog = [];
 let codexProfiles = [];
 let grokProfiles = [];
 let geminiProfiles = [];
@@ -2916,6 +2927,7 @@ function applyLanguage() {
   setText("claudeDesktopProfileSonnetModelLabel", currentLang === "zh" ? "Sonnet 模型" : "Sonnet Model");
   setText("claudeDesktopProfileOpusModelLabel", currentLang === "zh" ? "Opus 模型" : "Opus Model");
   setText("claudeDesktopProfileHaikuModelLabel", currentLang === "zh" ? "Haiku 模型" : "Haiku Model");
+  setText("claudeDesktopProfileModelFetchBtn", t("claudeDesktopFetchModels"));
   setText("claudeDesktopProfileProxyFailoverText", currentLang === "zh" ? "加入 Desktop Gateway 故障转移池" : "Join Desktop Gateway failover pool");
   setText("claudeDesktopProfileCancel", t("cancel"));
   setText("claudeDesktopProfileSubmit", t("save"));
@@ -4743,11 +4755,76 @@ function openClaudeDesktopProfileDialog(id = null) {
   $("claudeDesktopProfileSonnetModel").value = profile?.sonnetModel || "";
   $("claudeDesktopProfileOpusModel").value = profile?.opusModel || "";
   $("claudeDesktopProfileHaikuModel").value = profile?.haikuModel || "";
+  claudeDesktopModelCatalog = Array.isArray(profile?.availableModels) ? [...profile.availableModels] : [];
+  renderClaudeDesktopModelOptions(claudeDesktopModelCatalog);
   $("claudeDesktopProfileProxyFailover").checked = Boolean(profile?.proxyFailover);
   updateClaudeDesktopProfileFormState();
   $("claudeDesktopProfileOverlay")?.classList.add("open");
   document.body.classList.add("modal-open");
   setTimeout(() => $("claudeDesktopProfileName")?.focus(), 30);
+  if (profile?.apiKey && profile?.baseUrl) {
+    setTimeout(() => fetchClaudeDesktopModels({ silent: true }), 60);
+  }
+}
+
+function isClaudeDesktopModelId(model) {
+  return /^claude-(?:sonnet|opus|haiku)-[^\s]+$/i.test(String(model || "").trim());
+}
+
+function renderClaudeDesktopModelOptions(models) {
+  const datalist = $("claudeDesktopModelOptions");
+  if (!datalist) return;
+  const unique = [...new Set((models || []).map((model) => String(model || "").trim()).filter(Boolean))];
+  datalist.innerHTML = unique.map((model) => '<option value="' + esc(model) + '"></option>').join("");
+}
+
+async function fetchClaudeDesktopModels({ silent = false } = {}) {
+  const button = $("claudeDesktopProfileModelFetchBtn");
+  const result = $("claudeDesktopProfileModelFetchResults");
+  const baseUrl = $("claudeDesktopProfileBaseUrl")?.value.trim() || "";
+  const apiKey = $("claudeDesktopProfileApiKey")?.value.trim() || "";
+  if (!apiKey) {
+    if (!silent) showToast(t("modelFetchMissing"), "warning");
+    return;
+  }
+  const previousText = button?.textContent || t("claudeDesktopFetchModels");
+  if (button) {
+    button.disabled = true;
+    button.textContent = t("claudeDesktopFetchingModels");
+  }
+  try {
+    const protocol = $("claudeDesktopProfileApiFormat")?.value === "openai_chat" ? "codex" : "claude";
+    const models = await invoke("fetch_available_models", {
+      baseUrl,
+      apiKey,
+      timeoutSecs: 12,
+      protocol,
+    });
+    const normalized = helpers.normalizeFetchedModels
+      ? helpers.normalizeFetchedModels(models || [])
+      : (models || []).map((item) => item.id || item).filter(Boolean);
+    const safe = normalized.filter(isClaudeDesktopModelId);
+    const filtered = normalized.length - safe.length;
+    claudeDesktopModelCatalog = safe;
+    renderClaudeDesktopModelOptions(safe);
+    if (result) {
+      result.innerHTML = '<div class="endpoint-row"><span class="endpoint-url">' + esc(t("claudeDesktopModelsFetched", { count: safe.length })) + '</span><span class="endpoint-meta ' + (safe.length ? "fast" : "failed") + '">' + (filtered ? esc(t("claudeDesktopModelsFiltered", { count: filtered })) : "") + '</span></div>';
+      result.classList.add("open");
+    }
+    if (!silent || safe.length) showToast(t("claudeDesktopModelsFetched", { count: safe.length }), safe.length ? "success" : "warning");
+  } catch (error) {
+    const message = describeVerifyError(String(error));
+    if (result) {
+      result.innerHTML = '<div class="endpoint-row"><span class="endpoint-url">' + esc(t("claudeDesktopModelsFetchFailed", { error: message })) + '</span></div>';
+      result.classList.add("open");
+    }
+    if (!silent) showToast(t("claudeDesktopModelsFetchFailed", { error: message }), "error");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
 }
 
 function updateClaudeDesktopProfileFormState() {
@@ -4778,6 +4855,7 @@ async function submitClaudeDesktopProfile(event) {
     sonnetModel: $("claudeDesktopProfileSonnetModel").value.trim(),
     opusModel: $("claudeDesktopProfileOpusModel").value.trim(),
     haikuModel: $("claudeDesktopProfileHaikuModel").value.trim(),
+    availableModels: claudeDesktopModelCatalog,
     proxyFailover: Boolean($("claudeDesktopProfileProxyFailover").checked),
   };
   if (![input.modelId, input.sonnetModel, input.opusModel, input.haikuModel].some(Boolean)) {
@@ -10008,6 +10086,7 @@ function bindConsoleUiOnce() {
   $("claudeDesktopSyncBtn")?.addEventListener("click", syncClaudeDesktopProfile);
   $("claudeDesktopGatewayResetBtn")?.addEventListener("click", resetClaudeDesktopGatewayBreaker);
   $("claudeDesktopProfileConnectionMode")?.addEventListener("change", updateClaudeDesktopProfileFormState);
+  $("claudeDesktopProfileModelFetchBtn")?.addEventListener("click", () => fetchClaudeDesktopModels());
   $("claudeDesktopProfileClose")?.addEventListener("click", closeClaudeDesktopProfileDialog);
   $("claudeDesktopProfileCancel")?.addEventListener("click", closeClaudeDesktopProfileDialog);
   $("claudeDesktopProfileForm")?.addEventListener("submit", submitClaudeDesktopProfile);

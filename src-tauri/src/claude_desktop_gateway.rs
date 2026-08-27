@@ -316,12 +316,69 @@ fn model_for_role(profile: &ClaudeDesktopProfile, role: &str) -> Option<String> 
 
 fn role_from_route(model: &str) -> Option<&'static str> {
     let normalized = model.trim().to_ascii_lowercase();
-    if !normalized.starts_with("claude-") {
-        return None;
-    }
+    [
+        ("sonnet", SONNET_ROUTE_ID),
+        ("opus", OPUS_ROUTE_ID),
+        ("haiku", HAIKU_ROUTE_ID),
+    ]
+    .into_iter()
+    .find_map(|(role, route)| {
+        (normalized == route || normalized.starts_with(&format!("{route}-"))).then_some(role)
+    })
+}
+
+fn role_from_model_id(model: &str) -> Option<&'static str> {
+    let normalized = model.trim().to_ascii_lowercase();
     ["sonnet", "opus", "haiku"]
         .into_iter()
         .find(|role| normalized.contains(role))
+}
+
+fn is_safe_claude_model_id(model: &str) -> bool {
+    let normalized = model.trim().to_ascii_lowercase();
+    ["claude-sonnet-", "claude-opus-", "claude-haiku-"]
+        .into_iter()
+        .any(|prefix| {
+            normalized
+                .strip_prefix(prefix)
+                .is_some_and(|tail| !tail.is_empty())
+        })
+}
+
+fn configured_model_catalog(profile: &ClaudeDesktopProfile) -> Vec<String> {
+    let mut models = Vec::new();
+    let candidates = if profile.available_models.is_empty() {
+        vec![
+            profile.model_id.as_str(),
+            profile.sonnet_model.as_str(),
+            profile.opus_model.as_str(),
+            profile.haiku_model.as_str(),
+        ]
+    } else {
+        profile
+            .available_models
+            .iter()
+            .map(String::as_str)
+            .collect()
+    };
+    for model in candidates {
+        let model = model.trim();
+        if is_safe_claude_model_id(model) && !models.iter().any(|item| item == model) {
+            models.push(model.to_string());
+        }
+    }
+    if models.is_empty() {
+        for (role, route) in [
+            ("sonnet", SONNET_ROUTE_ID),
+            ("opus", OPUS_ROUTE_ID),
+            ("haiku", HAIKU_ROUTE_ID),
+        ] {
+            if model_for_role(profile, role).is_some() {
+                models.push(route.to_string());
+            }
+        }
+    }
+    models
 }
 
 #[cfg(test)]
@@ -336,15 +393,9 @@ pub(crate) fn map_model(
 }
 
 pub(crate) fn model_list_response(runtime: &ClaudeDesktopRuntime) -> Value {
-    let routes = [
-        ("sonnet", SONNET_ROUTE_ID),
-        ("opus", OPUS_ROUTE_ID),
-        ("haiku", HAIKU_ROUTE_ID),
-    ];
-    let data: Vec<Value> = routes
+    let data: Vec<Value> = configured_model_catalog(&runtime.profile)
         .into_iter()
-        .filter(|(role, _)| model_for_role(&runtime.profile, role).is_some())
-        .map(|(_, id)| {
+        .map(|id| {
             json!({
                 "id": id,
                 "object": "model",
@@ -362,20 +413,48 @@ fn target_for_profile_and_role(profile: &ClaudeDesktopProfile, role: &str) -> Op
     Some(target)
 }
 
+fn target_for_profile_and_model(profile: &ClaudeDesktopProfile, model: &str) -> ProxyTarget {
+    let mut target = target_from_profile(profile);
+    target.upstream.model = model.to_string();
+    target
+}
+
 pub(crate) fn request_targets(
     requested_model: &str,
     runtime: &ClaudeDesktopRuntime,
 ) -> Result<Vec<ProxyTarget>, String> {
-    let role = role_from_route(requested_model)
-        .ok_or_else(|| format!("未知的 Claude Desktop 模型路由: {requested_model}"))?;
-    let mut targets = vec![target_for_profile_and_role(&runtime.profile, role)
-        .ok_or_else(|| format!("Claude Desktop 的 {role} 模型没有可用映射"))?];
-    targets.extend(
-        runtime
-            .failover_profiles
-            .iter()
-            .filter_map(|profile| target_for_profile_and_role(profile, role)),
-    );
+    if let Some(role) = role_from_route(requested_model) {
+        let mut targets = vec![target_for_profile_and_role(&runtime.profile, role)
+            .ok_or_else(|| format!("Claude Desktop 的 {role} 模型没有可用映射"))?];
+        targets.extend(
+            runtime
+                .failover_profiles
+                .iter()
+                .filter_map(|profile| target_for_profile_and_role(profile, role)),
+        );
+        return Ok(targets);
+    }
+
+    if !is_safe_claude_model_id(requested_model) {
+        return Err(format!("未知的 Claude Desktop 模型路由: {requested_model}"));
+    }
+
+    let mut targets = vec![target_for_profile_and_model(&runtime.profile, requested_model)];
+    if let Some(role) = role_from_model_id(requested_model) {
+        targets.extend(
+            runtime
+                .failover_profiles
+                .iter()
+                .filter_map(|profile| target_for_profile_and_role(profile, role)),
+        );
+    } else {
+        targets.extend(
+            runtime
+                .failover_profiles
+                .iter()
+                .map(|profile| target_for_profile_and_model(profile, requested_model)),
+        );
+    }
     Ok(targets)
 }
 
@@ -562,6 +641,7 @@ mod tests {
             sonnet_model: "upstream-sonnet".into(),
             opus_model: "upstream-opus".into(),
             haiku_model: String::new(),
+            available_models: Vec::new(),
             proxy_failover: false,
             is_active: true,
             created_at: "1".into(),
@@ -597,6 +677,35 @@ mod tests {
             "upstream-sonnet"
         );
         assert!(map_model("gpt-5", &runtime).is_err());
+    }
+
+    #[test]
+    fn model_catalog_includes_configured_real_claude_models() {
+        let mut profile = fixture_profile();
+        profile.model_id = "claude-opus-5".into();
+        profile.sonnet_model = "claude-sonnet-4-6".into();
+        let runtime = runtime_from_profiles(profile, "vsd-good".into(), Vec::new());
+        let response = model_list_response(&runtime);
+        let ids: Vec<&str> = response["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|item| item["id"].as_str())
+            .collect();
+
+        assert!(ids.contains(&"claude-opus-5"));
+        assert!(ids.contains(&"claude-sonnet-4-6"));
+    }
+
+    #[test]
+    fn real_claude_model_id_is_forwarded_without_role_fallback() {
+        let mut profile = fixture_profile();
+        profile.model_id = "claude-opus-5".into();
+        profile.opus_model = "legacy-opus".into();
+        let runtime = runtime_from_profiles(profile, "vsd-good".into(), Vec::new());
+
+        let targets = request_targets("claude-opus-5", &runtime).unwrap();
+        assert_eq!(targets[0].upstream.model, "claude-opus-5");
     }
 
     #[test]

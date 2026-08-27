@@ -735,23 +735,28 @@
           <input type="password" id="claudeDesktopProfileApiKey" required autocomplete="off" spellcheck="false" placeholder="sk-...">
         </div>
         <div class="form-group">
-          <label id="claudeDesktopProfileModelIdLabel" for="claudeDesktopProfileModelId">默认模型</label>
-          <input type="text" id="claudeDesktopProfileModelId" autocomplete="off" spellcheck="false" placeholder="角色模型留空时使用">
+          <div class="form-label-row">
+            <label id="claudeDesktopProfileModelIdLabel" for="claudeDesktopProfileModelId">默认模型</label>
+            <button class="link-button" id="claudeDesktopProfileModelFetchBtn" type="button">获取模型</button>
+          </div>
+          <input type="text" id="claudeDesktopProfileModelId" list="claudeDesktopModelOptions" autocomplete="off" spellcheck="false" placeholder="角色模型留空时使用">
+          <datalist id="claudeDesktopModelOptions"></datalist>
+          <div class="endpoint-results" id="claudeDesktopProfileModelFetchResults"></div>
         </div>
         <details class="model-mapping-section" open>
           <summary id="claudeDesktopProfileModelMappingTitle">角色模型映射</summary>
           <div class="model-mapping-body">
             <div class="form-group">
               <label id="claudeDesktopProfileSonnetModelLabel" for="claudeDesktopProfileSonnetModel">Sonnet 模型</label>
-              <input type="text" id="claudeDesktopProfileSonnetModel" autocomplete="off" spellcheck="false">
+              <input type="text" id="claudeDesktopProfileSonnetModel" list="claudeDesktopModelOptions" autocomplete="off" spellcheck="false">
             </div>
             <div class="form-group">
               <label id="claudeDesktopProfileOpusModelLabel" for="claudeDesktopProfileOpusModel">Opus 模型</label>
-              <input type="text" id="claudeDesktopProfileOpusModel" autocomplete="off" spellcheck="false">
+              <input type="text" id="claudeDesktopProfileOpusModel" list="claudeDesktopModelOptions" autocomplete="off" spellcheck="false">
             </div>
             <div class="form-group">
               <label id="claudeDesktopProfileHaikuModelLabel" for="claudeDesktopProfileHaikuModel">Haiku 模型</label>
-              <input type="text" id="claudeDesktopProfileHaikuModel" autocomplete="off" spellcheck="false">
+              <input type="text" id="claudeDesktopProfileHaikuModel" list="claudeDesktopModelOptions" autocomplete="off" spellcheck="false">
             </div>
           </div>
         </details>
