@@ -784,7 +784,49 @@ function Invoke-UpdateCheck {
 }
 
 function Stop-ClaudeIfRunning {
-    $processes = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like "Claude*" })
+    param([object]$Info)
+
+    # Claude Code CLI 也使用 claude.exe 这个进程名，不能只按名称匹配，
+    # 否则一键汉化可能误杀用户正在运行的 CLI 会话。仅处理当前已解析到
+    # 的 Claude Desktop 安装目录下的进程；无法读取进程路径时宁可跳过，
+    # 让后续写入权限检查给出明确提示。
+    $installRoot = $null
+    if ($Info -and $Info.InstallLocation) {
+        try {
+            $installRoot = (Get-NormalizedFullPath -Path ([string]$Info.InstallLocation)).TrimEnd(
+                [IO.Path]::DirectorySeparatorChar,
+                [IO.Path]::AltDirectorySeparatorChar
+            )
+        } catch {
+            $installRoot = $null
+        }
+    }
+
+    $processes = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        if ($_.ProcessName -notlike "Claude*") {
+            return $false
+        }
+
+        if ([string]::IsNullOrWhiteSpace($installRoot)) {
+            return $false
+        }
+
+        try {
+            $processPath = $_.Path
+        } catch {
+            return $false
+        }
+
+        if ([string]::IsNullOrWhiteSpace($processPath)) {
+            return $false
+        }
+
+        $normalizedProcessPath = (Get-NormalizedFullPath -Path $processPath)
+        return $normalizedProcessPath.StartsWith(
+            ($installRoot + [IO.Path]::DirectorySeparatorChar),
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    })
     if ($processes.Count -eq 0) {
         return
     }
@@ -1135,7 +1177,7 @@ function Restore-Resources {
     param([object]$Info)
 
     Assert-ResourceFilesExist -Info $Info
-    Stop-ClaudeIfRunning
+    Stop-ClaudeIfRunning -Info $Info
 
     $backup = Select-BackupForRestore -Info $Info
     Write-Host "准备从备份还原: $($backup.FullName)"
@@ -1164,7 +1206,7 @@ function Patch-Resources {
     param([object]$Info)
 
     Assert-ResourceFilesExist -Info $Info
-    Stop-ClaudeIfRunning
+    Stop-ClaudeIfRunning -Info $Info
 
     $map = Read-TranslationMemory
     $backup = Get-PreferredBackup -Info $Info

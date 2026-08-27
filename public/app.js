@@ -1083,8 +1083,7 @@ const I18N = {
     claudeDesktopBreakerReset: "Desktop Gateway breaker reset",
     claudeDesktopFetchModels: "Fetch models",
     claudeDesktopFetchingModels: "Fetching models...",
-    claudeDesktopModelsFetched: "Fetched {count} Claude-compatible model(s)",
-    claudeDesktopModelsFiltered: "Filtered {count} non-Claude model(s)",
+    claudeDesktopModelsFetched: "Fetched {count} model(s)",
     claudeDesktopModelsFetchFailed: "Failed to fetch models: {error}",
     claudeDesktopLocalizationTitle: "Claude Desktop Chinese",
     claudeDesktopLocalizationPatch: "Translate",
@@ -1767,8 +1766,7 @@ const I18N = {
     claudeDesktopBreakerReset: "Desktop Gateway 熔断状态已重置",
     claudeDesktopFetchModels: "获取模型",
     claudeDesktopFetchingModels: "正在获取模型...",
-    claudeDesktopModelsFetched: "已获取 {count} 个 Claude 可用模型",
-    claudeDesktopModelsFiltered: "已过滤 {count} 个非 Claude 模型",
+    claudeDesktopModelsFetched: "已获取 {count} 个模型",
     claudeDesktopModelsFetchFailed: "获取模型失败：{error}",
     claudeDesktopLocalizationTitle: "Claude Desktop 汉化",
     claudeDesktopLocalizationPatch: "一键汉化",
@@ -4845,10 +4843,6 @@ function openClaudeDesktopProfileDialog(id = null) {
   }
 }
 
-function isClaudeDesktopModelId(model) {
-  return /^claude-(?:sonnet|opus|haiku)-[^\s]+$/i.test(String(model || "").trim());
-}
-
 function renderClaudeDesktopModelOptions(models) {
   const datalist = $("claudeDesktopModelOptions");
   if (!datalist) return;
@@ -4881,12 +4875,13 @@ async function fetchClaudeDesktopModels({ silent = false } = {}) {
     const normalized = helpers.normalizeFetchedModels
       ? helpers.normalizeFetchedModels(models || [])
       : (models || []).map((item) => item.id || item).filter(Boolean);
-    const safe = normalized.filter(isClaudeDesktopModelId);
-    const filtered = normalized.length - safe.length;
+    const safe = helpers.normalizeClaudeDesktopModels
+      ? helpers.normalizeClaudeDesktopModels(normalized)
+      : normalized;
     claudeDesktopModelCatalog = safe;
     renderClaudeDesktopModelOptions(safe);
     if (result) {
-      result.innerHTML = '<div class="endpoint-row"><span class="endpoint-url">' + esc(t("claudeDesktopModelsFetched", { count: safe.length })) + '</span><span class="endpoint-meta ' + (safe.length ? "fast" : "failed") + '">' + (filtered ? esc(t("claudeDesktopModelsFiltered", { count: filtered })) : "") + '</span></div>';
+      result.innerHTML = '<div class="endpoint-row"><span class="endpoint-url">' + esc(t("claudeDesktopModelsFetched", { count: safe.length })) + '</span><span class="endpoint-meta ' + (safe.length ? "fast" : "failed") + '"></span></div>';
       result.classList.add("open");
     }
     if (!silent || safe.length) showToast(t("claudeDesktopModelsFetched", { count: safe.length }), safe.length ? "success" : "warning");

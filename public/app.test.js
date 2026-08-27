@@ -44,6 +44,7 @@ const {
   validateEditorPathInput,
   resolveUniversalAppBaseUrl,
   normalizeFetchedModels,
+  normalizeClaudeDesktopModels,
   getCodexToolboxLayout,
   shouldRenderChannelQr,
   getMobileBindingUiState,
@@ -657,6 +658,21 @@ test("Claude Desktop gateway form exposes model discovery controls", () => {
   assert.match(app, /function fetchClaudeDesktopModels/);
   assert.match(app, /fetch_available_models/);
   assert.match(app, /claudeDesktopProfileModelId/);
+});
+
+test("Claude Desktop Gateway keeps third-party model ids from discovery", () => {
+  assert.deepEqual(
+    normalizeClaudeDesktopModels([
+      { id: "gpt-5" },
+      { id: "qwen3.7-max" },
+      { id: "claude-sonnet-4-6" },
+      { id: "" },
+      { id: "gpt-5" },
+    ]),
+    ["claude-sonnet-4-6", "gpt-5", "qwen3.7-max"]
+  );
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.doesNotMatch(app, /isClaudeDesktopModelId/);
 });
 
 test("Claude Desktop exposes reversible localization actions", () => {
