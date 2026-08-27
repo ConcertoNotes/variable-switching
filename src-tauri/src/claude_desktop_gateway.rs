@@ -389,18 +389,32 @@ pub(crate) fn map_model(
 }
 
 pub(crate) fn model_list_response(runtime: &ClaudeDesktopRuntime) -> Value {
-    let data: Vec<Value> = configured_model_catalog(&runtime.profile)
+    let models = configured_model_catalog(&runtime.profile);
+    let first_id = models.first().cloned();
+    let last_id = models.last().cloned();
+    // Claude Desktop validates the Anthropic ModelInfo shape rather than the
+    // OpenAI-compatible {object, created, owned_by} shape.  The catalog is
+    // synthetic, so capability/token limits are intentionally unknown.
+    let data: Vec<Value> = models
         .into_iter()
         .map(|id| {
             json!({
+                "type": "model",
                 "id": id,
-                "object": "model",
-                "created": 0,
-                "owned_by": "varswitch",
+                "display_name": id.clone(),
+                "created_at": "1970-01-01T00:00:00Z",
+                "capabilities": null,
+                "max_input_tokens": null,
+                "max_tokens": null,
             })
         })
         .collect();
-    json!({"object": "list", "data": data})
+    json!({
+        "data": data,
+        "has_more": false,
+        "first_id": first_id,
+        "last_id": last_id,
+    })
 }
 
 fn target_for_profile_and_role(profile: &ClaudeDesktopProfile, role: &str) -> Option<ProxyTarget> {
@@ -726,6 +740,23 @@ mod tests {
             ids,
             vec!["claude-sonnet-4-6", "gpt-5", "qwen3.7-max"]
         );
+    }
+
+    #[test]
+    fn model_catalog_uses_anthropic_model_info_shape_for_claude_desktop() {
+        let mut profile = fixture_profile();
+        profile.available_models = vec!["qwen3.7-max".into()];
+        let runtime = runtime_from_profiles(profile, "vsd-good".into(), Vec::new());
+
+        let response = model_list_response(&runtime);
+        assert_eq!(response["has_more"], false);
+        assert_eq!(response["first_id"], "qwen3.7-max");
+        assert_eq!(response["last_id"], "qwen3.7-max");
+        let model = &response["data"][0];
+        assert_eq!(model["type"], "model");
+        assert_eq!(model["id"], "qwen3.7-max");
+        assert_eq!(model["display_name"], "qwen3.7-max");
+        assert!(model["created_at"].as_str().is_some());
     }
 
     #[test]
