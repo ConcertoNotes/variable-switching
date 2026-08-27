@@ -1,19 +1,19 @@
 {
-  "version": "3.1.11",
-  "notes": "VarSwitch update 3.1.11",
-  "pub_date": "2026-08-27T03:19:24Z",
+  "version": "3.1.12",
+  "notes": "VarSwitch update 3.1.12",
+  "pub_date": "2026-08-27T03:36:24Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTNGV3lNUVViNVVqVmVmR3ZGc2ltTTRZdHV1VU5rL2pLeWFWSVRMNlFKZzNpeTFBUktZclJhbHdlRGNjeXRuRzR3SitwWFVHem9aL2NBbHMyaWR2ckFaajE0Q05lQmdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Nzk4OTIxCWZpbGU6VmFyU3dpdGNoXzMuMS4xMV94NjQtc2V0dXAuZXhlCkNTZmI3dmMvNW10RFNBL0h5dlRHcUFqaDhtRm1iZDd0UlVXNnYzY241QmpRUzJERTc2UjFMNkhyVS9IbjNqUHJ3OGlYU2R6NE5CeW5iZXNjeFA4ZkF3PT0K",
-      "url": "https://download.varswitch.strova.top/releases/VarSwitch_3.1.11_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTNGV3lNUVViNWQ5NXRiK3Q2dWg5Q0FGU3BPSFM4WjhIUW9uTkxRSHVuOFI3L2MrdlRCdnArOVM5UFlpQnVqWk9UdlMxbXA1eFFydDRXbXNjV0JYSVpkVnJvNkU3ZEFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3ODAxMzIyCWZpbGU6VmFyU3dpdGNoXzMuMS4xMl94NjQtc2V0dXAuZXhlCjFWUHJZdlZJVmhlOFlLQkpFYjM4bGdnenkyZ2FMWnN3QnVOQTZaNmtSaEE3UnEvSWdLRzZyUkpZakpWK0tDanlLN1FBUURJdm9CWExPZ0I1YWNzVUFRPT0K",
+      "url": "https://download.varswitch.strova.top/releases/VarSwitch_3.1.12_x64-setup.exe"
     },
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTNGV3lNUVViNVp6bDd3MDRaUUVmeExndXZJVG9tZ3BCUFpFWWF0TWZHYTFFei8yR25iajB1R1NoVlJMbXhRS293ODRqVWVyV3FlRkoveWc5TDhNM3B3NWZjaEVCd3djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Nzk5MTY3CWZpbGU6VmFyU3dpdGNoLmFwcC50YXIuZ3oKUmJKV09HRUcvZ1hhYmVPUXhramZ2R3Z5Vm9mVkFwZUxkOGdvUDRLamZKQzh2UkZDaVBJc1VSYnlneVplOGR4aTlFU1dWeC85Ny9kQlZCN1RMT3h0Q2c9PQo=",
-      "url": "https://download.varswitch.strova.top/releases/VarSwitch_3.1.11_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTNGV3lNUVViNVcwWHF2eHpYMGppcml3cXhRSFVNR3U3RVdkZFVSUU1GdGkxdWlSRzB0SS9QWGZ3MEhiN01NUDlva2lRZS9IeFk3bXNmWGlYRmN5OVhTOXNxTFczNVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3ODAxNTQ0CWZpbGU6VmFyU3dpdGNoLmFwcC50YXIuZ3oKYk1GakNKS1VpdmhDUkF3VUFOSCs4cHBWYWlYVGtDQkdld3hkZXUrdU9BUGpEQk5Mc2dUQUhvOG93YUd5RytwVU16aENXZ1VQOVh1K1dOeDJLdlVyQ1E9PQo=",
+      "url": "https://download.varswitch.strova.top/releases/VarSwitch_3.1.12_aarch64.app.tar.gz"
     },
     "darwin-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTNGV3lNUVViNVhES1dJMm5ickQ0RkFvUnJkOU10MnpnNWV2OVFodXJSS1ZFNVlyait2UUZGT0hFRVF5L3E2MVZpbUltcTJrTTFUam9IbGUrR0l2N2tFRFA5bitDOXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Nzk5MjEyCWZpbGU6VmFyU3dpdGNoLmFwcC50YXIuZ3oKY2dMbjJ0VFVkUEFMaXhRWk5YREZvTnAxejcrbWYva3hRYVBSWFhPQnZ1R2Z5aG02azlTcGpHRnlOUmlKbXdGbXJZekhRMWUvK0tiZGNzcFRNd01CQlE9PQo=",
-      "url": "https://download.varswitch.strova.top/releases/VarSwitch_3.1.11_x64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSVTNGV3lNUVViNWRuYldpaHpmVndlamtQVXRmWmUzSHVudUs1MERLQnFrd2RFNXJORmc2a2x2SWxJcThVR08vTi9YZ1pkcGY0TFVzbTN1MUlnUS9ZNmZETGxsbGg0c2dnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3ODAxNTA5CWZpbGU6VmFyU3dpdGNoLmFwcC50YXIuZ3oKZlBvVXUvQlhIOWJXSTZqVVZuRkFyUDJxWERNM3hUblg0Z3dta1c4Ky9UQjJ3N1VMazBjN05jL0p2cG56YWU4RzRWM09OR2p1SHRwM3V3MzJ4TUJKQnc9PQo=",
+      "url": "https://download.varswitch.strova.top/releases/VarSwitch_3.1.12_x64.app.tar.gz"
     }
   }
 }
