@@ -468,6 +468,28 @@ function Get-FileSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
 
+function Copy-ResourceFile {
+    param(
+        [string]$Source,
+        [string]$Target
+    )
+
+    if (-not (Test-Path -LiteralPath $Source)) {
+        throw "资源文件不存在: $Source"
+    }
+
+    $targetParent = Split-Path -Parent $Target
+    if ($targetParent) {
+        New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
+    }
+
+    # WindowsApps 中的 Claude 资源通常带 EFS 加密属性，Copy-Item 在普通
+    # 文件与加密文件之间复制时可能返回 UNKNOWN。通过文件 API 读取明文
+    # 字节再写入，既能完成备份，也能写回原有的加密资源文件。
+    $bytes = [IO.File]::ReadAllBytes($Source)
+    [IO.File]::WriteAllBytes($Target, $bytes)
+}
+
 function Read-TranslationMemoryFromPath {
     param([string]$Path)
 
@@ -875,8 +897,17 @@ function Get-OriginalBackupRoot {
 function Get-Backups {
     param([object]$Info)
     $original = Get-OriginalBackupRoot -Info $Info
-    if (Test-Path -LiteralPath $original) {
-        return @(Get-Item -LiteralPath $original)
+    if (Test-Path -LiteralPath $original -PathType Container) {
+        $complete = $true
+        foreach ($rel in $ResourceFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Under -Root $original -RelativePath $rel) -PathType Leaf)) {
+                $complete = $false
+                break
+            }
+        }
+        if ($complete) {
+            return @(Get-Item -LiteralPath $original)
+        }
     }
 
     return @()
@@ -897,14 +928,15 @@ function Backup-Resources {
     Assert-ResourceFilesExist -Info $Info
 
     $backupDir = Get-OriginalBackupRoot -Info $Info
-    if (Test-Path -LiteralPath $backupDir) {
+    $existingBackup = Get-PreferredBackup -Info $Info
+    if ($null -ne $existingBackup) {
         Write-Host "当前 Claude 版本已经有原始英文备份，不会覆盖: $backupDir"
         [void](Update-VersionState -Info $Info -Updates @{
             currentState       = (Read-VersionState -Info $Info)["currentState"]
-            backupRelativePath = Get-ProjectRelativePath -Path $backupDir
+            backupRelativePath = Get-ProjectRelativePath -Path $existingBackup.FullName
             lastAction         = "backup-exists"
         })
-        return Get-Item -LiteralPath $backupDir
+        return $existingBackup
     }
 
     $state = Read-VersionState -Info $Info
@@ -930,7 +962,7 @@ function Backup-Resources {
         $target = Join-Under -Root $backupDir -RelativePath $rel
         $targetParent = Split-Path -Parent $target
         New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
-        Copy-Item -LiteralPath $source -Destination $target -Force
+        Copy-ResourceFile -Source $source -Target $target
 
         $files += [ordered]@{
             relativePath       = $rel
@@ -1115,7 +1147,7 @@ function Restore-Resources {
             throw "备份缺少文件: $source"
         }
         Grant-ResourceWriteAccess -Path $target
-        Copy-Item -LiteralPath $source -Destination $target -Force
+        Copy-ResourceFile -Source $source -Target $target
         Write-Host "已还原: $rel"
     }
 
@@ -1181,7 +1213,7 @@ function Patch-Resources {
         Write-Utf8NoBomText -Path $tempFile -Text $json
 
         Grant-ResourceWriteAccess -Path $target
-        Copy-Item -LiteralPath $tempFile -Destination $target -Force
+        Copy-ResourceFile -Source $tempFile -Target $target
         Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
 
         $fileReports += [ordered]@{

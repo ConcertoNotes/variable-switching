@@ -113,7 +113,11 @@ fn initialize_localization_bundle(resource_root: &Path, writable_root: &Path) ->
         if !source.is_file() {
             return Err(format!("汉化资源缺失: {}", source.display()));
         }
-        if !target.exists() {
+        // 脚本随 VarSwitch 发布版本更新；每次初始化都刷新脚本，避免旧版本
+        // 已复制到用户数据目录后继续执行有缺陷的实现。翻译记忆库等用户
+        // 可能在线更新的文件仍保持原有的“只初始化一次”行为。
+        let should_refresh = *relative == LOCALIZATION_SCRIPT_RELATIVE;
+        if should_refresh || !target.exists() {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)
                     .map_err(|error| format!("创建汉化资源目录失败: {error}"))?;
