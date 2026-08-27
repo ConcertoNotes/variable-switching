@@ -86,6 +86,14 @@
       .sort((a, b) => a.localeCompare(b));
   }
 
+  // Claude Desktop Gateway 可代理任意第三方模型；这里只过滤明显无效的
+  // 模型 ID，不把供应商前缀限定为 claude-*。
+  function normalizeClaudeDesktopModels(models) {
+    return normalizeFetchedModels(models).filter(
+      (id) => id.length <= 256 && !/[\u0000-\u001f\u007f]/.test(id)
+    );
+  }
+
   function isDeepseekCodexConfig(providerName, baseUrl) {
     if (String(providerName || "").trim().toLowerCase() !== "deepseek") return false;
     try {
@@ -369,6 +377,7 @@
     validateEditorPathInput,
     resolveUniversalAppBaseUrl,
     normalizeFetchedModels,
+    normalizeClaudeDesktopModels,
     isDeepseekCodexConfig,
     getCodexToolboxLayout,
     isFreshMobileQr,
