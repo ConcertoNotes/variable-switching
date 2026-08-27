@@ -1,6 +1,7 @@
 mod claude_proxy;
 mod claude_desktop;
 mod claude_desktop_gateway;
+mod claude_desktop_localization;
 mod claude_desktop_provider;
 mod usage_stats;
 mod opencode;
@@ -1878,6 +1879,9 @@ pub fn run() {
             claude_desktop_provider::get_claude_desktop_provider_status,
             claude_desktop_gateway::get_claude_desktop_gateway_health,
             claude_desktop_gateway::claude_desktop_gateway_reset_breaker,
+            claude_desktop_localization::get_claude_desktop_localization_status,
+            claude_desktop_localization::run_claude_desktop_localization,
+            claude_desktop_localization::open_claude_desktop_localization_project,
             switch_profile,
             get_status,
             get_detected_editors,
