@@ -109,7 +109,7 @@
       <button class="sidebar-item sidebar-settings" data-console-page="settings" type="button">
         <img src="icon-guide.svg" alt=""><span>设置</span>
       </button>
-      <div class="sidebar-version">VarSwitch <span>v3.1.9</span></div>
+      <div class="sidebar-version">VarSwitch <span>v3.1.20</span></div>
     </aside>
 
     <main class="workspace-main" id="workspaceMain">
@@ -155,17 +155,19 @@
     <section class="support-section control-panel-section console-hint-section claude-desktop-dependency-warning" id="claudeDesktopDependencyWarning" hidden>
       <p class="support-hint" id="claudeDesktopDependencyWarningText">Gateway 模式需要保持 VarSwitch 运行；切换后请完全退出并重启 Claude Desktop。</p>
     </section>
-    <section class="status-section">
-      <div class="section-header-row"><h2 class="section-title" id="claudeDesktopStatusTitle">Claude Desktop 状态</h2></div>
-      <div class="status-grid" id="claudeDesktopStatusGrid"></div>
-    </section>
-    <section class="status-section proxy-health-section" id="claudeDesktopGatewayHealthSection" hidden>
-      <div class="section-header-row">
-        <h2 class="section-title" id="claudeDesktopGatewayHealthTitle">Desktop Gateway 健康</h2>
-        <button class="btn btn-secondary btn-sm" id="claudeDesktopGatewayResetBtn" type="button">重置熔断</button>
-      </div>
-      <div class="status-grid" id="claudeDesktopGatewayHealthGrid"></div>
-    </section>
+    <div class="claude-desktop-status-row">
+      <section class="status-section">
+        <div class="section-header-row"><h2 class="section-title" id="claudeDesktopStatusTitle">Claude Desktop 状态</h2></div>
+        <div class="status-grid" id="claudeDesktopStatusGrid"></div>
+      </section>
+      <section class="status-section proxy-health-section" id="claudeDesktopGatewayHealthSection" hidden>
+        <div class="section-header-row">
+          <h2 class="section-title" id="claudeDesktopGatewayHealthTitle">Desktop Gateway 健康</h2>
+          <button class="btn btn-secondary btn-sm" id="claudeDesktopGatewayResetBtn" type="button">重置熔断</button>
+        </div>
+        <div class="status-grid" id="claudeDesktopGatewayHealthGrid"></div>
+      </section>
+    </div>
     <section class="profiles-section">
       <h2 class="section-title" id="claudeDesktopProfilesTitle">Claude Desktop 配置列表</h2>
       <div class="profiles-grid" id="claudeDesktopProfilesList"></div>
@@ -651,17 +653,18 @@
         <div class="form-group">
           <label id="profileNameLabel" for="profileName">Config Name</label>
           <input type="text" id="profileName" required placeholder="e.g. Production">
+          <small class="field-error" id="profileNameError" role="alert"></small>
         </div>
         <div class="form-group">
           <label id="profileApiKeyLabel" for="profileApiKey">API Key</label>
-          <input type="password" id="profileApiKey" required placeholder="sk-..." autocomplete="off" spellcheck="false">
+          <span class="input-with-action api-key-input"><input type="password" id="profileApiKey" required placeholder="sk-..." autocomplete="off" spellcheck="false"><span class="api-key-actions"><button class="api-key-action" type="button" data-api-key-action="toggle" data-api-key-target="profileApiKey" aria-label="显示 API Key" title="显示 API Key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.2-6 9.5-6 9.5 6 9.5 6-3.2 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg></button><button class="api-key-action" type="button" data-api-key-action="paste" data-api-key-target="profileApiKey" aria-label="粘贴 API Key" title="粘贴 API Key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h6M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1ZM7 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2M16 9h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3M16 9v12"/></svg></button></span></span>
         </div>
         <div class="form-group">
           <div class="form-label-row">
             <label id="profileBaseUrlLabel" for="profileBaseUrl">Base URL</label>
             <div class="form-label-actions">
               <button class="link-button" id="profileModelFetchBtn" type="button">获取模型</button>
-              <button class="link-button" id="profileEndpointTestBtn" type="button">验证连接</button>
+              <button class="link-button" id="profileEndpointTestBtn" type="button">验证连接</button><span class="provider-inline-status" data-inline-status="claude" role="status" aria-live="polite" hidden></span>
             </div>
           </div>
           <input type="text" id="profileBaseUrl" placeholder="留空使用官方地址 https://api.anthropic.com">
@@ -717,7 +720,7 @@
             <option value="gateway">Gateway（推荐）</option>
             <option value="direct">直连 Anthropic</option>
           </select>
-          <small class="form-hint" id="claudeDesktopProfileConnectionModeHint">Gateway 支持模型映射、OpenAI Chat 转换与故障转移，需要保持 VarSwitch 运行。</small>
+          <small class="form-hint" id="claudeDesktopProfileConnectionModeHint">Gateway 支持 Anthropic 原始透传、OpenAI Chat 转换与故障转移，需要保持 VarSwitch 运行。</small>
         </div>
         <div class="form-group">
           <label id="claudeDesktopProfileApiFormatLabel" for="claudeDesktopProfileApiFormat">API 格式</label>
@@ -735,24 +738,26 @@
           <input type="password" id="claudeDesktopProfileApiKey" required autocomplete="off" spellcheck="false" placeholder="sk-...">
         </div>
         <div class="form-group">
-          <label id="claudeDesktopProfileModelIdLabel" for="claudeDesktopProfileModelId">默认模型</label>
-          <input type="text" id="claudeDesktopProfileModelId" autocomplete="off" spellcheck="false" placeholder="角色模型留空时使用">
+          <div class="form-label-row">
+            <label id="claudeDesktopProfileModelIdLabel" for="claudeDesktopProfileModelId">默认模型</label>
+            <button class="link-button" id="claudeDesktopProfileModelFetchBtn" type="button">获取模型</button>
+          </div>
+          <input type="text" id="claudeDesktopProfileModelId" list="claudeDesktopModelOptions" autocomplete="off" spellcheck="false" placeholder="未命中映射时使用">
+          <small class="form-hint" id="claudeDesktopProfileModelHint">Gateway：先点“获取模型”，填写未命中映射时使用的上游默认模型。Anthropic 透传保留 Claude Desktop 原始请求体；OpenAI 转换按下方逐项映射替换。</small>
+          <datalist id="claudeDesktopModelOptions"></datalist>
+          <div class="endpoint-results" id="claudeDesktopProfileModelFetchResults"></div>
         </div>
         <details class="model-mapping-section" open>
-          <summary id="claudeDesktopProfileModelMappingTitle">角色模型映射</summary>
+          <summary id="claudeDesktopProfileModelMappingTitle">模型映射</summary>
           <div class="model-mapping-body">
-            <div class="form-group">
-              <label id="claudeDesktopProfileSonnetModelLabel" for="claudeDesktopProfileSonnetModel">Sonnet 模型</label>
-              <input type="text" id="claudeDesktopProfileSonnetModel" autocomplete="off" spellcheck="false">
-            </div>
-            <div class="form-group">
-              <label id="claudeDesktopProfileOpusModelLabel" for="claudeDesktopProfileOpusModel">Opus 模型</label>
-              <input type="text" id="claudeDesktopProfileOpusModel" autocomplete="off" spellcheck="false">
-            </div>
-            <div class="form-group">
-              <label id="claudeDesktopProfileHaikuModelLabel" for="claudeDesktopProfileHaikuModel">Haiku 模型</label>
-              <input type="text" id="claudeDesktopProfileHaikuModel" autocomplete="off" spellcheck="false">
-            </div>
+            <small class="form-hint" id="claudeDesktopProfileModelMappingHint">手动添加 Claude Code 看到的模型与实际请求的上游模型；仅 OpenAI 转换替换，Anthropic 透传完整保留原始请求体。</small>
+            <div class="claude-desktop-model-mapping-head"><span id="claudeDesktopProfileSourceModelLabel">Claude Code 模型</span><span id="claudeDesktopProfileTargetModelLabel">上游实际模型</span><span></span></div>
+            <div id="claudeDesktopModelMappings"></div>
+            <button class="link-button" id="claudeDesktopProfileAddMappingBtn" type="button">+ 添加模型映射</button>
+            <!-- Legacy fields kept for persisted profiles created by older versions. -->
+            <input type="hidden" id="claudeDesktopProfileSonnetModel">
+            <input type="hidden" id="claudeDesktopProfileOpusModel">
+            <input type="hidden" id="claudeDesktopProfileHaikuModel">
           </div>
         </details>
         <div class="form-group proxy-failover-group" id="claudeDesktopProfileFailoverGroup">
@@ -795,18 +800,18 @@
         <div class="form-group">
           <label id="codexNameLabel" for="codexProfileName">配置名称</label>
           <input type="text" id="codexProfileName" required placeholder="e.g. Production">
+          <small class="field-error" id="codexProfileNameError" role="alert"></small>
         </div>
         <div class="form-group">
           <label id="codexApiKeyLabel" for="codexApiKey">API Key</label>
-          <input type="password" id="codexApiKey" required placeholder="sk-..." autocomplete="off">
-          <button class="link-button" id="codexApiKeyToggle" type="button">显示</button>
+          <span class="input-with-action api-key-input"><input type="password" id="codexApiKey" required placeholder="sk-..." autocomplete="off"><span class="api-key-actions"><button class="api-key-action" id="codexApiKeyToggle" type="button" data-api-key-action="toggle" data-api-key-target="codexApiKey" aria-label="显示 API Key" title="显示 API Key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.2-6 9.5-6 9.5 6 9.5 6-3.2 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg></button><button class="api-key-action" type="button" data-api-key-action="paste" data-api-key-target="codexApiKey" aria-label="粘贴 API Key" title="粘贴 API Key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h6M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1ZM7 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2M16 9h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3M16 9v12"/></svg></button></span></span>
         </div>
         <div class="form-group">
           <div class="form-label-row">
             <label id="codexBaseUrlLabel" for="codexBaseUrl">Base URL</label>
             <div class="form-label-actions">
               <button class="link-button" id="codexModelFetchBtn" type="button">获取模型</button>
-              <button class="link-button" id="codexEndpointTestBtn" type="button">验证连接</button>
+              <button class="link-button" id="codexEndpointTestBtn" type="button">验证连接</button><span class="provider-inline-status" data-inline-status="codex" role="status" aria-live="polite" hidden></span>
             </div>
           </div>
           <input type="text" id="codexBaseUrl" placeholder="留空使用官方地址 https://api.openai.com/v1">
@@ -894,17 +899,18 @@
         <div class="form-group">
           <label id="grokNameLabel" for="grokProfileName">Config Name</label>
           <input type="text" id="grokProfileName" required placeholder="e.g. xAI Official">
+          <small class="field-error" id="grokProfileNameError" role="alert"></small>
         </div>
         <div class="form-group">
           <label id="grokApiKeyLabel" for="grokApiKey">API Key</label>
-          <input type="password" id="grokApiKey" required placeholder="xai-..." autocomplete="off" spellcheck="false">
+          <span class="input-with-action api-key-input"><input type="password" id="grokApiKey" required placeholder="xai-..." autocomplete="off" spellcheck="false"><span class="api-key-actions"><button class="api-key-action" type="button" data-api-key-action="toggle" data-api-key-target="grokApiKey" aria-label="显示 API Key" title="显示 API Key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.2-6 9.5-6 9.5 6 9.5 6-3.2 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg></button><button class="api-key-action" type="button" data-api-key-action="paste" data-api-key-target="grokApiKey" aria-label="粘贴 API Key" title="粘贴 API Key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h6M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1ZM7 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2M16 9h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3M16 9v12"/></svg></button></span></span>
         </div>
         <div class="form-group">
           <div class="form-label-row">
             <label id="grokBaseUrlLabel" for="grokBaseUrl">Base URL</label>
             <div class="form-label-actions">
               <button class="link-button" id="grokModelFetchBtn" type="button">获取模型</button>
-              <button class="link-button" id="grokEndpointTestBtn" type="button">验证连接</button>
+              <button class="link-button" id="grokEndpointTestBtn" type="button">验证连接</button><span class="provider-inline-status" data-inline-status="grok" role="status" aria-live="polite" hidden></span>
             </div>
           </div>
           <input type="text" id="grokBaseUrl" placeholder="留空使用官方地址 https://api.x.ai/v1">
@@ -941,9 +947,9 @@
       </div>
       <form id="geminiProfileForm">
         <input type="hidden" id="geminiProfileId">
-        <div class="form-group"><label for="geminiProfileName">配置名称</label><input type="text" id="geminiProfileName" required placeholder="例如：公司 Gemini 网关"></div>
-        <div class="form-group"><label for="geminiApiKey">Gemini API Key</label><input type="password" id="geminiApiKey" required placeholder="AIza..." autocomplete="off"></div>
-        <div class="form-group"><div class="form-label-row"><label for="geminiBaseUrl">Base URL</label><div class="form-label-actions"><button class="link-button" id="geminiModelFetchBtn" type="button">获取模型</button><button class="link-button" id="geminiEndpointTestBtn" type="button">验证连接</button></div></div><input type="text" id="geminiBaseUrl" placeholder="留空使用官方地址 https://generativelanguage.googleapis.com"><div class="endpoint-results" id="geminiEndpointResults"></div></div>
+        <div class="form-group"><label for="geminiProfileName">配置名称</label><input type="text" id="geminiProfileName" required placeholder="例如：公司 Gemini 网关"><small class="field-error" id="geminiProfileNameError" role="alert"></small></div>
+        <div class="form-group"><label for="geminiApiKey">Gemini API Key</label><span class="input-with-action api-key-input"><input type="password" id="geminiApiKey" required placeholder="AIza..." autocomplete="off"><span class="api-key-actions"><button class="api-key-action" type="button" data-api-key-action="toggle" data-api-key-target="geminiApiKey" aria-label="显示 API Key" title="显示 API Key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.2-6 9.5-6 9.5 6 9.5 6-3.2 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg></button><button class="api-key-action" type="button" data-api-key-action="paste" data-api-key-target="geminiApiKey" aria-label="粘贴 API Key" title="粘贴 API Key"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h6M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1ZM7 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2M16 9h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3M16 9v12"/></svg></button></span></span></div>
+        <div class="form-group"><div class="form-label-row"><label for="geminiBaseUrl">Base URL</label><div class="form-label-actions"><button class="link-button" id="geminiModelFetchBtn" type="button">获取模型</button><button class="link-button" id="geminiEndpointTestBtn" type="button">验证连接</button><span class="provider-inline-status" data-inline-status="gemini" role="status" aria-live="polite" hidden></span></div></div><input type="text" id="geminiBaseUrl" placeholder="留空使用官方地址 https://generativelanguage.googleapis.com"><div class="endpoint-results" id="geminiEndpointResults"></div></div>
         <div class="form-group"><label for="geminiModel">模型</label><input type="text" id="geminiModel" placeholder="例如：gemini-2.5-pro"><div class="model-results" id="geminiModelResults"></div></div>
         <div class="form-actions"><button type="button" class="btn btn-secondary" id="geminiCancelBtn">取消</button><button type="submit" class="btn btn-primary" id="geminiSubmitBtn">保存</button></div>
       </form>

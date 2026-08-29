@@ -6,10 +6,6 @@ pub(crate) const CLAUDE_DESKTOP_OFFICIAL_ID: &str = "claude-desktop-official";
 pub(crate) const VARSWITCH_DESKTOP_PROFILE_ID: &str = "00000000-0000-4000-8000-000000257890";
 pub(crate) const CLAUDE_DESKTOP_GATEWAY_URL: &str = "http://127.0.0.1:25789/claude-desktop";
 
-const SONNET_ROUTE_ID: &str = "claude-sonnet-4-6";
-const OPUS_ROUTE_ID: &str = "claude-opus-4-6";
-const HAIKU_ROUTE_ID: &str = "claude-haiku-4-5-20251001";
-
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ClaudeDesktopConnectionMode {
@@ -31,6 +27,8 @@ pub(crate) struct ClaudeDesktopProfile {
     pub(crate) sonnet_model: String,
     pub(crate) opus_model: String,
     pub(crate) haiku_model: String,
+    #[serde(default)]
+    pub(crate) available_models: Vec<String>,
     pub(crate) proxy_failover: bool,
     pub(crate) is_active: bool,
     pub(crate) created_at: String,
@@ -57,6 +55,8 @@ pub(crate) struct ClaudeDesktopProfileInput {
     pub(crate) opus_model: String,
     #[serde(default)]
     pub(crate) haiku_model: String,
+    #[serde(default)]
+    pub(crate) available_models: Vec<String>,
     #[serde(default)]
     pub(crate) proxy_failover: bool,
 }
@@ -164,6 +164,7 @@ fn official_profile(is_active: bool) -> ClaudeDesktopProfile {
         sonnet_model: String::new(),
         opus_model: String::new(),
         haiku_model: String::new(),
+        available_models: Vec::new(),
         proxy_failover: false,
         is_active,
         created_at: "0".into(),
@@ -242,18 +243,6 @@ fn resolved_model_for_role(profile: &ClaudeDesktopProfile, role: &str) -> Option
     .map(str::to_string)
 }
 
-fn gateway_route_ids(profile: &ClaudeDesktopProfile) -> Vec<String> {
-    [
-        ("sonnet", SONNET_ROUTE_ID),
-        ("opus", OPUS_ROUTE_ID),
-        ("haiku", HAIKU_ROUTE_ID),
-    ]
-    .into_iter()
-    .filter(|(role, _)| resolved_model_for_role(profile, role).is_some())
-    .map(|(_, route)| route.to_string())
-    .collect()
-}
-
 fn is_safe_claude_model_id(model: &str) -> bool {
     let model = model.trim().to_ascii_lowercase();
     ["claude-sonnet-", "claude-opus-", "claude-haiku-"]
@@ -283,16 +272,24 @@ fn direct_model_ids(profile: &ClaudeDesktopProfile) -> Result<Vec<String>, Strin
     Ok(models)
 }
 
-fn build_profile_json(base_url: &str, api_key: &str, models: Vec<String>) -> serde_json::Value {
-    serde_json::json!({
+fn build_profile_json(
+    base_url: &str,
+    api_key: &str,
+    models: Option<Vec<String>>,
+) -> serde_json::Value {
+    let mut value = serde_json::json!({
         "coworkEgressAllowedHosts": ["*"],
         "disableDeploymentModeChooser": true,
         "inferenceGatewayApiKey": api_key,
         "inferenceGatewayAuthScheme": "bearer",
         "inferenceGatewayBaseUrl": base_url,
         "inferenceProvider": "gateway",
-        "inferenceModels": models,
     })
+    ;
+    if let Some(models) = models {
+        value["inferenceModels"] = serde_json::json!(models);
+    }
+    value
 }
 
 fn build_gateway_profile(
@@ -309,7 +306,7 @@ fn build_gateway_profile(
     Ok(build_profile_json(
         CLAUDE_DESKTOP_GATEWAY_URL,
         token,
-        gateway_route_ids(profile),
+        None,
     ))
 }
 
@@ -321,7 +318,7 @@ fn build_direct_profile(profile: &ClaudeDesktopProfile) -> Result<serde_json::Va
     Ok(build_profile_json(
         profile.base_url.trim_end_matches('/'),
         &profile.api_key,
-        direct_model_ids(profile)?,
+        Some(direct_model_ids(profile)?),
     ))
 }
 
@@ -628,6 +625,7 @@ fn import_from_claude_profiles(
             sonnet_model: profile.sonnet_model.clone(),
             opus_model: profile.opus_model.clone(),
             haiku_model: profile.haiku_model.clone(),
+            available_models: Vec::new(),
             proxy_failover: profile.proxy_failover,
             is_active: false,
             created_at: chrono_now(),
@@ -663,6 +661,7 @@ fn profile_from_input(input: ClaudeDesktopProfileInput) -> ClaudeDesktopProfile 
         sonnet_model: input.sonnet_model.trim().to_string(),
         opus_model: input.opus_model.trim().to_string(),
         haiku_model: input.haiku_model.trim().to_string(),
+        available_models: input.available_models,
         proxy_failover: input.proxy_failover,
         is_active: false,
         created_at: chrono_now(),
@@ -1033,7 +1032,8 @@ mod tests {
             model_id: "upstream-default".into(),
             sonnet_model: "upstream-sonnet".into(),
             opus_model: "upstream-opus".into(),
-            haiku_model: String::new(),
+        haiku_model: String::new(),
+        available_models: Vec::new(),
             proxy_failover: false,
             is_active: false,
             created_at: "2026-08-26T00:00:00Z".into(),
@@ -1247,13 +1247,9 @@ mod tests {
             "http://127.0.0.1:25789/claude-desktop"
         );
         assert_eq!(json["inferenceGatewayApiKey"], "vsd-test-token");
-        assert_eq!(
-            json["inferenceModels"],
-            serde_json::json!([
-                "claude-sonnet-4-6",
-                "claude-opus-4-6",
-                "claude-haiku-4-5-20251001"
-            ])
+        assert!(
+            json.get("inferenceModels").is_none(),
+            "Gateway must let Claude Desktop discover models from /v1/models"
         );
         assert!(!json.to_string().contains("sk-desktop-secret"));
         assert!(!json.to_string().contains("upstream-opus"));

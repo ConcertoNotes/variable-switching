@@ -1690,6 +1690,33 @@ body::before {
   margin-bottom: 0;
 }
 
+.claude-desktop-model-mapping-head,
+.claude-desktop-model-mapping-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.claude-desktop-model-mapping-head {
+  margin: 4px 0 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.claude-desktop-model-mapping-row {
+  margin-bottom: 8px;
+}
+
+.claude-desktop-model-mapping-row input {
+  min-width: 0;
+}
+
+.claude-desktop-model-mapping-remove {
+  padding: 4px 6px;
+  color: var(--text-secondary);
+}
+
 .form-hint.warning {
   color: var(--warning-text);
 }
@@ -5909,6 +5936,21 @@ body {
 .sidebar-item[hidden] { display: none !important; }
 
 /* Claude Desktop 3P Profile / Gateway */
+.claude-desktop-status-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.claude-desktop-status-row > .status-section {
+  min-width: 0;
+}
+
+.claude-desktop-status-row .status-grid {
+  grid-template-columns: 1fr;
+}
+
 .claude-desktop-mode-badge {
   display: inline-flex;
   align-items: center;
@@ -5950,6 +5992,7 @@ body {
 #claudeDesktopGatewayHealthGrid .proxy-upstream-list { margin-top: 10px; }
 
 @media (max-width: 760px) {
+  .claude-desktop-status-row { grid-template-columns: 1fr; }
   .claude-desktop-mode-badge { padding-inline: 6px; }
   .claude-desktop-profile-modal { max-height: calc(100vh - 18px); }
 }
@@ -7280,6 +7323,23 @@ body::before {
 
 /* 供应商表单底部操作条:悬浮玻璃条 */
 .provider-builder-footer { border-radius: 0 0 var(--r-card) var(--r-card); }
+
+/* 独立供应商弹窗的 API Key 操作、连接状态与表单校验反馈 */
+.api-key-input { position: relative; display: flex; align-items: center; width: 100%; }
+.api-key-input > input { width: 100%; padding-right: 72px; }
+.api-key-actions { position: absolute; right: 8px; display: inline-flex; align-items: center; gap: 4px; color: var(--console-muted); }
+.api-key-action { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; }
+.api-key-action svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.api-key-action:hover, .api-key-action:focus-visible { background: color-mix(in srgb, var(--console-blue) 12%, transparent); color: var(--console-blue); outline: none; }
+.provider-inline-status { display: inline-flex; align-items: center; min-height: 22px; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; white-space: nowrap; }
+.provider-inline-status[hidden] { display: none; }
+.provider-inline-status.is-success { background: #dcfce7; color: #15803d; }
+.provider-inline-status.is-error { background: #ffe4e6; color: #be123c; }
+.field-error { display: block; min-height: 16px; margin-top: 4px; color: #f43f5e; font-size: 12px; }
+.field-error[hidden] { display: none; }
+input[aria-invalid="true"] { border-color: #f43f5e; box-shadow: 0 0 0 2px rgb(244 63 94 / 12%); }
+@keyframes preset-overwrite-pulse { 0% { background-color: #fef3c7; border-color: #f59e0b; } 100% { background-color: inherit; border-color: var(--console-line); } }
+.preset-overwritten { animation: preset-overwrite-pulse 1.2s ease-out; }
 
 @media (min-width: 761px) {
   #pageAddProvider .provider-builder-footer {

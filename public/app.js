@@ -1067,12 +1067,18 @@ const I18N = {
     claudeDesktopOfficialLoginHint: "Claude official account",
     claudeDesktopApiFormat: "API Format",
     claudeDesktopDefaultModel: "Default model",
+    claudeDesktopModelHint: "Gateway: fetch models first, then enter the upstream default used when no mapping matches. Anthropic passthrough keeps the original body; OpenAI conversion applies exact mappings below.",
+    claudeDesktopModelMappingHint: "Manually add the model Claude Code sees and the upstream model it should call. Only OpenAI conversion replaces it; Anthropic passthrough keeps the full body.",
+    claudeDesktopSourceModelLabel: "Claude Code model",
+    claudeDesktopTargetModelLabel: "Upstream model",
+    claudeDesktopAddMapping: "+ Add model mapping",
+    claudeDesktopRemoveMapping: "Remove",
     claudeDesktopNoProfiles: "No Claude Desktop profiles",
     claudeDesktopNoProfilesHint: "Add one or import existing Claude Code providers.",
     claudeDesktopLoadFailed: "Failed to load Claude Desktop: {error}",
     claudeDesktopGatewayHint: "Gateway supports model mapping, OpenAI Chat conversion and failover. Keep VarSwitch running.",
     claudeDesktopDirectHint: "Direct mode supports Anthropic Messages only and does not require VarSwitch after switching.",
-    claudeDesktopModelRequired: "Enter at least one default or role model.",
+    claudeDesktopModelRequired: "Enter a default model or at least one complete model mapping.",
     claudeDesktopAdded: "Claude Desktop profile added",
     claudeDesktopUpdated: "Claude Desktop profile updated",
     claudeDesktopDeleted: "Claude Desktop profile deleted",
@@ -1080,7 +1086,11 @@ const I18N = {
     claudeDesktopImportConfirm: "Copy all current Claude Code providers into the independent Claude Desktop list?",
     claudeDesktopImported: "Imported {count} Claude Desktop profile(s)",
     claudeDesktopRestartRequired: "Fully quit and restart Claude Desktop to apply the profile.",
-    claudeDesktopBreakerReset: "Desktop Gateway breaker reset"
+    claudeDesktopBreakerReset: "Desktop Gateway breaker reset",
+    claudeDesktopFetchModels: "Fetch models",
+    claudeDesktopFetchingModels: "Fetching models...",
+    claudeDesktopModelsFetched: "Fetched {count} model(s)",
+    claudeDesktopModelsFetchFailed: "Failed to fetch models: {error}",
   },
   zh: {
     appTitle: "VarSwitch",
@@ -1737,12 +1747,18 @@ const I18N = {
     claudeDesktopOfficialLoginHint: "Claude 官方账号",
     claudeDesktopApiFormat: "API 格式",
     claudeDesktopDefaultModel: "默认模型",
+    claudeDesktopModelHint: "Gateway：先点“获取模型”，填写未命中映射时使用的上游默认模型。Anthropic 透传保留原始请求体；OpenAI 转换按下方逐项映射替换。",
+    claudeDesktopModelMappingHint: "手动添加 Claude Code 看到的模型与上游实际模型；仅 OpenAI 转换替换，Anthropic 透传完整保留原始请求体。",
+    claudeDesktopSourceModelLabel: "Claude Code 模型",
+    claudeDesktopTargetModelLabel: "上游实际模型",
+    claudeDesktopAddMapping: "+ 添加模型映射",
+    claudeDesktopRemoveMapping: "删除",
     claudeDesktopNoProfiles: "暂无 Claude Desktop 配置",
     claudeDesktopNoProfilesHint: "添加配置，或从 Claude Code 复制现有供应商。",
     claudeDesktopLoadFailed: "加载 Claude Desktop 失败：{error}",
     claudeDesktopGatewayHint: "Gateway 支持模型映射、OpenAI Chat 转换与故障转移，需要保持 VarSwitch 运行。",
     claudeDesktopDirectHint: "直连仅支持 Anthropic Messages；切换完成后不需要保持 VarSwitch 运行。",
-    claudeDesktopModelRequired: "请至少填写一个默认模型或角色模型。",
+    claudeDesktopModelRequired: "请至少填写一个默认模型或一条完整的模型映射。",
     claudeDesktopAdded: "Claude Desktop 配置已添加",
     claudeDesktopUpdated: "Claude Desktop 配置已更新",
     claudeDesktopDeleted: "Claude Desktop 配置已删除",
@@ -1750,7 +1766,11 @@ const I18N = {
     claudeDesktopImportConfirm: "把当前全部 Claude Code 供应商复制到独立的 Claude Desktop 列表？",
     claudeDesktopImported: "已导入 {count} 个 Claude Desktop 配置",
     claudeDesktopRestartRequired: "请完全退出并重启 Claude Desktop 使配置生效。",
-    claudeDesktopBreakerReset: "Desktop Gateway 熔断状态已重置"
+    claudeDesktopBreakerReset: "Desktop Gateway 熔断状态已重置",
+    claudeDesktopFetchModels: "获取模型",
+    claudeDesktopFetchingModels: "正在获取模型...",
+    claudeDesktopModelsFetched: "已获取 {count} 个模型",
+    claudeDesktopModelsFetchFailed: "获取模型失败：{error}",
   }
 };
 
@@ -1776,6 +1796,8 @@ let claudeDesktopGatewayHealth = null;
 let editingClaudeDesktopProfileId = null;
 let claudeDesktopSaving = false;
 let claudeDesktopHealthTimer = null;
+let claudeDesktopModelCatalog = [];
+let claudeDesktopModelMappings = [];
 let codexProfiles = [];
 let grokProfiles = [];
 let geminiProfiles = [];
@@ -2912,10 +2934,16 @@ function applyLanguage() {
   setText("claudeDesktopProfileBaseUrlLabel", "Base URL");
   setText("claudeDesktopProfileApiKeyLabel", "API Key");
   setText("claudeDesktopProfileModelIdLabel", t("claudeDesktopDefaultModel"));
-  setText("claudeDesktopProfileModelMappingTitle", currentLang === "zh" ? "角色模型映射" : "Role Model Mapping");
+  setText("claudeDesktopProfileModelHint", t("claudeDesktopModelHint"));
+  setText("claudeDesktopProfileModelMappingTitle", currentLang === "zh" ? "模型映射" : "Model Mapping");
+  setText("claudeDesktopProfileModelMappingHint", t("claudeDesktopModelMappingHint"));
+  setText("claudeDesktopProfileSourceModelLabel", t("claudeDesktopSourceModelLabel"));
+  setText("claudeDesktopProfileTargetModelLabel", t("claudeDesktopTargetModelLabel"));
+  setText("claudeDesktopProfileAddMappingBtn", t("claudeDesktopAddMapping"));
   setText("claudeDesktopProfileSonnetModelLabel", currentLang === "zh" ? "Sonnet 模型" : "Sonnet Model");
   setText("claudeDesktopProfileOpusModelLabel", currentLang === "zh" ? "Opus 模型" : "Opus Model");
   setText("claudeDesktopProfileHaikuModelLabel", currentLang === "zh" ? "Haiku 模型" : "Haiku Model");
+  setText("claudeDesktopProfileModelFetchBtn", t("claudeDesktopFetchModels"));
   setText("claudeDesktopProfileProxyFailoverText", currentLang === "zh" ? "加入 Desktop Gateway 故障转移池" : "Join Desktop Gateway failover pool");
   setText("claudeDesktopProfileCancel", t("cancel"));
   setText("claudeDesktopProfileSubmit", t("save"));
@@ -4743,11 +4771,114 @@ function openClaudeDesktopProfileDialog(id = null) {
   $("claudeDesktopProfileSonnetModel").value = profile?.sonnetModel || "";
   $("claudeDesktopProfileOpusModel").value = profile?.opusModel || "";
   $("claudeDesktopProfileHaikuModel").value = profile?.haikuModel || "";
+  claudeDesktopModelMappings = Array.isArray(profile?.modelMappings)
+    ? profile.modelMappings.map((item) => ({
+      sourceModel: String(item?.sourceModel || ""),
+      targetModel: String(item?.targetModel || ""),
+    }))
+    : [];
+  renderClaudeDesktopModelMappings();
+  claudeDesktopModelCatalog = Array.isArray(profile?.availableModels) ? [...profile.availableModels] : [];
+  renderClaudeDesktopModelOptions(claudeDesktopModelCatalog);
   $("claudeDesktopProfileProxyFailover").checked = Boolean(profile?.proxyFailover);
   updateClaudeDesktopProfileFormState();
   $("claudeDesktopProfileOverlay")?.classList.add("open");
   document.body.classList.add("modal-open");
   setTimeout(() => $("claudeDesktopProfileName")?.focus(), 30);
+  if (profile?.apiKey && profile?.baseUrl) {
+    setTimeout(() => fetchClaudeDesktopModels({ silent: true }), 60);
+  }
+}
+
+function renderClaudeDesktopModelMappings() {
+  const container = $("claudeDesktopModelMappings");
+  if (!container) return;
+  container.innerHTML = claudeDesktopModelMappings.map((mapping, index) => `
+    <div class="claude-desktop-model-mapping-row" data-index="${index}">
+      <input type="text" class="claude-desktop-model-source" list="claudeDesktopModelOptions" autocomplete="off" spellcheck="false" placeholder="claude-opus-4-6" value="${esc(mapping.sourceModel)}">
+      <input type="text" class="claude-desktop-model-target" list="claudeDesktopModelOptions" autocomplete="off" spellcheck="false" placeholder="上游模型 ID" value="${esc(mapping.targetModel)}">
+      <button type="button" class="link-button claude-desktop-model-mapping-remove" data-index="${index}">${esc(t("claudeDesktopRemoveMapping"))}</button>
+    </div>
+  `).join("");
+  container.querySelectorAll(".claude-desktop-model-source, .claude-desktop-model-target").forEach((input) => {
+    input.addEventListener("input", () => {
+      const row = input.closest("[data-index]");
+      const index = Number(row?.dataset.index);
+      if (!Number.isInteger(index) || !claudeDesktopModelMappings[index]) return;
+      if (input.classList.contains("claude-desktop-model-source")) claudeDesktopModelMappings[index].sourceModel = input.value;
+      else claudeDesktopModelMappings[index].targetModel = input.value;
+    });
+  });
+  container.querySelectorAll(".claude-desktop-model-mapping-remove").forEach((button) => {
+    button.addEventListener("click", () => {
+      claudeDesktopModelMappings.splice(Number(button.dataset.index), 1);
+      renderClaudeDesktopModelMappings();
+    });
+  });
+}
+
+function addClaudeDesktopModelMapping() {
+  claudeDesktopModelMappings.push({ sourceModel: "", targetModel: "" });
+  renderClaudeDesktopModelMappings();
+  const rows = document.querySelectorAll("#claudeDesktopModelMappings .claude-desktop-model-source");
+  rows[rows.length - 1]?.focus();
+}
+
+function renderClaudeDesktopModelOptions(models) {
+  const datalist = $("claudeDesktopModelOptions");
+  if (!datalist) return;
+  const unique = [...new Set((models || []).map((model) => String(model || "").trim()).filter(Boolean))];
+  datalist.innerHTML = unique.map((model) => '<option value="' + esc(model) + '"></option>').join("");
+}
+
+async function fetchClaudeDesktopModels({ silent = false } = {}) {
+  const button = $("claudeDesktopProfileModelFetchBtn");
+  const result = $("claudeDesktopProfileModelFetchResults");
+  const baseUrl = $("claudeDesktopProfileBaseUrl")?.value.trim() || "";
+  const apiKey = $("claudeDesktopProfileApiKey")?.value.trim() || "";
+  if (!apiKey) {
+    if (!silent) showToast(t("modelFetchMissing"), "warning");
+    return;
+  }
+  const previousText = button?.textContent || t("claudeDesktopFetchModels");
+  if (button) {
+    button.disabled = true;
+    button.textContent = t("claudeDesktopFetchingModels");
+  }
+  try {
+    const protocol = $("claudeDesktopProfileApiFormat")?.value === "openai_chat" ? "codex" : "claude";
+    const models = await invoke("fetch_available_models", {
+      baseUrl,
+      apiKey,
+      timeoutSecs: 12,
+      protocol,
+    });
+    const normalized = helpers.normalizeFetchedModels
+      ? helpers.normalizeFetchedModels(models || [])
+      : (models || []).map((item) => item.id || item).filter(Boolean);
+    const safe = helpers.normalizeClaudeDesktopModels
+      ? helpers.normalizeClaudeDesktopModels(normalized)
+      : normalized;
+    claudeDesktopModelCatalog = safe;
+    renderClaudeDesktopModelOptions(safe);
+    if (result) {
+      result.innerHTML = '<div class="endpoint-row"><span class="endpoint-url">' + esc(t("claudeDesktopModelsFetched", { count: safe.length })) + '</span><span class="endpoint-meta ' + (safe.length ? "fast" : "failed") + '"></span></div>';
+      result.classList.add("open");
+    }
+    if (!silent || safe.length) showToast(t("claudeDesktopModelsFetched", { count: safe.length }), safe.length ? "success" : "warning");
+  } catch (error) {
+    const message = describeVerifyError(String(error));
+    if (result) {
+      result.innerHTML = '<div class="endpoint-row"><span class="endpoint-url">' + esc(t("claudeDesktopModelsFetchFailed", { error: message })) + '</span></div>';
+      result.classList.add("open");
+    }
+    if (!silent) showToast(t("claudeDesktopModelsFetchFailed", { error: message }), "error");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
 }
 
 function updateClaudeDesktopProfileFormState() {
@@ -4768,6 +4899,7 @@ function updateClaudeDesktopProfileFormState() {
 async function submitClaudeDesktopProfile(event) {
   event.preventDefault();
   if (claudeDesktopSaving) return;
+  const directMode = $("claudeDesktopProfileConnectionMode").value === "direct";
   const input = {
     name: $("claudeDesktopProfileName").value.trim(),
     apiKey: $("claudeDesktopProfileApiKey").value.trim(),
@@ -4775,12 +4907,17 @@ async function submitClaudeDesktopProfile(event) {
     connectionMode: $("claudeDesktopProfileConnectionMode").value,
     apiFormat: $("claudeDesktopProfileApiFormat").value,
     modelId: $("claudeDesktopProfileModelId").value.trim(),
-    sonnetModel: $("claudeDesktopProfileSonnetModel").value.trim(),
-    opusModel: $("claudeDesktopProfileOpusModel").value.trim(),
-    haikuModel: $("claudeDesktopProfileHaikuModel").value.trim(),
+    // Legacy role fields are relevant only to Direct mode; Gateway uses exact modelMappings.
+    sonnetModel: directMode ? $("claudeDesktopProfileSonnetModel").value.trim() : "",
+    opusModel: directMode ? $("claudeDesktopProfileOpusModel").value.trim() : "",
+    haikuModel: directMode ? $("claudeDesktopProfileHaikuModel").value.trim() : "",
+    modelMappings: claudeDesktopModelMappings
+      .map((item) => ({ sourceModel: item.sourceModel.trim(), targetModel: item.targetModel.trim() }))
+      .filter((item) => item.sourceModel && item.targetModel),
+    availableModels: claudeDesktopModelCatalog,
     proxyFailover: Boolean($("claudeDesktopProfileProxyFailover").checked),
   };
-  if (![input.modelId, input.sonnetModel, input.opusModel, input.haikuModel].some(Boolean)) {
+  if (![input.modelId, input.sonnetModel, input.opusModel, input.haikuModel, ...input.modelMappings.map((item) => item.targetModel)].some(Boolean)) {
     showToast(t("claudeDesktopModelRequired"), "warning");
     return;
   }
@@ -4873,8 +5010,15 @@ async function resetClaudeDesktopGatewayBreaker() {
   }
 }
 
-// Claude 角色模型映射徽标：S/O/H + 模型名缩略，title 展示完整环境变量取值
+// Claude 配置模型映射徽标；Desktop 显示逐项映射，Claude Code 保留环境变量徽标。
 function modelMappingBadgesHtml(profile) {
+  if (Array.isArray(profile.modelMappings)) {
+    const mappings = profile.modelMappings.filter((item) => item?.sourceModel && item?.targetModel);
+    if (!mappings.length) return "";
+    return `<div class="model-map-badges">${mappings.map((item) =>
+      `<span class="model-map-badge" title="${esc(`${item.sourceModel} → ${item.targetModel}`)}"><b>↔</b>${esc(item.sourceModel)} → ${esc(item.targetModel)}</span>`,
+    ).join("")}</div>`;
+  }
   const entries = [
     ["S", "ANTHROPIC_DEFAULT_SONNET_MODEL", profile.sonnetModel],
     ["O", "ANTHROPIC_DEFAULT_OPUS_MODEL", profile.opusModel],
@@ -5103,6 +5247,137 @@ function clearEndpointResults(kind) {
   container.classList.remove("open");
 }
 
+const PROVIDER_DIALOG_CONFIG = {
+  claude: { nameInput: "profileName", nameError: "profileNameError", apiKey: "profileApiKey", submitButtons: ["submitBtn"], status: "claude" },
+  codex: { nameInput: "codexProfileName", nameError: "codexProfileNameError", apiKey: "codexApiKey", submitButtons: ["codexSubmitBtn", "codexSaveEnableBtn"], status: "codex" },
+  grok: { nameInput: "grokProfileName", nameError: "grokProfileNameError", apiKey: "grokApiKey", submitButtons: ["grokSubmitBtn"], status: "grok" },
+  gemini: { nameInput: "geminiProfileName", nameError: "geminiProfileNameError", apiKey: "geminiApiKey", submitButtons: ["geminiSubmitBtn"], status: "gemini" },
+};
+
+function providerProfiles(kind) {
+  return kind === "claude" ? profiles
+    : kind === "codex" ? codexProfiles
+      : kind === "grok" ? grokProfiles
+        : geminiProfiles;
+}
+
+function providerEditingId(kind) {
+  return kind === "claude" ? editingId
+    : kind === "codex" ? editingCodexId
+      : kind === "grok" ? editingGrokId
+        : editingGeminiId;
+}
+
+function validateProviderName(kind, name, currentId = providerEditingId(kind)) {
+  const normalized = String(name || "").trim().toLowerCase();
+  if (!normalized) return { valid: false, message: currentLang === "zh" ? "请填写配置名称" : "Config name is required" };
+  const duplicate = providerProfiles(kind).some((profile) =>
+    String(profile?.id) !== String(currentId || "")
+    && String(profile?.name || "").trim().toLowerCase() === normalized
+  );
+  return duplicate
+    ? { valid: false, message: currentLang === "zh" ? "配置名称已存在" : "Config name already exists" }
+    : { valid: true, message: "" };
+}
+
+function updateProviderNameValidation(kind) {
+  const config = PROVIDER_DIALOG_CONFIG[kind];
+  if (!config) return true;
+  const input = $(config.nameInput);
+  const error = $(config.nameError);
+  if (!input) return true;
+  const result = validateProviderName(kind, input.value);
+  if (error) {
+    error.textContent = result.message;
+    error.hidden = result.valid;
+  }
+  input.setAttribute("aria-invalid", String(!result.valid));
+  config.submitButtons.forEach((id) => {
+    const button = $(id);
+    if (button) button.disabled = !result.valid;
+  });
+  return result.valid;
+}
+
+function bindProviderNameValidation() {
+  Object.entries(PROVIDER_DIALOG_CONFIG).forEach(([kind, config]) => {
+    const input = $(config.nameInput);
+    if (!input || input.dataset.nameValidationBound) return;
+    input.dataset.nameValidationBound = "true";
+    ["input", "blur"].forEach((eventName) => input.addEventListener(eventName, () => updateProviderNameValidation(kind)));
+    updateProviderNameValidation(kind);
+  });
+}
+
+function clearProviderInlineStatus(kind) {
+  const status = document.querySelector(`[data-inline-status="${kind}"]`);
+  if (!status) return;
+  status.hidden = true;
+  status.textContent = "";
+  status.className = "provider-inline-status";
+}
+
+function renderProviderInlineStatus(kind, state) {
+  const status = document.querySelector(`[data-inline-status="${kind}"]`);
+  if (!status) return;
+  const success = state?.tone === "success";
+  const code = state?.statusCode ? `${state.statusCode} ` : "";
+  const summary = success
+    ? `✓ ${currentLang === "zh" ? "延迟" : "Latency"} ${state.latencyMs}ms`
+    : `✕ ${code}${state?.statusCode === "401"
+      ? (currentLang === "zh" ? "未授权" : "Unauthorized")
+      : (state?.summary || (currentLang === "zh" ? "连接失败" : "Connection failed"))}`;
+  status.hidden = false;
+  status.className = `provider-inline-status ${success ? "is-success" : "is-error"}`;
+  status.textContent = summary;
+}
+
+function providerStatusCode(raw) {
+  const match = String(raw || "").match(/HTTP\s+(\d{3})/i);
+  return match ? match[1] : "";
+}
+
+function highlightPresetOverwrite(fieldIds) {
+  fieldIds.filter(Boolean).forEach((id) => {
+    const field = $(id);
+    if (!field) return;
+    field.classList.remove("preset-overwritten");
+    void field.offsetWidth;
+    field.classList.add("preset-overwritten");
+    setTimeout(() => field.classList.remove("preset-overwritten"), 1300);
+  });
+}
+
+function bindProviderApiKeyActions() {
+  document.querySelectorAll("[data-api-key-action]").forEach((button) => {
+    if (button.dataset.apiKeyBound) return;
+    button.dataset.apiKeyBound = "true";
+    button.addEventListener("click", async () => {
+      const input = $(button.dataset.apiKeyTarget);
+      if (!input) return;
+      if (button.dataset.apiKeyAction === "toggle") {
+        const showing = input.type === "password";
+        input.type = showing ? "text" : "password";
+        const label = showing ? "隐藏 API Key" : "显示 API Key";
+        button.setAttribute("aria-label", label);
+        button.title = label;
+        return;
+      }
+      try {
+        input.value = (await navigator.clipboard.readText() || "").trim();
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch (_) {
+        showToast(currentLang === "zh" ? "无法读取剪贴板" : "Unable to read clipboard", "error");
+      }
+    });
+  });
+}
+
+function bindProviderDialogEnhancements() {
+  bindProviderApiKeyActions();
+  bindProviderNameValidation();
+}
+
 // Claude 配置选了 OpenAI 格式时，验证/取模型也要按 OpenAI 方式带 Bearer 头
 function productProtocol(kind) {
   if (kind === "claude" && $("profileApiFormat")?.value === "openai_chat") return "codex";
@@ -5198,19 +5473,19 @@ async function handleEndpointTest(kind) {
   const baseUrl = $(fields.baseUrl).value.trim() || OFFICIAL_BASE_URLS[kind] || "";
   const apiKey = $(fields.apiKey).value.trim();
   const container = $(fields.endpointResults);
+  clearProviderInlineStatus(kind);
   if (!apiKey) {
     showToast(t("modelFetchMissing"), "warning");
     return;
   }
 
-  const previousText = button.textContent;
-  button.disabled = true;
-  button.textContent = t("endpointTesting");
+  setButtonBusy(button, true, t("endpointTesting"));
   const startedAt = performance.now();
   try {
     const models = await invoke("fetch_available_models", { baseUrl, apiKey, timeoutSecs: 12, protocol: productProtocol(kind) });
     const elapsed = Math.round(performance.now() - startedAt);
     const count = (models || []).length;
+    renderProviderInlineStatus(kind, { tone: "success", latencyMs: elapsed });
     if (container) {
       container.innerHTML = `<div class="endpoint-row"><span class="endpoint-url" title="${esc(baseUrl)}">${esc(baseUrl)}</span><span class="endpoint-meta fast">${t("verifyOkLabel")} · ${count} ${t("verifyModelsSuffix")} · ${elapsed}ms</span></div>`;
       container.classList.add("open");
@@ -5219,14 +5494,14 @@ async function handleEndpointTest(kind) {
     showToast(t("verifyOkToast"), "success");
   } catch (error) {
     const message = describeVerifyError(String(error));
+    renderProviderInlineStatus(kind, { tone: "error", statusCode: providerStatusCode(error), summary: message });
     if (container) {
       container.innerHTML = `<div class="endpoint-row"><span class="endpoint-url" title="${esc(baseUrl)}">${esc(baseUrl)}</span><span class="endpoint-meta failed">${esc(message)}</span></div>`;
       container.classList.add("open");
     }
     showToast(message, "error");
   } finally {
-    button.disabled = false;
-    button.textContent = previousText || t("endpointTest");
+    setButtonBusy(button, false);
   }
 }
 
@@ -5248,15 +5523,25 @@ function renderClaudePresetOptions() {
 
 function applyClaudePreset(preset) {
   if (!preset) return;
+  const overwritten = [];
   if (!$("profileName").value.trim()) {
     $("profileName").value = preset.name;
+    overwritten.push("profileName");
   }
   $("profileBaseUrl").value = preset.baseUrl;
+  overwritten.push("profileBaseUrl");
   $("profileModelId").value = preset.model || "";
+  overwritten.push("profileModelId");
   // 内置预设均为 Anthropic 兼容端点，重置为直连
-  if ($("profileApiFormat")) $("profileApiFormat").value = "anthropic";
+  if ($("profileApiFormat")) {
+    $("profileApiFormat").value = preset.apiFormat || "anthropic";
+    overwritten.push("profileApiFormat");
+  }
+  highlightPresetOverwrite(overwritten);
   updateProxyFailoverGroupVisibility();
+  updateProviderNameValidation("claude");
   clearEndpointResults("claude");
+  clearProviderInlineStatus("claude");
   clearModelResults("claude");
 }
 
@@ -5284,7 +5569,9 @@ function openModal(profile) {
   const mappingSection = $("profileModelMappingSection");
   if (mappingSection) mappingSection.open = Boolean(sonnetModel || opusModel || haikuModel);
   clearEndpointResults("claude");
+  clearProviderInlineStatus("claude");
   clearModelResults("claude");
+  updateProviderNameValidation("claude");
   $("modalOverlay").classList.add("open");
   $("profileName").focus();
 }
@@ -5332,6 +5619,7 @@ async function handleSubmit(event) {
   const previousProfile = savingId ? profiles.find((item) => item.id === savingId) : null;
 
   const name = $("profileName").value.trim();
+  if (!updateProviderNameValidation("claude")) return;
   const apiKey = $("profileApiKey").value.trim();
   const baseUrl = $("profileBaseUrl").value.trim();
   const modelId = $("profileModelId").value.trim();
@@ -5553,7 +5841,11 @@ function applyGrokPreset(preset) {
   }
   $("grokBaseUrl").value = preset.baseUrl;
   $("grokModel").value = preset.model || "";
+  if ($("grokApiBackend")) $("grokApiBackend").value = preset.apiBackend || "chat_completions";
+  highlightPresetOverwrite(["grokProfileName", "grokBaseUrl", "grokModel", "grokApiBackend"]);
+  updateProviderNameValidation("grok");
   clearEndpointResults("grok");
+  clearProviderInlineStatus("grok");
   clearModelResults("grok");
   updateGrokPresetHint();
 }
@@ -5780,7 +6072,9 @@ function openGrokModal(profile) {
   }
   updateGrokPresetHint();
   clearEndpointResults("grok");
+  clearProviderInlineStatus("grok");
   clearModelResults("grok");
+  updateProviderNameValidation("grok");
   $("grokModalOverlay").classList.add("open");
   document.body.classList.add("modal-open");
   $("grokProfileName").focus();
@@ -5797,6 +6091,7 @@ async function handleGrokSubmit(event) {
   if (grokProfileSaving) return;
   const isNewProfile = !editingGrokId;
   const name = $("grokProfileName").value.trim();
+  if (!updateProviderNameValidation("grok")) return;
   const apiKey = $("grokApiKey").value.trim();
   const baseUrl = $("grokBaseUrl").value.trim() || "https://api.x.ai/v1";
   const model = $("grokModel").value.trim();
@@ -6008,7 +6303,9 @@ function openGeminiModal(profile) {
   $("geminiBaseUrl").value = profile?.baseUrl || "";
   $("geminiModel").value = profile?.model || "gemini-2.5-pro";
   clearEndpointResults("gemini");
+  clearProviderInlineStatus("gemini");
   clearModelResults("gemini");
+  updateProviderNameValidation("gemini");
   $("geminiModalOverlay").classList.add("open");
   document.body.classList.add("modal-open");
   $("geminiProfileName").focus();
@@ -6029,6 +6326,7 @@ async function handleGeminiSubmit(event) {
     baseUrl: $("geminiBaseUrl").value.trim(),
     model: $("geminiModel").value.trim() || null,
   };
+  if (!updateProviderNameValidation("gemini")) return;
   geminiProfileSaving = true;
   const submitButton = $("geminiSubmitBtn");
   setButtonBusy(submitButton, true, t("toastSaving"));
@@ -6407,7 +6705,10 @@ function applyCodexPreset(preset) {
   $("codexModel").value = preset.model;
   $("codexProvider").value = preset.providerName;
   if ($("codexWireApi")) $("codexWireApi").value = preset.wire || "responses";
+  highlightPresetOverwrite(["codexProfileName", "codexBaseUrl", "codexModel", "codexProvider", "codexWireApi"]);
+  updateProviderNameValidation("codex");
   clearEndpointResults("codex");
+  clearProviderInlineStatus("codex");
   clearModelResults("codex");
   if (preset.models?.length) renderModelResults("codex", preset.models);
   syncCodexWireApiControl(preset);
@@ -6645,7 +6946,10 @@ function openCodexModal(profile) {
     $("codexApiKey").value = profile ? profile.apiKey : "";
     $("codexApiKey").type = "password";
   }
-  if ($("codexApiKeyToggle")) $("codexApiKeyToggle").textContent = currentLang === "zh" ? "显示" : "Show";
+  if ($("codexApiKeyToggle")) {
+    $("codexApiKeyToggle").setAttribute("aria-label", currentLang === "zh" ? "显示 API Key" : "Show API Key");
+    $("codexApiKeyToggle").title = currentLang === "zh" ? "显示 API Key" : "Show API Key";
+  }
   if ($("codexBaseUrl")) $("codexBaseUrl").value = profile ? profile.baseUrl : "";
   if ($("codexModel")) $("codexModel").value = profile ? (profile.model || "") : "";
   if ($("codexWireApi")) $("codexWireApi").value = profile ? (profile.wireApi || "responses") : "responses";
@@ -6665,7 +6969,9 @@ function openCodexModal(profile) {
   }
   updateCodexPresetHint();
   clearEndpointResults("codex");
+  clearProviderInlineStatus("codex");
   clearModelResults("codex");
+  updateProviderNameValidation("codex");
   if (matchedPreset?.models?.length) renderModelResults("codex", matchedPreset.models);
   syncCodexWireApiControl(matchedPreset);
   $("codexModalOverlay").classList.add("open");
@@ -6688,6 +6994,7 @@ async function handleCodexSubmit(event) {
   const isNewProfile = !editingCodexId;
   const editingActiveProfile = codexProfiles.some((profile) => profile.id === editingCodexId && profile.isActive);
   const name = $("codexProfileName").value.trim();
+  if (!updateProviderNameValidation("codex")) return;
   const apiKey = $("codexApiKey").value.trim();
   const baseUrl = $("codexBaseUrl").value.trim();
   const model = $("codexModel").value.trim();
@@ -10008,6 +10315,8 @@ function bindConsoleUiOnce() {
   $("claudeDesktopSyncBtn")?.addEventListener("click", syncClaudeDesktopProfile);
   $("claudeDesktopGatewayResetBtn")?.addEventListener("click", resetClaudeDesktopGatewayBreaker);
   $("claudeDesktopProfileConnectionMode")?.addEventListener("change", updateClaudeDesktopProfileFormState);
+  $("claudeDesktopProfileModelFetchBtn")?.addEventListener("click", () => fetchClaudeDesktopModels());
+  $("claudeDesktopProfileAddMappingBtn")?.addEventListener("click", addClaudeDesktopModelMapping);
   $("claudeDesktopProfileClose")?.addEventListener("click", closeClaudeDesktopProfileDialog);
   $("claudeDesktopProfileCancel")?.addEventListener("click", closeClaudeDesktopProfileDialog);
   $("claudeDesktopProfileForm")?.addEventListener("submit", submitClaudeDesktopProfile);
@@ -10045,13 +10354,7 @@ function bindConsoleUiOnce() {
     codexEnableAfterSave = true;
     $("codexSubmitBtn")?.click();
   });
-  $("codexApiKeyToggle")?.addEventListener("click", () => {
-    const input = $("codexApiKey");
-    if (!input) return;
-    const show = input.type === "password";
-    input.type = show ? "text" : "password";
-    $("codexApiKeyToggle").textContent = show ? (currentLang === "zh" ? "隐藏" : "Hide") : (currentLang === "zh" ? "显示" : "Show");
-  });
+  bindProviderDialogEnhancements();
 }
 
 function enhanceAfterDataLoad() {
@@ -10141,6 +10444,8 @@ on("profileForm", "submit", handleSubmit);
 on("profilePresetSelect", "change", () => applyClaudePreset(getSelectedClaudePreset()));
 on("profileBaseUrl", "focus", () => tryClipboardAutoFill("url", "profileBaseUrl"));
 on("profileApiKey", "focus", () => tryClipboardAutoFill("key", "profileApiKey"));
+on("profileBaseUrl", "input", () => clearProviderInlineStatus("claude"));
+on("profileApiKey", "input", () => clearProviderInlineStatus("claude"));
 on("profileModelFetchBtn", "click", () => handleModelFetch("claude"));
 on("profileEndpointTestBtn", "click", () => handleEndpointTest("claude"));
 bindOverlayDismiss("modalOverlay", closeModal);
@@ -10163,6 +10468,8 @@ on("codexBaseUrl", "input", () => syncCodexWireApiControl());
 on("codexProvider", "input", () => syncCodexWireApiControl());
 on("codexBaseUrl", "focus", () => tryClipboardAutoFill("url", "codexBaseUrl"));
 on("codexApiKey", "focus", () => tryClipboardAutoFill("key", "codexApiKey"));
+on("codexBaseUrl", "input", () => clearProviderInlineStatus("codex"));
+on("codexApiKey", "input", () => clearProviderInlineStatus("codex"));
 on("codexImageBaseUrl", "focus", () => tryClipboardAutoFill("url", "codexImageBaseUrl"));
 on("codexImageApiKey", "focus", () => tryClipboardAutoFill("key", "codexImageApiKey"));
 on("codexBaseUrl", "input", updateCodexOfficialConfigPreview);
@@ -10185,6 +10492,8 @@ $("grokProfileForm")?.addEventListener("submit", handleGrokSubmit);
 $("grokPresetSelect")?.addEventListener("change", () => applyGrokPreset(getSelectedGrokPreset()));
 $("grokBaseUrl")?.addEventListener("focus", () => tryClipboardAutoFill("url", "grokBaseUrl"));
 $("grokApiKey")?.addEventListener("focus", () => tryClipboardAutoFill("key", "grokApiKey"));
+$("grokBaseUrl")?.addEventListener("input", () => clearProviderInlineStatus("grok"));
+$("grokApiKey")?.addEventListener("input", () => clearProviderInlineStatus("grok"));
 $("grokModelFetchBtn")?.addEventListener("click", () => handleModelFetch("grok"));
 $("grokEndpointTestBtn")?.addEventListener("click", () => handleEndpointTest("grok"));
 bindOverlayDismiss("grokModalOverlay", closeGrokModal);
@@ -10204,6 +10513,8 @@ $("geminiModalClose")?.addEventListener("click", closeGeminiModal);
 $("geminiProfileForm")?.addEventListener("submit", handleGeminiSubmit);
 $("geminiBaseUrl")?.addEventListener("focus", () => tryClipboardAutoFill("url", "geminiBaseUrl"));
 $("geminiApiKey")?.addEventListener("focus", () => tryClipboardAutoFill("key", "geminiApiKey"));
+$("geminiBaseUrl")?.addEventListener("input", () => clearProviderInlineStatus("gemini"));
+$("geminiApiKey")?.addEventListener("input", () => clearProviderInlineStatus("gemini"));
 $("geminiModelFetchBtn")?.addEventListener("click", () => handleModelFetch("gemini"));
 $("geminiEndpointTestBtn")?.addEventListener("click", () => handleEndpointTest("gemini"));
 bindOverlayDismiss("geminiModalOverlay", closeGeminiModal);

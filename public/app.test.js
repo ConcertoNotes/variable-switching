@@ -44,6 +44,7 @@ const {
   validateEditorPathInput,
   resolveUniversalAppBaseUrl,
   normalizeFetchedModels,
+  normalizeClaudeDesktopModels,
   getCodexToolboxLayout,
   shouldRenderChannelQr,
   getMobileBindingUiState,
@@ -326,6 +327,45 @@ test("universal provider form exposes per-app protocol and connectivity checks",
   assert.match(app, /resolveUniversalAppBaseUrl/);
   assert.doesNotMatch(app, /wireApi:\s*"responses",/);
   assert.doesNotMatch(app, /apiBackend:\s*"chat_completions",/);
+});
+
+test("provider dialogs expose API key actions, inline status, and name validation hooks", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  for (const id of ["profileApiKey", "codexApiKey", "grokApiKey", "geminiApiKey"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.equal((html.match(/data-api-key-action="toggle"/g) || []).length, 4);
+  assert.equal((html.match(/data-api-key-action="paste"/g) || []).length, 4);
+  assert.equal((html.match(/data-inline-status=/g) || []).length, 4);
+  assert.equal((html.match(/class="field-error"/g) || []).length, 4);
+  assert.match(app, /function bindProviderDialogEnhancements\(/);
+  assert.match(app, /function validateProviderName\(/);
+});
+
+test("provider preset application updates protocol fields and emits overwrite highlight", () => {
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.match(app, /applyClaudePreset[\s\S]{0,1200}profileApiFormat/);
+  assert.match(app, /applyCodexPreset[\s\S]{0,1200}codexWireApi/);
+  assert.match(app, /applyGrokPreset[\s\S]{0,1200}grokApiBackend/);
+  assert.match(app, /preset-overwritten/);
+});
+
+test("endpoint checks render a latency or HTTP status pill", () => {
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.match(app, /renderProviderInlineStatus\(/);
+  assert.match(app, /延迟|latency/);
+  assert.match(app, /HTTP|Unauthorized|未授权/);
+});
+
+test("provider name validation rejects blanks and duplicates while allowing the edited record", () => {
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.match(app, /if \(!normalized\) return \{ valid: false/);
+  assert.match(app, /String\(profile\?\.id\) !== String\(currentId/);
+  assert.match(app, /配置名称已存在|Config name already exists/);
+  assert.match(app, /codexSaveEnableBtn/);
+  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  assert.match(css, /\.field-error[^}]*color:\s*#f43f5e/);
 });
 
 test("Claude supports OpenAI-format upstreams via the local conversion proxy", () => {
@@ -646,6 +686,50 @@ test("Claude Desktop has a first-class provider page and gateway form", () => {
   assert.match(html, /id="claudeDesktopProfileSonnetModel"/);
   assert.match(html, /id="claudeDesktopProfileOpusModel"/);
   assert.match(html, /id="claudeDesktopProfileHaikuModel"/);
+  assert.match(html, /id="claudeDesktopModelMappings"/);
+  assert.match(html, /id="claudeDesktopProfileAddMappingBtn"/);
+});
+
+test("Claude Desktop gateway form exposes model discovery controls", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.match(html, /id="claudeDesktopProfileModelFetchBtn"/);
+  assert.match(html, /id="claudeDesktopProfileModelFetchResults"/);
+  assert.match(html, /list="claudeDesktopModelOptions"/);
+  assert.match(app, /function fetchClaudeDesktopModels/);
+  assert.match(app, /fetch_available_models/);
+  assert.match(app, /claudeDesktopProfileModelId/);
+});
+
+test("Claude Desktop mappings are explicit source-to-upstream pairs", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.match(html, /Claude Code 模型/);
+  assert.match(html, /上游实际模型/);
+  assert.match(app, /modelMappings:/);
+  assert.match(app, /function addClaudeDesktopModelMapping/);
+});
+
+test("Claude Desktop Gateway keeps third-party model ids from discovery", () => {
+  assert.deepEqual(
+    normalizeClaudeDesktopModels([
+      { id: "gpt-5" },
+      { id: "qwen3.7-max" },
+      { id: "claude-sonnet-4-6" },
+      { id: "" },
+      { id: "gpt-5" },
+    ]),
+    ["claude-sonnet-4-6", "gpt-5", "qwen3.7-max"]
+  );
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.doesNotMatch(app, /isClaudeDesktopModelId/);
+});
+
+test("Claude Desktop does not embed a localization workflow", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.doesNotMatch(html, /claudeDesktopLocalization/);
+  assert.doesNotMatch(app, /claudeDesktopLocalization|run_claude_desktop_localization/);
 });
 
 test("Claude Desktop frontend wires independent provider commands", () => {
@@ -677,6 +761,29 @@ test("Claude Desktop confirmations use the in-app async dialog", () => {
   assert.match(importFlow, /await appConfirm\(/);
   assert.doesNotMatch(deleteFlow, /\bconfirm\(/);
   assert.doesNotMatch(importFlow, /\bconfirm\(/);
+});
+
+test("download page exposes a shared download counter and clickable sparkle", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "varswitch-download-site", "index.html"), "utf8");
+  const script = fs.readFileSync(path.join(__dirname, "..", "varswitch-download-site", "download-site.js"), "utf8");
+  assert.match(html, /id="downloadCount"/);
+  assert.match(html, /id="downloadCountButton"/);
+  assert.match(html, /data-download-track/);
+  assert.match(html, /download-site\.js/);
+  assert.match(script, /const endpoint = ["']\/api\/download-count["']/);
+});
+
+test("download counter helper formats counts and posts the selected metric", async () => {
+  const counter = require(path.join(__dirname, "..", "varswitch-download-site", "download-site.js"));
+  assert.equal(counter.formatCount(1234), "1.2K");
+  let request;
+  const result = await counter.requestCount(async (url, options) => {
+    request = { url, options };
+    return { ok: true, json: async () => ({ metric: "sparkles", count: 7 }) };
+  }, "sparkles", "POST");
+  assert.deepEqual(result, { metric: "sparkles", count: 7 });
+  assert.equal(request.url, "/api/download-count?metric=sparkles");
+  assert.equal(request.options.method, "POST");
 });
 
 test("getCodexSessionMetrics reads the current toolbox response fields", () => {

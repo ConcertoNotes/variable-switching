@@ -316,12 +316,65 @@ fn model_for_role(profile: &ClaudeDesktopProfile, role: &str) -> Option<String> 
 
 fn role_from_route(model: &str) -> Option<&'static str> {
     let normalized = model.trim().to_ascii_lowercase();
-    if !normalized.starts_with("claude-") {
-        return None;
-    }
+    [
+        ("sonnet", SONNET_ROUTE_ID),
+        ("opus", OPUS_ROUTE_ID),
+        ("haiku", HAIKU_ROUTE_ID),
+    ]
+    .into_iter()
+    .find_map(|(role, route)| {
+        (normalized == route || normalized.starts_with(&format!("{route}-"))).then_some(role)
+    })
+}
+
+fn role_from_model_id(model: &str) -> Option<&'static str> {
+    let normalized = model.trim().to_ascii_lowercase();
     ["sonnet", "opus", "haiku"]
         .into_iter()
         .find(|role| normalized.contains(role))
+}
+
+fn is_valid_gateway_model_id(model: &str) -> bool {
+    let model = model.trim();
+    !model.is_empty()
+        && model.len() <= 256
+        && !model.chars().any(|ch| ch.is_control())
+}
+
+fn configured_model_catalog(profile: &ClaudeDesktopProfile) -> Vec<String> {
+    let mut models = Vec::new();
+    let candidates = if profile.available_models.is_empty() {
+        vec![
+            profile.model_id.as_str(),
+            profile.sonnet_model.as_str(),
+            profile.opus_model.as_str(),
+            profile.haiku_model.as_str(),
+        ]
+    } else {
+        profile
+            .available_models
+            .iter()
+            .map(String::as_str)
+            .collect()
+    };
+    for model in candidates {
+        let model = model.trim();
+        if is_valid_gateway_model_id(model) && !models.iter().any(|item| item == model) {
+            models.push(model.to_string());
+        }
+    }
+    if models.is_empty() {
+        for (role, route) in [
+            ("sonnet", SONNET_ROUTE_ID),
+            ("opus", OPUS_ROUTE_ID),
+            ("haiku", HAIKU_ROUTE_ID),
+        ] {
+            if model_for_role(profile, role).is_some() {
+                models.push(route.to_string());
+            }
+        }
+    }
+    models
 }
 
 #[cfg(test)]
@@ -336,24 +389,32 @@ pub(crate) fn map_model(
 }
 
 pub(crate) fn model_list_response(runtime: &ClaudeDesktopRuntime) -> Value {
-    let routes = [
-        ("sonnet", SONNET_ROUTE_ID),
-        ("opus", OPUS_ROUTE_ID),
-        ("haiku", HAIKU_ROUTE_ID),
-    ];
-    let data: Vec<Value> = routes
+    let models = configured_model_catalog(&runtime.profile);
+    let first_id = models.first().cloned();
+    let last_id = models.last().cloned();
+    // Claude Desktop validates the Anthropic ModelInfo shape rather than the
+    // OpenAI-compatible {object, created, owned_by} shape.  The catalog is
+    // synthetic, so capability/token limits are intentionally unknown.
+    let data: Vec<Value> = models
         .into_iter()
-        .filter(|(role, _)| model_for_role(&runtime.profile, role).is_some())
-        .map(|(_, id)| {
+        .map(|id| {
             json!({
+                "type": "model",
                 "id": id,
-                "object": "model",
-                "created": 0,
-                "owned_by": "varswitch",
+                "display_name": id.clone(),
+                "created_at": "1970-01-01T00:00:00Z",
+                "capabilities": null,
+                "max_input_tokens": null,
+                "max_tokens": null,
             })
         })
         .collect();
-    json!({"object": "list", "data": data})
+    json!({
+        "data": data,
+        "has_more": false,
+        "first_id": first_id,
+        "last_id": last_id,
+    })
 }
 
 fn target_for_profile_and_role(profile: &ClaudeDesktopProfile, role: &str) -> Option<ProxyTarget> {
@@ -362,20 +423,48 @@ fn target_for_profile_and_role(profile: &ClaudeDesktopProfile, role: &str) -> Op
     Some(target)
 }
 
+fn target_for_profile_and_model(profile: &ClaudeDesktopProfile, model: &str) -> ProxyTarget {
+    let mut target = target_from_profile(profile);
+    target.upstream.model = model.to_string();
+    target
+}
+
 pub(crate) fn request_targets(
     requested_model: &str,
     runtime: &ClaudeDesktopRuntime,
 ) -> Result<Vec<ProxyTarget>, String> {
-    let role = role_from_route(requested_model)
-        .ok_or_else(|| format!("未知的 Claude Desktop 模型路由: {requested_model}"))?;
-    let mut targets = vec![target_for_profile_and_role(&runtime.profile, role)
-        .ok_or_else(|| format!("Claude Desktop 的 {role} 模型没有可用映射"))?];
-    targets.extend(
-        runtime
-            .failover_profiles
-            .iter()
-            .filter_map(|profile| target_for_profile_and_role(profile, role)),
-    );
+    if let Some(role) = role_from_route(requested_model) {
+        let mut targets = vec![target_for_profile_and_role(&runtime.profile, role)
+            .ok_or_else(|| format!("Claude Desktop 的 {role} 模型没有可用映射"))?];
+        targets.extend(
+            runtime
+                .failover_profiles
+                .iter()
+                .filter_map(|profile| target_for_profile_and_role(profile, role)),
+        );
+        return Ok(targets);
+    }
+
+    if !is_valid_gateway_model_id(requested_model) {
+        return Err(format!("无效的 Claude Desktop 模型 ID: {requested_model}"));
+    }
+
+    let mut targets = vec![target_for_profile_and_model(&runtime.profile, requested_model)];
+    if let Some(role) = role_from_model_id(requested_model) {
+        targets.extend(
+            runtime
+                .failover_profiles
+                .iter()
+                .filter_map(|profile| target_for_profile_and_role(profile, role)),
+        );
+    } else {
+        targets.extend(
+            runtime
+                .failover_profiles
+                .iter()
+                .map(|profile| target_for_profile_and_model(profile, requested_model)),
+        );
+    }
     Ok(targets)
 }
 
@@ -562,6 +651,7 @@ mod tests {
             sonnet_model: "upstream-sonnet".into(),
             opus_model: "upstream-opus".into(),
             haiku_model: String::new(),
+            available_models: Vec::new(),
             proxy_failover: false,
             is_active: true,
             created_at: "1".into(),
@@ -600,8 +690,43 @@ mod tests {
     }
 
     #[test]
-    fn model_catalog_exposes_only_resolvable_safe_role_ids() {
-        let runtime = fixture_runtime();
+    fn model_catalog_includes_configured_real_claude_models() {
+        let mut profile = fixture_profile();
+        profile.model_id = "claude-opus-5".into();
+        profile.sonnet_model = "claude-sonnet-4-6".into();
+        let runtime = runtime_from_profiles(profile, "vsd-good".into(), Vec::new());
+        let response = model_list_response(&runtime);
+        let ids: Vec<&str> = response["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|item| item["id"].as_str())
+            .collect();
+
+        assert!(ids.contains(&"claude-opus-5"));
+        assert!(ids.contains(&"claude-sonnet-4-6"));
+    }
+
+    #[test]
+    fn real_claude_model_id_is_forwarded_without_role_fallback() {
+        let mut profile = fixture_profile();
+        profile.model_id = "claude-opus-5".into();
+        profile.opus_model = "legacy-opus".into();
+        let runtime = runtime_from_profiles(profile, "vsd-good".into(), Vec::new());
+
+        let targets = request_targets("claude-opus-5", &runtime).unwrap();
+        assert_eq!(targets[0].upstream.model, "claude-opus-5");
+    }
+
+    #[test]
+    fn model_catalog_exposes_configured_models_including_third_party_ids() {
+        let mut profile = fixture_profile();
+        profile.available_models = vec![
+            "claude-sonnet-4-6".into(),
+            "gpt-5".into(),
+            "qwen3.7-max".into(),
+        ];
+        let runtime = runtime_from_profiles(profile, "vsd-good".into(), Vec::new());
 
         let response = model_list_response(&runtime);
         let ids: Vec<&str> = response["data"]
@@ -613,13 +738,32 @@ mod tests {
 
         assert_eq!(
             ids,
-            vec![
-                "claude-sonnet-4-6",
-                "claude-opus-4-6",
-                "claude-haiku-4-5-20251001"
-            ]
+            vec!["claude-sonnet-4-6", "gpt-5", "qwen3.7-max"]
         );
-        assert!(!response.to_string().contains("upstream-opus"));
+    }
+
+    #[test]
+    fn model_catalog_uses_anthropic_model_info_shape_for_claude_desktop() {
+        let mut profile = fixture_profile();
+        profile.available_models = vec!["qwen3.7-max".into()];
+        let runtime = runtime_from_profiles(profile, "vsd-good".into(), Vec::new());
+
+        let response = model_list_response(&runtime);
+        assert_eq!(response["has_more"], false);
+        assert_eq!(response["first_id"], "qwen3.7-max");
+        assert_eq!(response["last_id"], "qwen3.7-max");
+        let model = &response["data"][0];
+        assert_eq!(model["type"], "model");
+        assert_eq!(model["id"], "qwen3.7-max");
+        assert_eq!(model["display_name"], "qwen3.7-max");
+        assert!(model["created_at"].as_str().is_some());
+    }
+
+    #[test]
+    fn third_party_model_ids_are_forwarded_without_role_mapping() {
+        let runtime = fixture_runtime();
+        let targets = request_targets("gpt-5", &runtime).unwrap();
+        assert_eq!(targets[0].upstream.model, "gpt-5");
     }
 
     #[test]
@@ -673,7 +817,7 @@ mod tests {
     }
 
     #[test]
-    fn http_models_requires_auth_and_returns_safe_catalog() {
+    fn http_models_requires_auth_and_returns_configured_catalog() {
         let (status, _) = gateway_http_round_trip(
             fixture_runtime(),
             reqwest::Method::GET,
@@ -691,26 +835,26 @@ mod tests {
             None,
         );
         assert_eq!(status, 200);
-        assert!(body.contains("claude-sonnet-4-6"));
-        assert!(!body.contains("upstream-sonnet"));
+        assert!(body.contains("upstream-default"));
+        assert!(body.contains("upstream-sonnet"));
     }
 
     #[test]
-    fn http_messages_rejects_unknown_model_before_forwarding() {
+    fn http_messages_rejects_invalid_model_id_before_forwarding() {
         let (status, body) = gateway_http_round_trip(
             fixture_runtime(),
             reqwest::Method::POST,
             "/claude-desktop/v1/messages",
             Some("Bearer vsd-good"),
             Some(serde_json::json!({
-                "model": "gpt-5",
+                "model": "bad\u{0001}model",
                 "max_tokens": 16,
                 "messages": []
             })),
         );
 
         assert_eq!(status, 400);
-        assert!(body.contains("未知"));
+        assert!(body.contains("模型"));
     }
 
     #[test]

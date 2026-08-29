@@ -13,6 +13,14 @@ use std::path::{Path, PathBuf};
 
 /// 用户主目录（macOS / Linux 分支拼路径用）。
 /// 与 lib.rs 的 home_dir 逻辑一致，这里独立实现一份以减少跨文件耦合。
+#[cfg(target_os = "windows")]
+fn desktop_home_dir() -> PathBuf {
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_default()
+}
+
 #[cfg(not(target_os = "windows"))]
 fn desktop_home_dir() -> PathBuf {
     let home = std::env::var("HOME")
@@ -28,10 +36,13 @@ fn desktop_home_dir() -> PathBuf {
 pub fn claude_desktop_config_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        let appdata = std::env::var("APPDATA").unwrap_or_default();
-        PathBuf::from(appdata)
-            .join("Claude")
-            .join("claude_desktop_config.json")
+        let local_app_data = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| desktop_home_dir().join("AppData").join("Local"));
+        let app_data = std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| desktop_home_dir().join("AppData").join("Roaming"));
+        claude_desktop_config_path_for_roots(&local_app_data, &app_data)
     }
     #[cfg(target_os = "macos")]
     {
@@ -50,14 +61,73 @@ pub fn claude_desktop_config_path() -> PathBuf {
     }
 }
 
+fn claude_config_path_in(root: &Path) -> PathBuf {
+    root.join("Claude").join("claude_desktop_config.json")
+}
+
+/// 在 Windows 的 MSIX 与传统安装之间选择 Claude Desktop 配置路径。
+///
+/// MSIX 当前把配置放在 LOCALAPPDATA；若只发现传统 APPDATA/Claude，则继续兼容旧安装。
+/// 两者都不存在时默认使用 LOCALAPPDATA，确保首次启动 MSIX 时写入正确目录。
+fn claude_desktop_config_path_for_roots(local_app_data: &Path, app_data: &Path) -> PathBuf {
+    let local_dir = local_app_data.join("Claude");
+    let app_dir = app_data.join("Claude");
+    if local_dir.exists() || !app_dir.exists() {
+        claude_config_path_in(local_app_data)
+    } else {
+        claude_config_path_in(app_data)
+    }
+}
+
+fn claude_package_data_exists(local_app_data: &Path) -> bool {
+    let packages = local_app_data.join("Packages");
+    let Ok(entries) = fs::read_dir(packages) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry.file_type().is_ok_and(|file_type| file_type.is_dir())
+            && entry
+                .file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .starts_with("claude_")
+    })
+}
+
+fn claude_desktop_installation_evidence_for_roots(
+    local_app_data: &Path,
+    app_data: &Path,
+    appx_installed: bool,
+) -> bool {
+    appx_installed
+        || claude_package_data_exists(local_app_data)
+        || local_app_data.join("Claude").exists()
+        || app_data.join("Claude").exists()
+}
+
 /// 是否检测到 Claude Desktop：配置文件或其父目录（%APPDATA%\Claude 等）
 /// 存在即视为已安装。这是 best-effort 判定，Desktop 未装时该目录一般不存在。
 pub fn claude_desktop_installed() -> bool {
-    let path = claude_desktop_config_path();
-    if path.exists() {
-        return true;
+    #[cfg(target_os = "windows")]
+    {
+        let local_app_data = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| desktop_home_dir().join("AppData").join("Local"));
+        let app_data = std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| desktop_home_dir().join("AppData").join("Roaming"));
+        return claude_desktop_installation_evidence_for_roots(
+            &local_app_data,
+            &app_data,
+            claude_package_data_exists(&local_app_data),
+        );
     }
-    path.parent().is_some_and(|dir| dir.exists())
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let path = claude_desktop_config_path();
+        path.exists() || path.parent().is_some_and(|dir| dir.exists())
+    }
 }
 
 /// 读取指定配置文件里的 mcpServers 对象。
@@ -174,6 +244,60 @@ pub fn remove_claude_desktop_mcp_server(name: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_path_prefers_local_appdata_msix_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "varswitch-claude-desktop-path-priority-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let local = root.join("local");
+        let appdata = root.join("roaming");
+        let local_config = local.join("Claude").join("claude_desktop_config.json");
+        fs::create_dir_all(local_config.parent().unwrap()).unwrap();
+        fs::write(&local_config, b"{}").unwrap();
+
+        assert_eq!(
+            claude_desktop_config_path_for_roots(&local, &appdata),
+            local_config
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn config_path_falls_back_to_roaming_appdata_for_legacy_install() {
+        let root = std::env::temp_dir().join(format!(
+            "varswitch-claude-desktop-path-legacy-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let local = root.join("local");
+        let appdata = root.join("roaming");
+        let roaming_config = appdata.join("Claude").join("claude_desktop_config.json");
+        fs::create_dir_all(roaming_config.parent().unwrap()).unwrap();
+        fs::write(&roaming_config, b"{}").unwrap();
+
+        assert_eq!(
+            claude_desktop_config_path_for_roots(&local, &appdata),
+            roaming_config
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn claude_3p_directory_alone_is_not_installation_evidence() {
+        let root = std::env::temp_dir().join(format!(
+            "varswitch-claude-desktop-install-evidence-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let local = root.join("local");
+        let appdata = root.join("roaming");
+        fs::create_dir_all(local.join("Claude-3p")).unwrap();
+
+        assert!(!claude_desktop_installation_evidence_for_roots(
+            &local, &appdata, false
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
 
     /// 每个测试用独立的临时目录，避免并行测试互相干扰
     fn temp_config_path(tag: &str) -> PathBuf {
