@@ -7341,6 +7341,166 @@ input[aria-invalid="true"] { border-color: #f43f5e; box-shadow: 0 0 0 2px rgb(24
 @keyframes preset-overwrite-pulse { 0% { background-color: #fef3c7; border-color: #f59e0b; } 100% { background-color: inherit; border-color: var(--console-line); } }
 .preset-overwritten { animation: preset-overwrite-pulse 1.2s ease-out; }
 
+/* 按 Modal Redesign Guide 统一配置弹窗：双列基础信息、通栏凭证、折叠高级设置 */
+.provider-config-modal {
+  width: min(720px, calc(100vw - 32px));
+  max-width: 720px;
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+.provider-config-modal > form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+  row-gap: 0;
+}
+.provider-config-modal > form > input[type="hidden"] { display: none; }
+.provider-config-modal > form > .modal-form-grid,
+.provider-config-modal > form > .modal-form-full,
+.provider-config-modal > form > .form-actions,
+.provider-config-modal > form > details { grid-column: 1 / -1; }
+.provider-config-modal > form > .form-group { min-width: 0; margin-bottom: 16px; }
+.provider-config-modal .form-group input,
+.provider-config-modal .form-group select,
+.provider-config-modal .form-select { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; min-height: 40px; }
+.provider-config-modal .form-group input:focus,
+.provider-config-modal .form-group select:focus,
+.provider-config-modal .form-select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgb(37 99 235 / 12%); }
+.provider-config-modal .form-hint { color: #94a3b8; font-size: 11px; }
+.provider-config-modal .form-label-row { margin-bottom: 6px; }
+.provider-config-modal .base-url-input { position: relative; display: flex; align-items: center; }
+.provider-config-modal .base-url-input > input { padding-right: 170px; }
+.provider-config-modal .base-url-actions { position: absolute; right: 6px; display: inline-flex; align-items: center; gap: 3px; }
+.provider-config-modal .base-url-actions .link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.provider-config-modal .base-url-actions .inline-spinner {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  border-width: 2px;
+}
+.provider-config-modal .base-url-actions .link-button:hover { background: #f1f5f9; color: #2563eb; text-decoration: none; }
+.provider-config-modal .base-url-actions .primary-action { color: #2563eb; background: #eff6ff; }
+.provider-config-modal .api-key-input > input { padding-right: 76px; }
+.provider-config-modal .modal-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.provider-config-modal .modal-form-grid .form-group { margin-bottom: 0; }
+.provider-config-modal .modal-form-grid-mapping { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.provider-config-modal .label-help { color: #64748b; font-size: 12px; cursor: help; }
+.provider-config-modal .advanced-summary-hint { color: #94a3b8; font-size: 11px; font-weight: 400; }
+.provider-config-modal .form-section,
+.provider-config-modal .model-mapping-section { margin: 0 0 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+.provider-config-modal > form > .form-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+.provider-config-modal .modal-footer-option { display: inline-flex; align-items: center; gap: 7px; margin-right: auto; color: #475569; font-size: 12px; cursor: pointer; }
+.provider-config-modal .modal-footer-option input { width: 15px; height: 15px; accent-color: #2563eb; }
+.provider-config-modal .field-error { min-height: 15px; }
+.provider-config-modal .proxy-failover-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  cursor: pointer;
+  line-height: 20px;
+}
+.provider-config-modal .proxy-failover-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+}
+.provider-config-modal .proxy-failover-group .form-hint { margin: 4px 0 0 24px; }
+.provider-config-modal .claude-desktop-model-mapping-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 52px;
+  align-items: center;
+}
+.provider-config-modal .claude-desktop-model-mapping-head {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 52px;
+  align-items: center;
+}
+.provider-config-modal .claude-desktop-model-mapping-row input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  min-height: 40px;
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.provider-config-modal .claude-desktop-model-mapping-row input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 12%);
+}
+.provider-config-modal .claude-desktop-model-mapping-remove {
+  width: 52px;
+  justify-self: end;
+  text-align: center;
+  white-space: nowrap;
+}
+.provider-config-modal #claudeDesktopProfileAddMappingBtn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  margin-top: 4px;
+}
+.provider-config-modal #claudeDesktopProfileFailoverGroup {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+:root[data-theme="dark"] .provider-config-modal { background: var(--console-card); border-color: var(--console-line); }
+:root[data-theme="dark"] .provider-config-modal .form-group input,
+:root[data-theme="dark"] .provider-config-modal .form-group select,
+:root[data-theme="dark"] .provider-config-modal .form-select { background: var(--console-card-muted); border-color: var(--console-line); }
+:root[data-theme="dark"] .provider-config-modal .claude-desktop-model-mapping-row input { background: var(--console-card-muted); border-color: var(--console-line); color: var(--console-text); }
+:root[data-theme="dark"] .provider-config-modal .form-section,
+:root[data-theme="dark"] .provider-config-modal .model-mapping-section { background: color-mix(in srgb, var(--console-card-muted) 72%, transparent); border-color: var(--console-line); }
+
+/* 无额外 wrapper 的旧弹窗也按相同信息架构排列 */
+.codex-config-modal > form > .form-group:has(#codexApiKey),
+.codex-config-modal > form > .form-group:has(#codexBaseUrl) { grid-column: 1 / -1; }
+.grok-config-modal > form > .form-group:has(#grokPresetSelect) { grid-column: 1; grid-row: 1; }
+.grok-config-modal > form > .form-group:has(#grokProfileName) { grid-column: 2; grid-row: 1; }
+.grok-config-modal > form > .form-group:has(#grokApiKey),
+.grok-config-modal > form > .form-group:has(#grokBaseUrl) { grid-column: 1 / -1; }
+.gemini-config-modal > form > .form-group:has(#geminiProfileName) { grid-column: 1; grid-row: 1; }
+.gemini-config-modal > form > .form-group:has(#geminiApiKey) { grid-column: 2; grid-row: 1; }
+.gemini-config-modal > form > .form-group:has(#geminiBaseUrl) { grid-column: 1 / -1; }
+.opencode-config-modal > form > .form-group:has(#opencodePresetSelect) { grid-column: 1; grid-row: 1; }
+.opencode-config-modal > form > .form-group:has(#opencodeProfileName) { grid-column: 2; grid-row: 1; }
+.opencode-config-modal > form > .form-group:has(#opencodeApiKey),
+.opencode-config-modal > form > .form-group:has(#opencodeBaseUrl) { grid-column: 1 / -1; }
+
+@media (max-width: 640px) {
+  .provider-config-modal { width: calc(100vw - 24px); padding: 20px; }
+  .provider-config-modal > form { grid-template-columns: 1fr; }
+  .provider-config-modal > form > .form-group,
+  .provider-config-modal > form > .form-section,
+  .provider-config-modal > form > details { grid-column: 1 !important; grid-row: auto !important; }
+  .provider-config-modal .modal-form-grid,
+  .provider-config-modal .modal-form-grid-mapping { grid-template-columns: 1fr; }
+  .provider-config-modal .base-url-input > input { padding-right: 12px; padding-bottom: 42px; }
+  .provider-config-modal .base-url-actions { left: 6px; right: auto; bottom: 5px; }
+  .provider-config-modal > form > .form-actions { flex-wrap: wrap; }
+  .provider-config-modal .modal-footer-option { width: 100%; margin-bottom: 6px; }
+}
+
 @media (min-width: 761px) {
   #pageAddProvider .provider-builder-footer {
     left: calc(var(--sidebar-width) + 42px);

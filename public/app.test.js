@@ -267,7 +267,7 @@ test("editing the active Codex profile reapplies image Skill configuration after
   const submit = app.slice(submitStart, submitEnd);
 
   assert.match(submit, /editingActiveProfile\s*=\s*codexProfiles\.some/);
-  assert.match(submit, /codexEnableAfterSave\s*\|\|\s*editingActiveProfile/);
+  assert.match(submit, /codexEnableAfterSave[\s\S]{0,120}editingActiveProfile/);
   assert.match(submit, /if \(enableAfter && savedId\) \{\s*await handleCodexSwitch\(savedId\);/s);
 });
 
@@ -335,10 +335,10 @@ test("provider dialogs expose API key actions, inline status, and name validatio
   for (const id of ["profileApiKey", "codexApiKey", "grokApiKey", "geminiApiKey"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
-  assert.equal((html.match(/data-api-key-action="toggle"/g) || []).length, 4);
-  assert.equal((html.match(/data-api-key-action="paste"/g) || []).length, 4);
-  assert.equal((html.match(/data-inline-status=/g) || []).length, 4);
-  assert.equal((html.match(/class="field-error"/g) || []).length, 4);
+  assert.ok((html.match(/data-api-key-action="toggle"/g) || []).length >= 4);
+  assert.ok((html.match(/data-api-key-action="paste"/g) || []).length >= 4);
+  assert.ok((html.match(/data-inline-status=/g) || []).length >= 4);
+  assert.ok((html.match(/class="field-error"/g) || []).length >= 4);
   assert.match(app, /function bindProviderDialogEnhancements\(/);
   assert.match(app, /function validateProviderName\(/);
 });
@@ -366,6 +366,50 @@ test("provider name validation rejects blanks and duplicates while allowing the 
   assert.match(app, /codexSaveEnableBtn/);
   const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
   assert.match(css, /\.field-error[^}]*color:\s*#f43f5e/);
+});
+
+test("Claude Desktop dialog uses the requested API key and inline feedback layout", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  assert.match(html, /id="claudeDesktopProfileOverlay"[\s\S]*provider-config-modal/);
+  assert.match(html, /id="claudeDesktopProfileApiKey"[\s\S]*data-api-key-action="toggle"[\s\S]*data-api-key-action="paste"/);
+  assert.match(html, /id="claudeDesktopProfileModelFetchBtn"[\s\S]*data-inline-status="claude-desktop"/);
+  assert.match(html, /id="claudeDesktopProfileNameError"/);
+  assert.match(app, /claudeDesktopProfileModelFetchResults/);
+  assert.match(app, /claude-desktop.*nameError/);
+});
+
+test("provider dialogs follow the two-column modal form layout", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  ["modalOverlay", "claudeDesktopProfileOverlay", "codexModalOverlay", "grokModalOverlay", "geminiModalOverlay", "opencodeModalOverlay"].forEach((overlayId) => {
+    const overlay = html.match(new RegExp(`<div class="modal-overlay" id="${overlayId}">[\\s\\S]*?<div class="modal\\s[^>]*>`));
+    assert.ok(overlay, `${overlayId} should contain a modal`);
+    assert.match(overlay[0], /provider-config-modal/);
+  });
+  assert.match(html, /class="modal-form-grid(?:\s|\")/);
+  assert.match(html, /class="[^"]*modal-form-full/);
+  assert.match(html, /class="[^"]*modal-footer-option/);
+  assert.match(html, /保存并立即启用|Save and activate/);
+  for (const id of ["profileBaseUrl", "claudeDesktopProfileBaseUrl", "codexBaseUrl", "grokBaseUrl", "geminiBaseUrl", "opencodeBaseUrl"]) {
+    const field = html.match(new RegExp(`id="${id}"[\\s\\S]{0,260}base-url-actions`));
+    assert.ok(field, `${id} should use action-in-input layout`);
+  }
+});
+
+test("provider modal controls keep inline alignment and stable action columns", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+
+  assert.match(css, /\.provider-config-modal \.proxy-failover-checkbox\s*\{[^}]*display:\s*inline-flex[^}]*align-items:\s*center/s);
+  assert.match(css, /\.provider-config-modal \.base-url-actions \.link-button\s*\{[^}]*display:\s*inline-flex[^}]*justify-content:\s*center[^}]*gap:\s*5px/s);
+  assert.match(css, /\.provider-config-modal \.claude-desktop-model-mapping-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+52px/s);
+  assert.match(css, /\.provider-config-modal \.claude-desktop-model-mapping-head\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+52px/s);
+  assert.match(css, /\.provider-config-modal \.claude-desktop-model-mapping-row input\s*\{[^}]*border:\s*1px solid #e2e8f0[^}]*border-radius:\s*8px[^}]*min-height:\s*40px/s);
+
+  const codexForm = html.match(/<form id="codexProfileForm">([\s\S]*?)<\/form>/)?.[1] || "";
+  assert.ok(codexForm.indexOf('id="codexProfileName"') < codexForm.indexOf('id="codexBaseUrl"'));
+  assert.ok(codexForm.indexOf('id="codexBaseUrl"') < codexForm.indexOf('id="codexWireApi"'));
+  assert.ok(codexForm.indexOf('id="codexWireApi"') < codexForm.indexOf('id="codexModel"'));
 });
 
 test("Claude supports OpenAI-format upstreams via the local conversion proxy", () => {

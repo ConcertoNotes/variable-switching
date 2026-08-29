@@ -4767,6 +4767,7 @@ function openClaudeDesktopProfileDialog(id = null) {
   $("claudeDesktopProfileApiFormat").value = profile?.apiFormat || "anthropic";
   $("claudeDesktopProfileBaseUrl").value = profile?.baseUrl || "";
   $("claudeDesktopProfileApiKey").value = profile?.apiKey || "";
+  $("claudeDesktopProfileApiKey").type = "password";
   $("claudeDesktopProfileModelId").value = profile?.modelId || "";
   $("claudeDesktopProfileSonnetModel").value = profile?.sonnetModel || "";
   $("claudeDesktopProfileOpusModel").value = profile?.opusModel || "";
@@ -4778,9 +4779,14 @@ function openClaudeDesktopProfileDialog(id = null) {
     }))
     : [];
   renderClaudeDesktopModelMappings();
+  const advanced = $("claudeDesktopProfileAdvancedSection");
+  if (advanced) advanced.open = Boolean(profile?.proxyFailover || claudeDesktopModelMappings.length);
   claudeDesktopModelCatalog = Array.isArray(profile?.availableModels) ? [...profile.availableModels] : [];
   renderClaudeDesktopModelOptions(claudeDesktopModelCatalog);
   $("claudeDesktopProfileProxyFailover").checked = Boolean(profile?.proxyFailover);
+  if ($("claudeDesktopProfileSaveAndActivate")) $("claudeDesktopProfileSaveAndActivate").checked = false;
+  clearProviderInlineStatus("claude-desktop");
+  updateProviderNameValidation("claude-desktop");
   updateClaudeDesktopProfileFormState();
   $("claudeDesktopProfileOverlay")?.classList.add("open");
   document.body.classList.add("modal-open");
@@ -4831,8 +4837,8 @@ function renderClaudeDesktopModelOptions(models) {
   datalist.innerHTML = unique.map((model) => '<option value="' + esc(model) + '"></option>').join("");
 }
 
-async function fetchClaudeDesktopModels({ silent = false } = {}) {
-  const button = $("claudeDesktopProfileModelFetchBtn");
+async function fetchClaudeDesktopModels({ silent = false, triggerButtonId = "claudeDesktopProfileModelFetchBtn" } = {}) {
+  const button = $(triggerButtonId) || $("claudeDesktopProfileModelFetchBtn");
   const result = $("claudeDesktopProfileModelFetchResults");
   const baseUrl = $("claudeDesktopProfileBaseUrl")?.value.trim() || "";
   const apiKey = $("claudeDesktopProfileApiKey")?.value.trim() || "";
@@ -4845,6 +4851,7 @@ async function fetchClaudeDesktopModels({ silent = false } = {}) {
     button.disabled = true;
     button.textContent = t("claudeDesktopFetchingModels");
   }
+  const startedAt = performance.now();
   try {
     const protocol = $("claudeDesktopProfileApiFormat")?.value === "openai_chat" ? "codex" : "claude";
     const models = await invoke("fetch_available_models", {
@@ -4860,6 +4867,7 @@ async function fetchClaudeDesktopModels({ silent = false } = {}) {
       ? helpers.normalizeClaudeDesktopModels(normalized)
       : normalized;
     claudeDesktopModelCatalog = safe;
+    renderProviderInlineStatus("claude-desktop", { tone: "success", latencyMs: Math.round(performance.now() - startedAt) });
     renderClaudeDesktopModelOptions(safe);
     if (result) {
       result.innerHTML = '<div class="endpoint-row"><span class="endpoint-url">' + esc(t("claudeDesktopModelsFetched", { count: safe.length })) + '</span><span class="endpoint-meta ' + (safe.length ? "fast" : "failed") + '"></span></div>';
@@ -4868,6 +4876,7 @@ async function fetchClaudeDesktopModels({ silent = false } = {}) {
     if (!silent || safe.length) showToast(t("claudeDesktopModelsFetched", { count: safe.length }), safe.length ? "success" : "warning");
   } catch (error) {
     const message = describeVerifyError(String(error));
+    renderProviderInlineStatus("claude-desktop", { tone: "error", statusCode: providerStatusCode(error), summary: message });
     if (result) {
       result.innerHTML = '<div class="endpoint-row"><span class="endpoint-url">' + esc(t("claudeDesktopModelsFetchFailed", { error: message })) + '</span></div>';
       result.classList.add("open");
@@ -4917,6 +4926,8 @@ async function submitClaudeDesktopProfile(event) {
     availableModels: claudeDesktopModelCatalog,
     proxyFailover: Boolean($("claudeDesktopProfileProxyFailover").checked),
   };
+  if (!updateProviderNameValidation("claude-desktop")) return;
+  const saveAndActivate = Boolean($("claudeDesktopProfileSaveAndActivate")?.checked);
   if (![input.modelId, input.sonnetModel, input.opusModel, input.haikuModel, ...input.modelMappings.map((item) => item.targetModel)].some(Boolean)) {
     showToast(t("claudeDesktopModelRequired"), "warning");
     return;
@@ -4934,6 +4945,10 @@ async function submitClaudeDesktopProfile(event) {
     }
     closeClaudeDesktopProfileDialog();
     await loadClaudeDesktopPage();
+    if (saveAndActivate) {
+      const saved = claudeDesktopProfiles.find((item) => item.name === input.name);
+      if (saved?.id) await switchClaudeDesktopProfile(saved.id);
+    }
   } catch (error) {
     showToast(String(error), "error");
   } finally {
@@ -5228,6 +5243,17 @@ function productFieldMap(kind) {
       endpointTestBtn: "geminiEndpointTestBtn",
     };
   }
+  if (kind === "opencode") {
+    return {
+      baseUrl: "opencodeBaseUrl",
+      apiKey: "opencodeApiKey",
+      model: "opencodeModel",
+      endpointResults: "opencodeEndpointResults",
+      modelResults: "opencodeModelResults",
+      modelFetchBtn: "opencodeModelFetchBtn",
+      endpointTestBtn: "opencodeEndpointTestBtn",
+    };
+  }
   return {
     baseUrl: "profileBaseUrl",
     apiKey: "profileApiKey",
@@ -5252,20 +5278,26 @@ const PROVIDER_DIALOG_CONFIG = {
   codex: { nameInput: "codexProfileName", nameError: "codexProfileNameError", apiKey: "codexApiKey", submitButtons: ["codexSubmitBtn", "codexSaveEnableBtn"], status: "codex" },
   grok: { nameInput: "grokProfileName", nameError: "grokProfileNameError", apiKey: "grokApiKey", submitButtons: ["grokSubmitBtn"], status: "grok" },
   gemini: { nameInput: "geminiProfileName", nameError: "geminiProfileNameError", apiKey: "geminiApiKey", submitButtons: ["geminiSubmitBtn"], status: "gemini" },
+  "claude-desktop": { nameInput: "claudeDesktopProfileName", nameError: "claudeDesktopProfileNameError", apiKey: "claudeDesktopProfileApiKey", submitButtons: ["claudeDesktopProfileSubmit"], status: "claude-desktop" },
+  opencode: { nameInput: "opencodeProfileName", nameError: "opencodeProfileNameError", apiKey: "opencodeApiKey", submitButtons: ["opencodeSubmitBtn"], status: "opencode" },
 };
 
 function providerProfiles(kind) {
   return kind === "claude" ? profiles
     : kind === "codex" ? codexProfiles
       : kind === "grok" ? grokProfiles
-        : geminiProfiles;
+        : kind === "gemini" ? geminiProfiles
+          : kind === "claude-desktop" ? claudeDesktopProfiles
+            : opencodeProfiles;
 }
 
 function providerEditingId(kind) {
   return kind === "claude" ? editingId
     : kind === "codex" ? editingCodexId
       : kind === "grok" ? editingGrokId
-        : editingGeminiId;
+        : kind === "gemini" ? editingGeminiId
+          : kind === "claude-desktop" ? editingClaudeDesktopProfileId
+            : editingOpenCodeId;
 }
 
 function validateProviderName(kind, name, currentId = providerEditingId(kind)) {
@@ -5381,6 +5413,7 @@ function bindProviderDialogEnhancements() {
 // Claude 配置选了 OpenAI 格式时，验证/取模型也要按 OpenAI 方式带 Bearer 头
 function productProtocol(kind) {
   if (kind === "claude" && $("profileApiFormat")?.value === "openai_chat") return "codex";
+  if (kind === "opencode") return "codex";
   return kind;
 }
 
@@ -5558,6 +5591,7 @@ function openModal(profile) {
   // 代理相关勾选：编辑时回填；接管开关随 apiFormat 显示/隐藏
   if ($("profileProxyFailover")) $("profileProxyFailover").checked = profile ? Boolean(profile.proxyFailover) : false;
   if ($("profileProxyTakeover")) $("profileProxyTakeover").checked = profile ? Boolean(profile.proxyTakeover) : false;
+  if ($("profileSaveAndActivate")) $("profileSaveAndActivate").checked = false;
   updateProxyFailoverGroupVisibility();
   // 高级模型映射：编辑时回填；已配置过任一角色模型时默认展开
   const sonnetModel = profile ? (profile.sonnetModel || "") : "";
@@ -5624,6 +5658,7 @@ async function handleSubmit(event) {
   const baseUrl = $("profileBaseUrl").value.trim();
   const modelId = $("profileModelId").value.trim();
   const apiFormat = $("profileApiFormat")?.value || "anthropic";
+  const saveAndActivate = Boolean($("profileSaveAndActivate")?.checked);
   // 备用池成员由代理内部访问，两种格式都可入池；没有 Base URL 则无从转发
   const proxyFailover = Boolean($("profileProxyFailover")?.checked) && Boolean(baseUrl);
   // 接管只对 anthropic 直连有意义：openai_chat 本就必经代理，强制落回 false
@@ -5660,7 +5695,10 @@ async function handleSubmit(event) {
     closeModal();
     await loadProfiles();
     await loadStatus();
-    if (isNewProfile) {
+    if (saveAndActivate) {
+      const saved = profiles.find((item) => item.name === name);
+      if (saved?.id) await handleSwitch(saved.id);
+    } else if (isNewProfile) {
       switchConsolePage("claude");
     } else if (
       previousProfile?.isActive &&
@@ -6065,6 +6103,8 @@ function openGrokModal(profile) {
   $("grokPresetSelect").value = "";
   $("grokProfileName").value = profile ? profile.name : "";
   $("grokApiKey").value = profile ? profile.apiKey : "";
+  $("grokApiKey").type = "password";
+  if ($("grokSaveAndActivate")) $("grokSaveAndActivate").checked = false;
   $("grokBaseUrl").value = profile ? profile.baseUrl : "";
   $("grokModel").value = profile ? (profile.model || "") : "";
   if ($("grokApiBackend")) {
@@ -6096,6 +6136,7 @@ async function handleGrokSubmit(event) {
   const baseUrl = $("grokBaseUrl").value.trim() || "https://api.x.ai/v1";
   const model = $("grokModel").value.trim();
   const apiBackend = $("grokApiBackend")?.value || "chat_completions";
+  const saveAndActivate = Boolean($("grokSaveAndActivate")?.checked);
 
   grokProfileSaving = true;
   const submitButton = $("grokSubmitBtn");
@@ -6123,7 +6164,10 @@ async function handleGrokSubmit(event) {
     }
     closeGrokModal();
     await Promise.all([loadGrokProfiles(), loadGrokStatus(), loadGrokDiagnostics()]);
-    if (isNewProfile) switchConsolePage("grok");
+    if (saveAndActivate) {
+      const saved = grokProfiles.find((item) => item.name === name);
+      if (saved?.id) await handleGrokSwitch(saved.id);
+    } else if (isNewProfile) switchConsolePage("grok");
   } catch (error) {
     showToast(String(error), "error");
   } finally {
@@ -6300,6 +6344,8 @@ function openGeminiModal(profile) {
   $("geminiProfileId").value = editingGeminiId || "";
   $("geminiProfileName").value = profile?.name || "";
   $("geminiApiKey").value = profile?.apiKey || "";
+  $("geminiApiKey").type = "password";
+  if ($("geminiSaveAndActivate")) $("geminiSaveAndActivate").checked = false;
   $("geminiBaseUrl").value = profile?.baseUrl || "";
   $("geminiModel").value = profile?.model || "gemini-2.5-pro";
   clearEndpointResults("gemini");
@@ -6326,6 +6372,7 @@ async function handleGeminiSubmit(event) {
     baseUrl: $("geminiBaseUrl").value.trim(),
     model: $("geminiModel").value.trim() || null,
   };
+  const saveAndActivate = Boolean($("geminiSaveAndActivate")?.checked);
   if (!updateProviderNameValidation("gemini")) return;
   geminiProfileSaving = true;
   const submitButton = $("geminiSubmitBtn");
@@ -6336,7 +6383,10 @@ async function handleGeminiSubmit(event) {
     showToast(editingGeminiId ? "Gemini 配置已更新" : "Gemini 配置已添加", "success");
     closeGeminiModal();
     await Promise.all([loadGeminiProfiles(), loadGeminiStatus()]);
-    switchConsolePage("gemini");
+    if (saveAndActivate) {
+      const saved = geminiProfiles.find((item) => item.name === payload.name);
+      if (saved?.id) await handleGeminiSwitch(saved.id);
+    } else switchConsolePage("gemini");
   } catch (error) {
     showToast(String(error), "error");
   } finally {
@@ -6571,6 +6621,8 @@ function openOpenCodeModal(profile) {
   $("opencodeProfileName").value = profile ? profile.name : "";
   $("opencodeProviderId").value = profile ? (profile.providerId || "anthropic") : "anthropic";
   $("opencodeApiKey").value = profile ? profile.apiKey : "";
+  $("opencodeApiKey").type = "password";
+  if ($("opencodeSaveAndActivate")) $("opencodeSaveAndActivate").checked = false;
   $("opencodeBaseUrl").value = profile ? (profile.baseUrl || "") : "";
   $("opencodeModel").value = profile ? (profile.model || "") : "";
   updateOpenCodePresetHint();
@@ -6596,6 +6648,8 @@ async function handleOpenCodeSubmit(event) {
     model: $("opencodeModel").value.trim() || null,
     providerId: $("opencodeProviderId").value.trim() || null,
   };
+  if (!updateProviderNameValidation("opencode")) return;
+  const saveAndActivate = Boolean($("opencodeSaveAndActivate")?.checked);
 
   opencodeProfileSaving = true;
   const submitButton = $("opencodeSubmitBtn");
@@ -6610,7 +6664,10 @@ async function handleOpenCodeSubmit(event) {
     }
     closeOpenCodeModal();
     await Promise.all([loadOpenCodeProfiles(), loadOpenCodeStatus()]);
-    if (isNewProfile) switchConsolePage("opencode");
+    if (saveAndActivate) {
+      const saved = opencodeProfiles.find((item) => item.name === payload.name);
+      if (saved?.id) await handleOpenCodeSwitch(saved.id);
+    } else if (isNewProfile) switchConsolePage("opencode");
   } catch (error) {
     showToast(String(error), "error");
   } finally {
@@ -6935,6 +6992,7 @@ async function loadCodexStatus() {
 function openCodexModal(profile) {
   editingCodexId = profile ? profile.id : null;
   codexEnableAfterSave = false;
+  if ($("codexSaveAndActivate")) $("codexSaveAndActivate").checked = false;
   $("codexModalTitle").textContent = profile ? t("codexEditConfig") : t("codexAddConfig");
   $("codexProfileId").value = editingCodexId || "";
   const matchedPreset = profile && helpers.isDeepseekCodexConfig?.(profile.providerName, profile.baseUrl)
@@ -7017,7 +7075,8 @@ async function handleCodexSubmit(event) {
   // save_only：前端仅保存配置，后端仍用 auth_json 字段存储，不自动切换
   const saveOnly = authMode === "save_only";
   if (saveOnly) authMode = "auth_json";
-  const enableAfter = (codexEnableAfterSave || editingActiveProfile) && !saveOnly;
+  const saveAndActivate = Boolean($("codexSaveAndActivate")?.checked);
+  const enableAfter = (codexEnableAfterSave || saveAndActivate || editingActiveProfile) && !saveOnly;
   codexEnableAfterSave = false;
 
   codexProfileSaving = true;
@@ -10316,6 +10375,9 @@ function bindConsoleUiOnce() {
   $("claudeDesktopGatewayResetBtn")?.addEventListener("click", resetClaudeDesktopGatewayBreaker);
   $("claudeDesktopProfileConnectionMode")?.addEventListener("change", updateClaudeDesktopProfileFormState);
   $("claudeDesktopProfileModelFetchBtn")?.addEventListener("click", () => fetchClaudeDesktopModels());
+  $("claudeDesktopProfileEndpointTestBtn")?.addEventListener("click", () => fetchClaudeDesktopModels({ triggerButtonId: "claudeDesktopProfileEndpointTestBtn" }));
+  $("claudeDesktopProfileBaseUrl")?.addEventListener("input", () => clearProviderInlineStatus("claude-desktop"));
+  $("claudeDesktopProfileApiKey")?.addEventListener("input", () => clearProviderInlineStatus("claude-desktop"));
   $("claudeDesktopProfileAddMappingBtn")?.addEventListener("click", addClaudeDesktopModelMapping);
   $("claudeDesktopProfileClose")?.addEventListener("click", closeClaudeDesktopProfileDialog);
   $("claudeDesktopProfileCancel")?.addEventListener("click", closeClaudeDesktopProfileDialog);
@@ -10527,6 +10589,10 @@ $("opencodeProfileForm")?.addEventListener("submit", handleOpenCodeSubmit);
 $("opencodePresetSelect")?.addEventListener("change", () => applyOpenCodePreset(getSelectedOpenCodePreset()));
 $("opencodeBaseUrl")?.addEventListener("focus", () => tryClipboardAutoFill("url", "opencodeBaseUrl"));
 $("opencodeApiKey")?.addEventListener("focus", () => tryClipboardAutoFill("key", "opencodeApiKey"));
+$("opencodeBaseUrl")?.addEventListener("input", () => clearProviderInlineStatus("opencode"));
+$("opencodeApiKey")?.addEventListener("input", () => clearProviderInlineStatus("opencode"));
+$("opencodeModelFetchBtn")?.addEventListener("click", () => handleModelFetch("opencode"));
+$("opencodeEndpointTestBtn")?.addEventListener("click", () => handleEndpointTest("opencode"));
 bindOverlayDismiss("opencodeModalOverlay", closeOpenCodeModal);
 $("opencodePageAddBtn")?.addEventListener("click", () => openOpenCodeModal(null));
 $("opencodePageImportBtn")?.addEventListener("click", handleOpenCodeImport);
