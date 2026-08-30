@@ -377,9 +377,21 @@ test("provider dialogs expose API key actions, inline status, and name validatio
   for (const id of ["profileApiKey", "codexApiKey", "grokApiKey", "geminiApiKey"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
-  assert.ok((html.match(/data-api-key-action="toggle"/g) || []).length >= 4);
-  assert.ok((html.match(/data-api-key-action="paste"/g) || []).length >= 4);
-  assert.ok((html.match(/data-inline-status=/g) || []).length >= 4);
+
+  // 两个按钮组由 JS 生成（见 renderApiKeyActions / renderBaseUrlActions）：
+  // 之前六个弹窗各写一份内联标记，两个 SVG 重复 12 次，其中一份的路径还抄错了。
+  // 这里断言占位符齐全 + 生成器存在，而不是数内联标记的份数。
+  assert.ok((html.match(/data-api-key-actions="/g) || []).length >= 6, "API Key 按钮组占位符不足");
+  assert.ok((html.match(/data-base-url-actions="/g) || []).length >= 6, "Base URL 按钮组占位符不足");
+  assert.doesNotMatch(html, /data-api-key-action="toggle"/, "按钮应由 JS 生成，不再内联");
+  assert.match(app, /function renderApiKeyActions\(/);
+  assert.match(app, /function renderBaseUrlActions\(/);
+  // 生成必须早于顶层的 addEventListener，否则拿不到按钮元素
+  assert.ok(
+    app.indexOf("\nrenderBaseUrlActions();") < app.indexOf('on("profileModelFetchBtn"'),
+    "按钮组要在顶层事件绑定之前生成"
+  );
+
   assert.ok((html.match(/class="field-error"/g) || []).length >= 4);
   assert.match(app, /function bindProviderDialogEnhancements\(/);
   assert.match(app, /function validateProviderName\(/);
@@ -414,8 +426,9 @@ test("Claude Desktop dialog uses the requested API key and inline feedback layou
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
   assert.match(html, /id="claudeDesktopProfileOverlay"[\s\S]*provider-config-modal/);
-  assert.match(html, /id="claudeDesktopProfileApiKey"[\s\S]*data-api-key-action="toggle"[\s\S]*data-api-key-action="paste"/);
-  assert.match(html, /id="claudeDesktopProfileModelFetchBtn"[\s\S]*data-inline-status="claude-desktop"/);
+  // 按钮组改由 JS 生成，这里断言这个弹窗挂了两个占位符（target / 前缀都对）
+  assert.match(html, /data-api-key-actions="claudeDesktopProfileApiKey"/);
+  assert.match(html, /data-base-url-actions="claude-desktop" data-id-prefix="claudeDesktopProfile"/);
   assert.match(html, /id="claudeDesktopProfileNameError"/);
   assert.match(app, /claudeDesktopProfileModelFetchResults/);
   assert.match(app, /claude-desktop.*nameError/);
@@ -894,7 +907,9 @@ test("Claude Desktop has a first-class provider page and gateway form", () => {
 test("Claude Desktop gateway form exposes model discovery controls", () => {
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
-  assert.match(html, /id="claudeDesktopProfileModelFetchBtn"/);
+  // 「拉取模型」按钮由 renderBaseUrlActions 依据 data-id-prefix 生成 id
+  assert.match(html, /data-base-url-actions="claude-desktop" data-id-prefix="claudeDesktopProfile"/);
+  assert.match(app, /\$\{esc\(prefix\)\}ModelFetchBtn/);
   assert.match(html, /id="claudeDesktopProfileModelFetchResults"/);
   assert.match(html, /list="claudeDesktopModelOptions"/);
   assert.match(app, /function fetchClaudeDesktopModels/);

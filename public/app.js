@@ -1145,6 +1145,12 @@ const I18N = {
     universalNoAppSelected: "Enable at least one app",
     universalAutoV1Hint: "A /v1 suffix is appended automatically on save",
     showKey: "Show",
+    showApiKey: "Show API key",
+    fetchModels: "Fetch models",
+    testConnection: "Test connection",
+    hideApiKey: "Hide API key",
+    pasteApiKey: "Paste API key",
+    clipboardReadFailed: "Unable to read clipboard",
     universalTestConn: "Test connection",
     resetBtn: "Reset",
     universalSubmit: "Add and sync",
@@ -1885,6 +1891,12 @@ const I18N = {
     universalNoAppSelected: "请至少启用一个应用",
     universalAutoV1Hint: "保存时地址自动补全 /v1 后缀",
     showKey: "显示",
+    showApiKey: "显示 API Key",
+    fetchModels: "拉取模型",
+    testConnection: "测试连接",
+    hideApiKey: "隐藏 API Key",
+    pasteApiKey: "粘贴 API Key",
+    clipboardReadFailed: "无法读取剪贴板",
     universalTestConn: "验证连接",
     resetBtn: "重置",
     universalSubmit: "添加并同步",
@@ -3032,6 +3044,7 @@ function applyLanguage() {
   document.documentElement.lang = currentLang === "zh" ? "zh-CN" : "en";
   document.title = t("appTitle");
   applyStaticI18n();
+  try { renderBaseUrlActions(); renderApiKeyActions(); } catch (_) {}
 
   setText("appTitle", t("appTitle"));
   setText("appSubtitle", t("appSubtitle"));
@@ -3043,8 +3056,6 @@ function applyLanguage() {
   setText("profileNameLabel", t("nameLabel"));
   setText("profileApiKeyLabel", t("tokenLabel"));
   setText("profileBaseUrlLabel", t("urlLabel"));
-  setText("profileEndpointTestBtn", t("endpointTest"));
-  setText("profileModelFetchBtn", t("modelFetch"));
   setText("cancelBtn", t("cancel"));
   setText("submitBtn", t("save"));
   setText("switchPanelTitle", t("switchingTo"));
@@ -3080,7 +3091,6 @@ function applyLanguage() {
   setText("claudeDesktopProfileSonnetModelLabel", currentLang === "zh" ? "Sonnet 模型" : "Sonnet Model");
   setText("claudeDesktopProfileOpusModelLabel", currentLang === "zh" ? "Opus 模型" : "Opus Model");
   setText("claudeDesktopProfileHaikuModelLabel", currentLang === "zh" ? "Haiku 模型" : "Haiku Model");
-  setText("claudeDesktopProfileModelFetchBtn", t("claudeDesktopFetchModels"));
   setText("claudeDesktopProfileProxyFailoverText", currentLang === "zh" ? "加入 Desktop Gateway 故障转移池" : "Join Desktop Gateway failover pool");
   setText("claudeDesktopProfileCancel", t("cancel"));
   setText("claudeDesktopProfileSubmit", t("save"));
@@ -3164,8 +3174,6 @@ function applyLanguage() {
   setText("codexNameLabel", t("codexNameLabel"));
   setText("codexApiKeyLabel", t("codexApiKeyLabel"));
   setText("codexBaseUrlLabel", t("codexBaseUrlLabel"));
-  setText("codexEndpointTestBtn", t("endpointTest"));
-  setText("codexModelFetchBtn", t("modelFetch"));
   setText("codexModelLabel", t("codexModelLabel"));
   setText("codexProviderLabel", t("codexProviderLabel"));
   setText("codexImageSectionTitle", t("codexImageSectionTitle"));
@@ -3188,8 +3196,6 @@ function applyLanguage() {
   if ($("grokNameLabel")) setText("grokNameLabel", t("grokNameLabel"));
   if ($("grokApiKeyLabel")) setText("grokApiKeyLabel", t("grokApiKeyLabel"));
   if ($("grokBaseUrlLabel")) setText("grokBaseUrlLabel", t("grokBaseUrlLabel"));
-  if ($("grokEndpointTestBtn")) setText("grokEndpointTestBtn", t("endpointTest"));
-  if ($("grokModelFetchBtn")) setText("grokModelFetchBtn", t("modelFetch"));
   if ($("grokModelLabel")) setText("grokModelLabel", t("grokModelLabel"));
   if ($("grokModelHint")) setText("grokModelHint", t("grokModelHint"));
   if ($("grokApiBackendLabel")) setText("grokApiBackendLabel", t("grokApiBackendLabel"));
@@ -5527,7 +5533,61 @@ function highlightPresetOverwrite(fieldIds) {
   });
 }
 
+// 六个供应商弹窗的「显示 / 粘贴」按钮组结构完全相同，之前在 index.html 里各写一遍，
+// 两个内联 SVG 因此重复了 12 次（其中一份的粘贴图标路径还抄错了）。
+// 现在由 <span data-api-key-actions="目标输入框 id"> 占位，这里统一生成。
+const API_KEY_ICONS = {
+  toggle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.2-6 9.5-6 9.5 6 9.5 6-3.2 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>',
+  paste: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h6M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1ZM7 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2M16 9h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3M16 9v12"/></svg>',
+};
+
+// 「拉取模型 / 测试连接 + 内联状态」在六个弹窗里结构完全相同，只有 id 前缀和
+// data-inline-status 的取值不同，同样由占位符生成，顺带让按钮文案跟随语言。
+function renderBaseUrlActions() {
+  document.querySelectorAll("[data-base-url-actions]").forEach((host) => {
+    const status = host.getAttribute("data-base-url-actions");
+    const prefix = host.getAttribute("data-id-prefix");
+    if (!status || !prefix) return;
+    // 复用字典里已有的键，applyLanguage 不再逐个 setText 这两个按钮
+    const fetchLabel = t("modelFetch");
+    const testLabel = t("endpointTest");
+    if (host.childElementCount) {
+      setText(`${prefix}ModelFetchBtn`, fetchLabel);
+      setText(`${prefix}EndpointTestBtn`, testLabel);
+      return;
+    }
+    host.innerHTML =
+      `<button class="link-button" id="${esc(prefix)}ModelFetchBtn" type="button">${esc(fetchLabel)}</button>`
+      + `<button class="link-button primary-action" id="${esc(prefix)}EndpointTestBtn" type="button">${esc(testLabel)}</button>`
+      + `<span class="provider-inline-status" data-inline-status="${esc(status)}" role="status" aria-live="polite" hidden></span>`;
+  });
+}
+
+function renderApiKeyActions() {
+  document.querySelectorAll("[data-api-key-actions]").forEach((host) => {
+    const target = host.getAttribute("data-api-key-actions");
+    if (!target) return;
+    const labels = { toggle: t("showApiKey"), paste: t("pasteApiKey") };
+    // 已渲染过就只刷新文案，避免重复绑定
+    if (host.childElementCount) {
+      host.querySelectorAll("[data-api-key-action]").forEach((button) => {
+        const action = button.dataset.apiKeyAction;
+        const label = action === "toggle" && $(target)?.type === "text" ? t("hideApiKey") : labels[action];
+        button.setAttribute("aria-label", label);
+        button.title = label;
+      });
+      return;
+    }
+    host.innerHTML = ["toggle", "paste"]
+      .map((action) => `<button class="api-key-action" type="button" data-api-key-action="${action}"`
+        + ` data-api-key-target="${esc(target)}" aria-label="${esc(labels[action])}"`
+        + ` title="${esc(labels[action])}">${API_KEY_ICONS[action]}</button>`)
+      .join("");
+  });
+}
+
 function bindProviderApiKeyActions() {
+  renderApiKeyActions();
   document.querySelectorAll("[data-api-key-action]").forEach((button) => {
     if (button.dataset.apiKeyBound) return;
     button.dataset.apiKeyBound = "true";
@@ -5537,7 +5597,7 @@ function bindProviderApiKeyActions() {
       if (button.dataset.apiKeyAction === "toggle") {
         const showing = input.type === "password";
         input.type = showing ? "text" : "password";
-        const label = showing ? "隐藏 API Key" : "显示 API Key";
+        const label = showing ? t("hideApiKey") : t("showApiKey");
         button.setAttribute("aria-label", label);
         button.title = label;
         return;
@@ -5546,11 +5606,16 @@ function bindProviderApiKeyActions() {
         input.value = (await navigator.clipboard.readText() || "").trim();
         input.dispatchEvent(new Event("input", { bubbles: true }));
       } catch (_) {
-        showToast(currentLang === "zh" ? "无法读取剪贴板" : "Unable to read clipboard", "error");
+        showToast(t("clipboardReadFailed"), "error");
       }
     });
   });
 }
+
+// 两个按钮组必须在下面的顶层 addEventListener 之前存在，否则拿不到元素。
+// 这里的调用点先于所有 on(...) 绑定，也先于 init()。
+renderBaseUrlActions();
+renderApiKeyActions();
 
 function bindProviderDialogEnhancements() {
   bindProviderApiKeyActions();
