@@ -216,13 +216,18 @@ body {
   backdrop-filter: blur(10px);
 }
 
+/* 弹窗面板本身是不透明卡片，底下那层 blur 算了也看不见；
+   背景虚化由 .modal-overlay 遮罩负责，这里关掉省一层合成。 */
 .modal,
 .app-dialog,
 .mgmt-panel,
+.guide-modal,
 .modal.codex-wizard-modal {
   border-color: var(--console-line-strong);
   border-radius: 14px !important;
   box-shadow: 0 22px 64px rgba(0, 0, 0, 0.24);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .toast {
@@ -1140,6 +1145,28 @@ body::before {
     border-color 180ms var(--ease-spring), background 180ms var(--ease-spring);
 }
 
+/* 收紧配置卡的留白：一张卡只装 3-4 个字段，原来的间距让它占了近 290px，
+   一屏放不下几张。压到 220px 左右，切换配置时能一次看到更多候选。 */
+.console-page .profile-card {
+  padding: 16px 18px;
+}
+
+.console-page .profile-header {
+  margin-bottom: 12px;
+}
+
+.console-page .profile-body {
+  margin-bottom: 14px;
+}
+
+.console-page .profile-field {
+  margin-bottom: 6px;
+}
+
+.console-page .profile-actions {
+  padding-top: 12px;
+}
+
 .console-page .profile-card:hover {
   transform: translateY(-1.5px);
   box-shadow: var(--elev-raised), var(--inner-light);
@@ -1525,11 +1552,37 @@ body::before {
 }
 
 /* 状态区卡片:品牌色晕染的主卡 */
+/* 状态区扁平化：原本是「带内边距的卡片里再套一张状态卡」，
+   两层内边距叠加白占约 40px 高，而这一屏最该先看到的是下面的配置列表。
+   现在区块本身只作为容器，卡片样式交给内部的 .status-card。 */
 .console-page .status-section {
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.console-page .status-section > .section-header-row {
+  margin-bottom: 10px;
+}
+
+/* 品牌色晕染移到真正的卡片上 */
+.console-page .status-section .status-card {
   background:
     radial-gradient(130% 150% at 0% 0%, color-mix(in srgb, var(--console-blue) 6%, transparent) 0%, transparent 46%),
     radial-gradient(110% 130% at 100% 0%, color-mix(in srgb, #AF52DE 3.5%, transparent) 0%, transparent 44%),
     var(--console-card);
+}
+
+/* 卡内的产品名与区块标题重复（「Claude 状态」上面已经写了），
+   收起后每个状态区省下一整行。 */
+#statusGrid .status-card-title,
+#codexStatusGrid .status-card-title,
+#grokStatusGrid .status-card-title,
+#geminiStatusGrid .status-card-title,
+#opencodeStatusGrid .status-card-title,
+#claudeDesktopStatusGrid .status-card-title {
+  display: none;
 }
 
 .console-page .section-title {

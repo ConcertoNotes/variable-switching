@@ -684,6 +684,37 @@ test("compact navigation accounts for every primary destination", () => {
   );
 });
 
+test("glass effects stay on the two surfaces that need them", () => {
+  const css = readStylesheets();
+
+  // 打开配置弹窗时曾有 13 层 backdrop-filter 同时生效：顶栏、侧栏、遮罩、弹窗，
+  // 外加表单里每一个输入框。输入框和弹窗都是不透明的，那层模糊算了也看不见。
+  assert.doesNotMatch(
+    css,
+    /\.form-group input,\s*\n\.form-select\s*\{[^}]*backdrop-filter/s,
+    "输入框不应再做毛玻璃"
+  );
+  assert.match(
+    css,
+    /\.modal,[\s\S]{0,120}\.guide-modal,[\s\S]{0,80}\{[^}]*backdrop-filter:\s*none;/s,
+    "弹窗面板本身应关掉毛玻璃，背景虚化交给遮罩"
+  );
+});
+
+test("status sections stay flat so the config list reaches the first screen", () => {
+  const css = readStylesheets();
+
+  // 状态区曾是「带内边距的卡片里再套一张状态卡」，两层内边距加上一行重复的产品名，
+  // 把配置列表推到首屏之外。这里锁定扁平化后的结构。
+  assert.match(css, /\.console-page \.status-section\s*\{[^}]*padding:\s*0;[^}]*background:\s*none;/s);
+  assert.match(css, /\.console-page \.status-section \.status-card\s*\{[^}]*radial-gradient/s);
+
+  // 每个状态网格的卡内标题都要收起，包括 Claude Desktop 那个单独的网格。
+  // 代理健康与网关健康的卡片没有标题元素，不在此列。
+  const titled = SINGLE_COLUMN_GRID_IDS.filter((id) => !id.includes("Health"));
+  assertStatusGridsShareRule(css, " .status-card-title", "display:\\s*none;", { ids: titled });
+});
+
 test("sidebar collapses to icons on mid-width windows", () => {
   const css = readStylesheets();
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");

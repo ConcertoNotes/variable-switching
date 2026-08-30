@@ -1315,6 +1315,8 @@
   text-decoration: none;
 }
 
+/* 输入框不做毛玻璃：它们位于实色弹窗上，背后没有可透视的内容，
+   一个表单里十几个 blur 层只是白白增加合成开销。 */
 .form-group input,
 .form-select {
   width: 100%;
@@ -1325,8 +1327,6 @@
   font-family: inherit;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
   background: var(--surface-soft);
-  backdrop-filter: var(--glass-saturate) blur(10px);
-  -webkit-backdrop-filter: var(--glass-saturate) blur(10px);
   color: var(--text);
 }
 
