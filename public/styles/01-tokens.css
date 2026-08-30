@@ -63,6 +63,12 @@
   --console-red: #DC2626;
   --sidebar-width: 228px;
   --topbar-height: 56px;
+  /* 水平基线。侧栏是浮动卡片，栏内文字的位置由「卡片外边距 + 项内边距」决定，
+     这个位置无法再压缩，于是把它定为全局基线：顶栏 logo 与主内容区都对齐到 --gutter，
+     三者的文字落在同一条竖线上。改动其中任一段，另外两处会自动跟随。 */
+  --sidebar-inset: 14px;
+  --sidebar-item-inset: 11px;
+  --gutter: calc(var(--sidebar-inset) + var(--sidebar-item-inset));
   --console-line-strong: rgba(24, 24, 28, 0.13);
   --console-selection: rgba(0, 122, 255, 0.10);
   --console-elevation: 0 1px 2px rgba(15, 23, 42, 0.035);

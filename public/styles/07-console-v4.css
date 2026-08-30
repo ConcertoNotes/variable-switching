@@ -31,7 +31,7 @@ body {
 
 .toolbar-inner {
   gap: 24px;
-  padding: 0 20px;
+  padding: 0 var(--gutter);
 }
 
 .toolbar-left,
@@ -45,13 +45,13 @@ body {
 .workspace-shell { min-height: calc(100dvh - var(--topbar-height)); }
 
 .sidebar {
-  padding: 14px 10px 12px;
+  padding: 14px 0 12px;
   background: color-mix(in srgb, var(--console-card-muted) 92%, var(--console-bg));
   scrollbar-width: thin;
 }
 
 .sidebar-section-label {
-  padding: 5px 10px 7px;
+  padding: 5px var(--sidebar-item-inset) 7px;
   font-size: 10px;
   font-weight: 650;
   letter-spacing: 0;
@@ -237,8 +237,65 @@ body {
 
 * { scrollbar-color: color-mix(in srgb, var(--console-weak) 52%, transparent) transparent; }
 
+/* 中等宽度：侧栏收起文字只留图标。
+   228px 的侧栏在 1200px 以下会吃掉主内容区近四分之一的横向空间，
+   而这一档正是配置卡片从三列掉到两列的地方，正文更需要宽度。
+   悬停时用 title 属性提示名称（HTML 里各项已带 title）。 */
+@media (max-width: 1200px) and (min-width: 761px) {
+  :root { --sidebar-width: 62px; }
+
+  .sidebar-item {
+    grid-template-columns: 20px;
+    justify-content: center;
+    gap: 0;
+  }
+
+  /* 文字与计数徽标收起，状态点改为贴在图标右上角 */
+  .sidebar-item > span:not(.nav-state-dot):not(.nav-count),
+  .sidebar-item > .nav-count {
+    display: none;
+  }
+
+  .sidebar-item {
+    position: relative;
+  }
+
+  .sidebar-item > .nav-state-dot {
+    position: absolute;
+    top: 5px;
+    right: 9px;
+  }
+
+  /* 分组标题文字收起：首个分组直接隐藏，
+     后续分组用一条细分隔线代替标题，保留分组感。
+     文字用 font-size:0 抹掉（元素本身要留着当分隔线）。 */
+  .sidebar-section-label {
+    display: none;
+  }
+
+  .sidebar-section-label-spaced {
+    display: block;
+    height: 0;
+    padding: 0;
+    margin: 9px 10px;
+    font-size: 0;
+    border-top: 0.5px solid var(--hairline);
+  }
+
+  /* 版本号只留数字，"VarSwitch" 是裸文本节点，用 font-size:0 抹掉后
+     再给 span 恢复字号 */
+  .sidebar-version {
+    padding-inline: 0;
+    text-align: center;
+    font-size: 0;
+  }
+
+  .sidebar-version span {
+    font-size: 9px;
+  }
+}
+
 @media (max-width: 960px) and (min-width: 761px) {
-  :root { --sidebar-width: 208px; }
   .workspace-main { padding: 24px 22px 40px; }
   .page-header { align-items: flex-start; }
   .page-header-actions { max-width: 52%; }
@@ -746,7 +803,7 @@ body::before {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
 }
 
-.toolbar-inner { padding: 0 20px; }
+.toolbar-inner { padding: 0 var(--gutter); }
 
 .toolbar-icon {
   width: 27px;
@@ -763,13 +820,17 @@ body::before {
 
 /* ---------- 4. 悬浮玻璃侧边栏(macOS 风格 inset sidebar) ---------- */
 
+/* 侧栏是一张浮动卡片。左右不再加内边距：栏内文字的位置
+   由卡片外边距 --sidebar-inset 与项自身的 --sidebar-item-inset 决定，
+   两者之和就是全局基线 --gutter。 */
 .sidebar {
   background: var(--material-sidebar);
   -webkit-backdrop-filter: var(--material-blur);
   backdrop-filter: var(--material-blur);
   border-right: 0.5px solid var(--hairline);
-  padding: 16px 11px 12px;
+  padding: 16px 0 12px;
 }
+
 
 @media (min-width: 761px) {
   .workspace-shell {
@@ -779,10 +840,10 @@ body::before {
   .sidebar {
     width: var(--sidebar-width);
     box-sizing: border-box;
-    margin: 14px 0 14px 14px;
-    top: calc(var(--topbar-height) + 14px);
-    height: calc(100vh - var(--topbar-height) - 28px);
-    height: calc(100dvh - var(--topbar-height) - 28px);
+    margin: var(--sidebar-inset) 0 var(--sidebar-inset) var(--sidebar-inset);
+    top: calc(var(--topbar-height) + var(--sidebar-inset));
+    height: calc(100vh - var(--topbar-height) - var(--sidebar-inset) * 2);
+    height: calc(100dvh - var(--topbar-height) - var(--sidebar-inset) * 2);
     border: 0.5px solid var(--hairline);
     border-radius: var(--r-card);
     box-shadow: var(--elev-card), var(--inner-light);
@@ -790,7 +851,7 @@ body::before {
 }
 
 .sidebar-section-label {
-  padding: 4px 11px 7px;
+  padding: 4px var(--sidebar-item-inset) 7px;
   font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.01em;
@@ -800,7 +861,7 @@ body::before {
 
 .sidebar-item {
   min-height: 37px;
-  padding: 7px 10px;
+  padding: 7px var(--sidebar-item-inset);
   border-radius: var(--r-control);
   font-size: 13px;
   font-weight: 500;
@@ -863,6 +924,8 @@ body::before {
 
 /* ---------- 5. 页面排版层级 ---------- */
 
+/* 主内容区与侧栏之间保留一段留白，两者是并列的视觉分区，不与侧栏文字共用基线；
+   顶栏与侧栏的对齐由 --gutter 负责（见 01-tokens.css）。 */
 .workspace-main {
   padding: 30px clamp(24px, 3.4vw, 44px) 56px;
 }
@@ -1447,7 +1510,7 @@ body::before {
 /* 侧边栏:更大的条目与品牌区 */
 .sidebar-item {
   min-height: 40px;
-  padding: 8px 11px;
+  padding: 8px var(--sidebar-item-inset);
   font-size: 13px;
   border-radius: 11px;
 }

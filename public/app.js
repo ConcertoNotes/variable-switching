@@ -3275,6 +3275,8 @@ function applyLanguage() {
   updateLangSegControl();
   updateThemeSegControl();
   renderUpdateButton();
+  // 侧栏 tooltip 的文案取自项内标签，换语言后要跟着更新
+  syncSidebarItemTitles();
 
   if ($("modalOverlay")?.classList.contains("open")) {
     setText("modalTitle", editingId ? t("editConfig") : t("addConfig"));
@@ -10261,16 +10263,28 @@ function duplicateConfiguration(type, id) {
   showToast(currentLang === "zh" ? "已创建配置副本，请确认后保存" : "Config duplicated. Review and save it.", "success");
 }
 
+// 窄窗口下侧边栏收起文字只留图标，靠原生 tooltip 说明每一项是什么。
+// title 从项内的文字标签取，切换语言后重新调用即可保持同步。
+function syncSidebarItemTitles() {
+  document.querySelectorAll(".sidebar-item").forEach((item) => {
+    const label = item.querySelector("span:not(.nav-state-dot):not(.nav-count)");
+    const text = label?.textContent.trim();
+    if (text) item.title = text;
+  });
+}
+
 function bindConsoleUiOnce() {
   if (window.__varswitchConsoleBound) return;
   window.__varswitchConsoleBound = true;
+
+  syncSidebarItemTitles();
 
   // 事件委托：侧边栏 / 指标卡 / 快捷入口一定可点
   document.addEventListener("click", (event) => {
     const nav = event.target.closest("[data-console-page]");
     if (!nav) return;
     // 忽略弹窗表单内的无关节点
-    if (nav.closest(".modal-overlay") || nav.closest(".mgmt-overlay")) return;
+    if (nav.closest(".modal-overlay")) return;
     const page = nav.getAttribute("data-console-page");
     if (!page) return;
     if (

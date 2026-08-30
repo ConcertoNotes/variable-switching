@@ -684,6 +684,29 @@ test("compact navigation accounts for every primary destination", () => {
   );
 });
 
+test("sidebar collapses to icons on mid-width windows", () => {
+  const css = readStylesheets();
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+
+  // 1200px 以下侧栏只留图标，把横向空间让给正文；760px 以下另有底部导航栏接管。
+  const collapsed = css.match(/@media\s*\(max-width:\s*1200px\)\s*and\s*\(min-width:\s*761px\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(collapsed, "应存在中等宽度的侧栏折叠断点");
+  assert.match(collapsed[0], /--sidebar-width:\s*62px;/);
+  assert.match(collapsed[0], /\.sidebar-item\s*\{[^}]*grid-template-columns:\s*20px;/s);
+
+  // 文字收起后靠原生 tooltip 说明每一项，title 由 JS 从标签同步，切语言时要一起更新
+  assert.match(app, /function syncSidebarItemTitles\(\)/);
+  assert.match(app, /updateThemeSegControl\(\);[\s\S]{0,200}syncSidebarItemTitles\(\);/);
+});
+
+test("water-tight left alignment between toolbar and sidebar", () => {
+  const css = readStylesheets();
+  // 顶栏 logo 与侧栏项的左边距同源，避免两条基线各自漂移
+  assert.match(css, /--gutter:\s*calc\(var\(--sidebar-inset\)\s*\+\s*var\(--sidebar-item-inset\)\);/);
+  assert.match(css, /\.toolbar-inner\s*\{\s*padding:\s*0 var\(--gutter\);\s*\}/);
+  assert.match(css, /\.sidebar-item\s*\{[^}]*padding:\s*8px var\(--sidebar-item-inset\);/s);
+});
+
 test("console provides keyboard focus and reduced-motion affordances", () => {
   const css = readStylesheets();
   assert.match(css, /:where\([^)]*button[^)]*\):focus-visible\s*\{/s);
