@@ -79,7 +79,7 @@
 
     <div class="workspace-shell" id="workspaceShell">
       <aside class="sidebar" aria-label="主导航">
-        <div class="sidebar-section-label">工作台</div>
+        <div class="sidebar-section-label" data-i18n="navSectionWorkspace">工作台</div>
         <nav class="sidebar-nav" id="sidebarNav">
           <button class="sidebar-item" data-console-page="claude" data-provider-nav="claude" type="button" hidden>
             <img src="anthropic-color.svg" alt=""><span>Claude Code</span><span class="nav-state-dot" id="claudeNavState"></span>
@@ -100,9 +100,9 @@
             <img src="icon-opencode.svg" alt=""><span>OpenCode</span><span class="nav-state-dot" id="opencodeNavState"></span>
           </button>
           <button class="sidebar-item active" data-console-page="add-provider" type="button">
-            <img src="icon-toolbox.svg" alt=""><span>添加配置</span>
+            <img src="icon-toolbox.svg" alt=""><span data-i18n="navAddProvider">添加配置</span>
           </button>
-          <div class="sidebar-section-label sidebar-section-label-spaced" id="toolboxSectionLabel">工具箱</div>
+          <div class="sidebar-section-label sidebar-section-label-spaced" id="toolboxSectionLabel" data-i18n="navSectionToolbox">工具箱</div>
           <div class="sidebar-toolbox">
             <button class="sidebar-item sidebar-toolbox-entry" id="developerToolsNav" data-console-page="developer-tools" type="button">
               <img src="anthropic-color.svg" alt=""><span>Claude Toolbox</span>
@@ -116,7 +116,7 @@
           </div>
         </nav>
         <button class="sidebar-item sidebar-settings" data-console-page="settings" type="button">
-          <img src="icon-guide.svg" alt=""><span>设置</span>
+          <img src="icon-guide.svg" alt=""><span data-i18n="navSettings">设置</span>
         </button>
         <div class="sidebar-version">VarSwitch <span>v3.1.21</span></div>
       </aside>
@@ -124,7 +124,7 @@
       <main class="workspace-main" id="workspaceMain">
         <div class="page-content console-page" id="pageClaudeCode" data-console-page-panel="claude">
           <div class="app">
-            <header class="page-header"><div><h1>Claude Code</h1><p>管理系统环境变量与 Claude 设置同步状态。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="claudeSyncBtn" type="button">立即同步</button><button class="btn btn-secondary" id="claudePageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="claudePageAddBtn" type="button">添加 Claude 配置</button></div></header>
+            <header class="page-header"><div><h1>Claude Code</h1><p data-i18n="claudePageSubtitle">管理系统环境变量与 Claude 设置同步状态。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="claudeSyncBtn" type="button">立即同步</button><button class="btn btn-secondary" id="claudePageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="claudePageAddBtn" type="button" data-i18n="claudePageAddBtnText">添加 Claude 配置</button></div></header>
             <section class="support-section control-panel-section console-hint-section">
               <p class="support-hint" id="supportHint">Open the usage guide, check GitHub Releases for updates, or jump to the repository.</p>
             </section>
@@ -226,13 +226,13 @@
 
         <div class="page-content console-page" id="pageGemini" data-console-page-panel="gemini">
           <div class="app">
-            <header class="page-header"><div><h1>Gemini</h1><p>管理 Gemini CLI 的 API Key、自定义网关与默认模型。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="geminiRefreshBtn" type="button">立即同步</button><button class="btn btn-secondary" id="geminiPageImportBtn" type="button">导入当前配置</button><button class="btn btn-primary" id="geminiPageAddBtn" type="button">添加 Gemini 配置</button></div></header>
+            <header class="page-header"><div><h1>Gemini</h1><p data-i18n="geminiPageSubtitle">管理 Gemini CLI 的 API Key、自定义网关与默认模型。</p></div><div class="page-header-actions"><button class="btn btn-secondary" id="geminiRefreshBtn" type="button" data-i18n="syncNow">立即同步</button><button class="btn btn-secondary" id="geminiPageImportBtn" type="button" data-i18n="importBtn">导入当前配置</button><button class="btn btn-primary" id="geminiPageAddBtn" type="button" data-i18n="geminiPageAddBtnText">添加 Gemini 配置</button></div></header>
             <section class="status-section">
               <div class="section-header-row"><h2 class="section-title" id="geminiStatusSectionTitle">Gemini 状态</h2></div>
               <div class="status-grid" id="geminiStatusGrid"></div>
             </section>
             <section class="profiles-section">
-              <h2 class="section-title" id="geminiProfilesSectionTitle">Gemini 配置列表</h2>
+              <h2 class="section-title" id="geminiProfilesSectionTitle" data-i18n="geminiProfilesTitle">Gemini 配置列表</h2>
               <div class="profiles-grid" id="geminiProfilesGrid"></div>
             </section>
           </div>
@@ -255,36 +255,36 @@
         <section class="console-page active" id="pageAddProvider" data-console-page-panel="add-provider">
           <div class="provider-onboarding">
             <header class="page-header provider-onboarding-header">
-              <div><h1>添加统一供应商</h1><p>一次配置 API 网关，并同步到选中的应用。</p></div>
+              <div><h1 data-i18n="universalPageTitle">添加统一供应商</h1><p data-i18n="universalPageSubtitle">一次配置 API 网关，并同步到选中的应用。</p></div>
             </header>
             <form class="provider-builder" id="universalProviderForm">
               <div class="provider-builder-section">
                 <div class="provider-builder-heading">
-                  <div><h2>供应商预设</h2><p>与 cc-switch 一致，统一供应商从 NewAPI 或自定义网关开始。</p></div>
+                  <div><h2 data-i18n="universalPresetHeading">供应商预设</h2><p data-i18n="universalPresetDesc">与 cc-switch 一致，统一供应商从 NewAPI 或自定义网关开始。</p></div>
                 </div>
                 <div class="universal-provider-preset-grid" id="universalProviderPresetGrid" role="radiogroup" aria-label="供应商预设">
-                  <button class="universal-provider-preset active" data-universal-preset="newapi" type="button" role="radio" aria-checked="true"><strong>NewAPI</strong><small>多协议统一 API 网关</small></button>
-                  <button class="universal-provider-preset" data-universal-preset="custom_gateway" type="button" role="radio" aria-checked="false"><strong>自定义网关</strong><small>手动配置兼容服务</small></button>
+                  <button class="universal-provider-preset active" data-universal-preset="newapi" type="button" role="radio" aria-checked="true"><strong>NewAPI</strong><small data-i18n="universalPresetNewapiDesc">多协议统一 API 网关</small></button>
+                  <button class="universal-provider-preset" data-universal-preset="custom_gateway" type="button" role="radio" aria-checked="false"><strong data-i18n="universalPresetCustom">自定义网关</strong><small data-i18n="universalPresetCustomDesc">手动配置兼容服务</small></button>
                 </div>
                 <p class="provider-preset-hint" id="universalProviderPresetHint">支持 Anthropic、OpenAI 与多种兼容协议的统一 API 网关</p>
               </div>
               <div class="provider-builder-section">
                 <div class="provider-builder-heading">
-                  <div><h2>连接信息</h2><p>所有选中的应用共用这组地址和密钥。</p></div>
+                  <div><h2 data-i18n="universalConnHeading">连接信息</h2><p data-i18n="universalConnDesc">所有选中的应用共用这组地址和密钥。</p></div>
                 </div>
                 <div class="universal-provider-fields">
-                  <label class="form-group"><span>供应商名称</span><input id="universalProviderName" type="text" value="NewAPI" placeholder="例如：公司 NewAPI" required></label>
+                  <label class="form-group"><span data-i18n="universalProviderNameLabel">供应商名称</span><input id="universalProviderName" type="text" value="NewAPI" placeholder="例如：公司 NewAPI" required></label>
                   <div class="form-group">
-                    <div class="universal-label-row"><span>API 地址</span><button class="link-button" id="universalEndpointTestBtn" type="button">验证连接</button></div>
+                    <div class="universal-label-row"><span data-i18n="universalBaseUrlLabel">API 地址</span><button class="link-button" id="universalEndpointTestBtn" type="button" data-i18n="universalTestConn">验证连接</button></div>
                     <input id="universalProviderBaseUrl" type="url" placeholder="https://api.example.com" required>
                   </div>
-                  <label class="form-group universal-api-key-field"><span>API Key</span><span class="input-with-action"><input id="universalProviderApiKey" type="password" placeholder="sk-..." autocomplete="off" required><button class="link-button" id="universalProviderApiKeyToggle" type="button">显示</button></span></label>
+                  <label class="form-group universal-api-key-field"><span>API Key</span><span class="input-with-action"><input id="universalProviderApiKey" type="password" placeholder="sk-..." autocomplete="off" required><button class="link-button" id="universalProviderApiKeyToggle" type="button" data-i18n="showKey">显示</button></span></label>
                   <div class="endpoint-results universal-endpoint-results" id="universalEndpointResults"></div>
                 </div>
               </div>
               <div class="provider-builder-section">
                 <div class="provider-builder-heading">
-                  <div><h2>启用的应用</h2><p>保存后会生成对应配置，并在左侧显示栏目。</p></div>
+                  <div><h2 data-i18n="universalAppsHeading">启用的应用</h2><p data-i18n="universalAppsDesc">保存后会生成对应配置，并在左侧显示栏目。</p></div>
                 </div>
                 <div class="universal-provider-apps" id="universalProviderApps">
                   <label class="universal-app-option"><span><img src="anthropic-color.svg" alt=""><span><strong>Claude Code</strong><small>Anthropic Messages</small></span></span><input data-universal-app="claude" type="checkbox" checked><i aria-hidden="true"></i></label>
@@ -295,42 +295,42 @@
               </div>
               <div class="provider-builder-section">
                 <div class="provider-builder-heading">
-                  <div><h2>应用参数</h2><p>按应用设置协议与默认模型；验证连接后模型输入框支持自动补全，留空时由对应客户端决定。</p></div>
+                  <div><h2 data-i18n="universalParamsHeading">应用参数</h2><p data-i18n="universalParamsDesc">按应用设置协议与默认模型；验证连接后模型输入框支持自动补全，留空时由对应客户端决定。</p></div>
                 </div>
                 <datalist id="universalModelOptions"></datalist>
                 <div class="universal-provider-models">
                   <div class="universal-app-card" data-universal-app-card="claude">
                     <div class="universal-app-card-head">
                       <img src="anthropic-color.svg" alt="">
-                      <div><strong>Claude Code</strong><small>写入 ~/.claude/settings.json 与系统环境变量</small></div>
+                      <div><strong>Claude Code</strong><small data-i18n="universalClaudeTarget">写入 ~/.claude/settings.json 与系统环境变量</small></div>
                     </div>
-                    <label class="form-group"><span>API 格式</span>
+                    <label class="form-group"><span data-i18n="universalApiFormatLabel">API 格式</span>
                       <select class="form-select" id="universalClaudeApiFormat">
                         <option value="anthropic">Anthropic Messages（网关支持 Anthropic 协议）</option>
                         <option value="openai_chat">OpenAI Chat Completions（经本地代理转换）</option>
                       </select>
                     </label>
-                    <label class="form-group"><span>默认模型</span><input id="universalClaudeModel" type="text" value="claude-sonnet-5" placeholder="claude-sonnet-5" list="universalModelOptions"></label>
+                    <label class="form-group"><span data-i18n="universalDefaultModelLabel">默认模型</span><input id="universalClaudeModel" type="text" value="claude-sonnet-5" placeholder="claude-sonnet-5" list="universalModelOptions"></label>
                     <p class="universal-app-card-hint" data-universal-url-preview="claude"></p>
                   </div>
                   <div class="universal-app-card" data-universal-app-card="codex">
                     <div class="universal-app-card-head">
                       <img src="OpenAI-black-monoblossom.svg" alt="">
-                      <div><strong>Codex</strong><small>写入 ~/.codex/config.toml 的 wire_api 字段</small></div>
+                      <div><strong>Codex</strong><small data-i18n="universalCodexTarget">写入 ~/.codex/config.toml 的 wire_api 字段</small></div>
                     </div>
-                    <label class="form-group"><span>上游协议</span>
+                    <label class="form-group"><span data-i18n="universalWireApiLabel">上游协议</span>
                       <select class="form-select" id="universalCodexWireApi">
                         <option value="responses">OpenAI Responses（官方 / 兼容网关）</option>
                         <option value="chat">OpenAI Chat Completions（旧网关 / 本地转换）</option>
                       </select>
                     </label>
-                    <label class="form-group"><span>默认模型</span><input id="universalCodexModel" type="text" value="gpt-5.5" placeholder="gpt-5.5" list="universalModelOptions"></label>
+                    <label class="form-group"><span data-i18n="universalDefaultModelLabel">默认模型</span><input id="universalCodexModel" type="text" value="gpt-5.5" placeholder="gpt-5.5" list="universalModelOptions"></label>
                     <p class="universal-app-card-hint" data-universal-url-preview="codex"></p>
                   </div>
                   <div class="universal-app-card" data-universal-app-card="grok">
                     <div class="universal-app-card-head">
                       <img src="grok-color.svg" alt="">
-                      <div><strong>Grok / xAI</strong><small>写入 ~/.grok/config.toml 的 api_backend 字段</small></div>
+                      <div><strong>Grok / xAI</strong><small data-i18n="universalGrokTarget">写入 ~/.grok/config.toml 的 api_backend 字段</small></div>
                     </div>
                     <label class="form-group"><span>API Backend</span>
                       <select class="form-select" id="universalGrokApiBackend">
@@ -339,29 +339,29 @@
                         <option value="messages">messages（Anthropic）</option>
                       </select>
                     </label>
-                    <label class="form-group"><span>默认模型</span><input id="universalGrokModel" type="text" value="grok-4" placeholder="grok-4" list="universalModelOptions"></label>
+                    <label class="form-group"><span data-i18n="universalDefaultModelLabel">默认模型</span><input id="universalGrokModel" type="text" value="grok-4" placeholder="grok-4" list="universalModelOptions"></label>
                     <p class="universal-app-card-hint" data-universal-url-preview="grok"></p>
                   </div>
                   <div class="universal-app-card" data-universal-app-card="gemini">
                     <div class="universal-app-card-head">
                       <img src="gemini-color.svg" alt="">
-                      <div><strong>Gemini</strong><small>Generative Language · 写入 GOOGLE_GEMINI_BASE_URL</small></div>
+                      <div><strong>Gemini</strong><small data-i18n="universalGeminiTarget">Generative Language · 写入 GOOGLE_GEMINI_BASE_URL</small></div>
                     </div>
-                    <label class="form-group"><span>默认模型</span><input id="universalGeminiModel" type="text" value="gemini-2.5-pro" placeholder="gemini-2.5-pro" list="universalModelOptions"></label>
+                    <label class="form-group"><span data-i18n="universalDefaultModelLabel">默认模型</span><input id="universalGeminiModel" type="text" value="gemini-2.5-pro" placeholder="gemini-2.5-pro" list="universalModelOptions"></label>
                     <p class="universal-app-card-hint" data-universal-url-preview="gemini"></p>
                   </div>
                 </div>
               </div>
               <footer class="provider-builder-footer">
                 <p class="provider-footer-hint" id="universalProviderFooterHint">将同步到 Claude、Codex、Grok、Gemini</p>
-                <div class="provider-builder-actions"><button class="btn btn-secondary" id="universalProviderResetBtn" type="button">重置</button><button class="btn btn-primary" id="universalProviderSubmitBtn" type="submit">添加并同步</button></div>
+                <div class="provider-builder-actions"><button class="btn btn-secondary" id="universalProviderResetBtn" type="button" data-i18n="resetBtn">重置</button><button class="btn btn-primary" id="universalProviderSubmitBtn" type="submit" data-i18n="universalSubmit">添加并同步</button></div>
               </footer>
             </form>
           </div>
         </section>
 
         <section class="console-page" id="pageCodexToolbox" data-console-page-panel="toolbox">
-          <header class="page-header"><div><h1>Codex Toolbox</h1><p>同步 Codex 会话，并配置手机端远程控制。</p></div></header>
+          <header class="page-header"><div><h1>Codex Toolbox</h1><p data-i18n="toolboxPageSubtitle">同步 Codex 会话，并配置手机端远程控制。</p></div></header>
           <div class="tool-page-host toolbox-page-host" id="toolboxPageHost">
             <div class="skills-tabs" id="toolboxPageTabs" role="tablist" aria-label="Codex Toolbox">
               <button class="skills-tab active" id="toolboxTabSession" type="button" role="tab" aria-selected="true" aria-controls="toolboxSessionContent">Session Sync</button>
@@ -371,7 +371,7 @@
             <div class="skills-tab-content" id="toolboxSessionContent" role="tabpanel" aria-labelledby="toolboxTabSession">
               <div class="mgmt-hint" id="toolboxSessionHint">Sync local Codex history records into VarSwitch.</div>
               <section class="console-card" id="sessionStatusCard">
-                <div class="console-card-header"><div><h2>同步状态</h2><p id="sessionStatusSummary">尚未同步</p></div></div>
+                <div class="console-card-header"><div><h2 data-i18n="toolboxSyncStatusHeading">同步状态</h2><p id="sessionStatusSummary">尚未同步</p></div></div>
                 <div class="session-status-metrics" id="sessionStatusMetrics"></div>
               </section>
               <div class="toolbox-sync-bar">
@@ -454,7 +454,7 @@
         </section>
 
         <section class="console-page" id="pageDeveloperTools" data-console-page-panel="developer-tools">
-          <header class="page-header"><div><h1>Claude Toolbox</h1><p>管理 Claude Code 的 Skills、Prompts 与 MCP Servers。</p></div></header>
+          <header class="page-header"><div><h1>Claude Toolbox</h1><p data-i18n="developerToolsSubtitle">管理 Claude Code 的 Skills、Prompts 与 MCP Servers。</p></div></header>
           <div class="developer-tools-tabs" role="tablist" aria-label="Claude Toolbox">
             <button class="developer-tools-tab active" id="developerToolsSkillsTab" data-developer-tool="skills" type="button" role="tab" aria-selected="true" aria-controls="developerToolSkillsContent">Skills</button>
             <button class="developer-tools-tab" id="developerToolsPromptsTab" data-developer-tool="prompts" type="button" role="tab" aria-selected="false" aria-controls="developerToolPromptsContent">Prompts</button>
@@ -868,16 +868,16 @@
         </section>
 
         <section class="console-page" id="pageSettings" data-console-page-panel="settings">
-          <header class="page-header"><div><h1>设置</h1><p>管理应用偏好、路径、备份与帮助入口。</p></div></header>
+          <header class="page-header"><div><h1 data-i18n="navSettings">设置</h1><p data-i18n="settingsPageSubtitle">管理应用偏好、路径、备份与帮助入口。</p></div></header>
           <div class="settings-preferences console-card">
-            <div class="settings-inline-group"><div><strong>语言</strong><small>选择界面显示语言</small></div><div class="seg-control"><button id="settingsLangZh" type="button">中文</button><button id="settingsLangEn" type="button">English</button></div></div>
-            <div class="settings-inline-group"><div><strong>外观</strong><small>选择浅色或深色主题</small></div><div class="seg-control"><button id="settingsThemeLight" type="button">浅色</button><button id="settingsThemeDark" type="button">深色</button></div></div>
+            <div class="settings-inline-group"><div><strong data-i18n="settingsLangLabel">语言</strong><small data-i18n="settingsLangDesc">选择界面显示语言</small></div><div class="seg-control"><button id="settingsLangZh" type="button" data-i18n="settingsLangZhBtn">中文</button><button id="settingsLangEn" type="button" data-i18n="settingsLangEnBtn">English</button></div></div>
+            <div class="settings-inline-group"><div><strong data-i18n="settingsThemeLabel">外观</strong><small data-i18n="settingsThemeDesc">选择浅色或深色主题</small></div><div class="seg-control"><button id="settingsThemeLight" type="button" data-i18n="settingsThemeLightBtn">浅色</button><button id="settingsThemeDark" type="button" data-i18n="settingsThemeDarkBtn">深色</button></div></div>
           </div>
           <div class="settings-help-grid">
-            <button class="quick-action" id="settingsGuideBtn" type="button"><img src="icon-guide.svg" alt=""><span><strong>使用说明</strong><small>查看安全切换与配置指南</small></span></button>
-            <button class="quick-action" id="settingsUpdateBtn" type="button"><img src="icon-update.svg" alt=""><span><strong id="settingsUpdateBtnLabel">检查更新</strong><small id="settingsUpdateBtnDesc">检查 VarSwitch 最新版本</small></span></button>
-            <button class="quick-action" id="settingsDownloadBtn" type="button"><img src="icon-download.svg" alt=""><span><strong>下载网站</strong><small>打开版本下载页面</small></span></button>
-            <button class="quick-action" id="settingsGithubBtn" type="button"><img src="icon-github.svg" alt=""><span><strong>GitHub 仓库</strong><small>查看源码与问题反馈</small></span></button>
+            <button class="quick-action" id="settingsGuideBtn" type="button"><img src="icon-guide.svg" alt=""><span><strong data-i18n="settingsGuideTitle">使用说明</strong><small data-i18n="settingsGuideDesc">查看安全切换与配置指南</small></span></button>
+            <button class="quick-action" id="settingsUpdateBtn" type="button"><img src="icon-update.svg" alt=""><span><strong id="settingsUpdateBtnLabel" data-i18n="settingsUpdateTitle">检查更新</strong><small id="settingsUpdateBtnDesc">检查 VarSwitch 最新版本</small></span></button>
+            <button class="quick-action" id="settingsDownloadBtn" type="button"><img src="icon-download.svg" alt=""><span><strong data-i18n="settingsDownloadTitle">下载网站</strong><small data-i18n="settingsDownloadDesc">打开版本下载页面</small></span></button>
+            <button class="quick-action" id="settingsGithubBtn" type="button"><img src="icon-github.svg" alt=""><span><strong data-i18n="settingsGithubTitle">GitHub 仓库</strong><small data-i18n="settingsGithubDesc">查看源码与问题反馈</small></span></button>
           </div>
           <div class="tool-page-host settings-page-host" id="settingsPageHost">
             <div class="settings-body">

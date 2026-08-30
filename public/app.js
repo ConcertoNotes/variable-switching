@@ -392,18 +392,19 @@ const OPENCODE_PRESETS = [
   },
 ];
 
+// 名称与描述存 i18n key，取值时用 t() 解析，避免把中文写死在表里。
 const UNIVERSAL_PROVIDER_PRESETS = [
   {
     id: "newapi",
-    name: "NewAPI",
-    description: "支持 Anthropic、OpenAI 与多种兼容协议的统一 API 网关",
+    nameKey: "universalPresetNewapiName",
+    descriptionKey: "universalPresetNewapiDesc",
     models: { claude: "claude-sonnet-5", codex: "gpt-5.5", grok: "grok-4", gemini: "gemini-2.5-pro" },
     providerName: "custom",
   },
   {
     id: "custom_gateway",
-    name: "自定义网关",
-    description: "使用同一组 API 地址和密钥同步到多个应用",
+    nameKey: "universalPresetCustom",
+    descriptionKey: "universalPresetCustomHint",
     models: { claude: "", codex: "", grok: "", gemini: "" },
     providerName: "custom",
   },
@@ -1091,6 +1092,66 @@ const I18N = {
     claudeDesktopFetchingModels: "Fetching models...",
     claudeDesktopModelsFetched: "Fetched {count} model(s)",
     claudeDesktopModelsFetchFailed: "Failed to fetch models: {error}",
+    navSectionWorkspace: "Workspace",
+    navSectionToolbox: "Toolbox",
+    navAddProvider: "Add Config",
+    navSettings: "Settings",
+    claudePageSubtitle: "Manage system environment variables and Claude settings sync.",
+    claudePageAddBtnText: "Add Claude Config",
+    geminiPageSubtitle: "Manage the Gemini CLI API key, custom gateway, and default model.",
+    geminiPageAddBtnText: "Add Gemini Config",
+    universalPageTitle: "Add Unified Provider",
+    universalPageSubtitle: "Configure the API gateway once and sync it to the selected apps.",
+    universalPresetHeading: "Provider Presets",
+    universalPresetDesc: "As in cc-switch, a unified provider starts from NewAPI or a custom gateway.",
+    universalPresetNewapiDesc: "Multi-protocol unified API gateway",
+    universalPresetCustom: "Custom Gateway",
+    universalPresetCustomDesc: "Configure a compatible service manually",
+    universalConnHeading: "Connection",
+    universalConnDesc: "Every selected app shares this endpoint and key.",
+    universalProviderNameLabel: "Provider name",
+    universalBaseUrlLabel: "API endpoint",
+    universalAppsHeading: "Enabled apps",
+    universalAppsDesc: "Saving creates a profile for each app and adds it to the sidebar.",
+    universalParamsHeading: "Per-app settings",
+    universalParamsDesc: "Set the protocol and default model per app. After a successful connection test the model field autocompletes; leave it empty to let each client decide.",
+    universalClaudeTarget: "Writes ~/.claude/settings.json and system environment variables",
+    universalCodexTarget: "Writes the wire_api field in ~/.codex/config.toml",
+    universalGrokTarget: "Writes the api_backend field in ~/.grok/config.toml",
+    universalGeminiTarget: "Generative Language · writes GOOGLE_GEMINI_BASE_URL",
+    universalApiFormatLabel: "API format",
+    universalDefaultModelLabel: "Default model",
+    universalWireApiLabel: "Upstream protocol",
+    toolboxPageSubtitle: "Sync Codex sessions and set up mobile remote control.",
+    toolboxSyncStatusHeading: "Sync status",
+    developerToolsSubtitle: "Manage Claude Code skills, prompts, and MCP servers.",
+    settingsPageSubtitle: "Manage preferences, paths, backups, and help links.",
+    settingsLangLabel: "Language",
+    settingsLangDesc: "Choose the interface language",
+    settingsThemeLabel: "Appearance",
+    settingsThemeDesc: "Choose a light or dark theme",
+    settingsThemeLightBtn: "Light",
+    settingsThemeDarkBtn: "Dark",
+    settingsGuideTitle: "Usage guide",
+    settingsGuideDesc: "Read the switching and configuration guide",
+    settingsUpdateTitle: "Check for updates",
+    settingsDownloadTitle: "Download site",
+    settingsDownloadDesc: "Open the release download page",
+    settingsGithubTitle: "GitHub repository",
+    settingsGithubDesc: "Browse the source and report issues",
+    universalPresetNewapiName: "NewAPI",
+    universalPresetCustomHint: "Sync one endpoint and key to multiple apps",
+    universalSyncTargets: "Will sync to {apps}",
+    universalNoAppSelected: "Enable at least one app",
+    universalAutoV1Hint: "A /v1 suffix is appended automatically on save",
+    showKey: "Show",
+    universalTestConn: "Test connection",
+    resetBtn: "Reset",
+    universalSubmit: "Add and sync",
+    geminiProfilesTitle: "Gemini Config List",
+    settingsLangZhBtn: "中文",
+    settingsLangEnBtn: "English",
+    hideKey: "Hide",
   },
   zh: {
     appTitle: "VarSwitch",
@@ -1771,6 +1832,66 @@ const I18N = {
     claudeDesktopFetchingModels: "正在获取模型...",
     claudeDesktopModelsFetched: "已获取 {count} 个模型",
     claudeDesktopModelsFetchFailed: "获取模型失败：{error}",
+    navSectionWorkspace: "工作台",
+    navSectionToolbox: "工具箱",
+    navAddProvider: "添加配置",
+    navSettings: "设置",
+    claudePageSubtitle: "管理系统环境变量与 Claude 设置同步状态。",
+    claudePageAddBtnText: "添加 Claude 配置",
+    geminiPageSubtitle: "管理 Gemini CLI 的 API Key、自定义网关与默认模型。",
+    geminiPageAddBtnText: "添加 Gemini 配置",
+    universalPageTitle: "添加统一供应商",
+    universalPageSubtitle: "一次配置 API 网关，并同步到选中的应用。",
+    universalPresetHeading: "供应商预设",
+    universalPresetDesc: "与 cc-switch 一致，统一供应商从 NewAPI 或自定义网关开始。",
+    universalPresetNewapiDesc: "多协议统一 API 网关",
+    universalPresetCustom: "自定义网关",
+    universalPresetCustomDesc: "手动配置兼容服务",
+    universalConnHeading: "连接信息",
+    universalConnDesc: "所有选中的应用共用这组地址和密钥。",
+    universalProviderNameLabel: "供应商名称",
+    universalBaseUrlLabel: "API 地址",
+    universalAppsHeading: "启用的应用",
+    universalAppsDesc: "保存后会生成对应配置，并在左侧显示栏目。",
+    universalParamsHeading: "应用参数",
+    universalParamsDesc: "按应用设置协议与默认模型；验证连接后模型输入框支持自动补全，留空时由对应客户端决定。",
+    universalClaudeTarget: "写入 ~/.claude/settings.json 与系统环境变量",
+    universalCodexTarget: "写入 ~/.codex/config.toml 的 wire_api 字段",
+    universalGrokTarget: "写入 ~/.grok/config.toml 的 api_backend 字段",
+    universalGeminiTarget: "Generative Language · 写入 GOOGLE_GEMINI_BASE_URL",
+    universalApiFormatLabel: "API 格式",
+    universalDefaultModelLabel: "默认模型",
+    universalWireApiLabel: "上游协议",
+    toolboxPageSubtitle: "同步 Codex 会话，并配置手机端远程控制。",
+    toolboxSyncStatusHeading: "同步状态",
+    developerToolsSubtitle: "管理 Claude Code 的 Skills、Prompts 与 MCP Servers。",
+    settingsPageSubtitle: "管理应用偏好、路径、备份与帮助入口。",
+    settingsLangLabel: "语言",
+    settingsLangDesc: "选择界面显示语言",
+    settingsThemeLabel: "外观",
+    settingsThemeDesc: "选择浅色或深色主题",
+    settingsThemeLightBtn: "浅色",
+    settingsThemeDarkBtn: "深色",
+    settingsGuideTitle: "使用说明",
+    settingsGuideDesc: "查看安全切换与配置指南",
+    settingsUpdateTitle: "检查更新",
+    settingsDownloadTitle: "下载网站",
+    settingsDownloadDesc: "打开版本下载页面",
+    settingsGithubTitle: "GitHub 仓库",
+    settingsGithubDesc: "查看源码与问题反馈",
+    universalPresetNewapiName: "NewAPI",
+    universalPresetCustomHint: "使用同一组 API 地址和密钥同步到多个应用",
+    universalSyncTargets: "将同步到 {apps}",
+    universalNoAppSelected: "请至少启用一个应用",
+    universalAutoV1Hint: "保存时地址自动补全 /v1 后缀",
+    showKey: "显示",
+    universalTestConn: "验证连接",
+    resetBtn: "重置",
+    universalSubmit: "添加并同步",
+    geminiProfilesTitle: "Gemini 配置列表",
+    settingsLangZhBtn: "中文",
+    settingsLangEnBtn: "English",
+    hideKey: "隐藏",
   }
 };
 
@@ -2888,10 +3009,29 @@ function applyTheme() {
   updateThemeSegControl();
 }
 
+// 静态文案统一走 data-i18n：在 index.html 上标好 key，这里一次性刷新。
+// 逐个 setText(id, ...) 需要每处都有 id，漏掉一处就会在另一种语言下留下未翻译的文字。
+function applyStaticI18n(root = document) {
+  root.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.getAttribute("data-i18n");
+    if (key) el.textContent = t(key);
+  });
+  // 占位符与 title 走各自的属性，避免覆盖元素内容
+  root.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-placeholder");
+    if (key) el.placeholder = t(key);
+  });
+  root.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-title");
+    if (key) el.title = t(key);
+  });
+}
+
 function applyLanguage() {
   try {
   document.documentElement.lang = currentLang === "zh" ? "zh-CN" : "en";
   document.title = t("appTitle");
+  applyStaticI18n();
 
   setText("appTitle", t("appTitle"));
   setText("appSubtitle", t("appSubtitle"));
@@ -3295,26 +3435,35 @@ function setLanguage(lang) {
   localStorage.setItem(LANG_USER_SET_KEY, "1");
   syncAppSettingsAppearance();
   applyLanguage();
-  renderProfiles();
-  loadStatus();
-  if (currentPage === "codex") {
-    renderCodexProfiles();
-    loadCodexStatus();
+
+  // 所有页面都常驻 DOM，只重渲染当前页会让其他页停留在旧语言，
+  // 切回去才发现没变。这里一律重渲染，失败一项不影响其余。
+  const renderers = [
+    renderProfiles, loadStatus,
+    renderCodexProfiles, loadCodexStatus,
+    renderGrokProfiles, loadGrokStatus,
+    renderGeminiProfiles, loadGeminiStatus,
+    renderOpenCodeProfiles, loadOpenCodeStatus,
+    renderClaudeDesktopProfiles,
+    renderUniversalProviderForm,
+    renderSessionStatusCard, renderMobileTimeline,
+  ];
+  for (const render of renderers) {
+    try {
+      if (typeof render === "function") render();
+    } catch (error) {
+      console.error("setLanguage re-render failed:", error);
+    }
   }
-  if (currentPage === "grok") {
-    renderGrokProfiles();
-    loadGrokStatus();
-    loadGrokDiagnostics();
-  }
-  if (currentPage === "gemini") {
-    renderGeminiProfiles();
-    loadGeminiStatus();
-  }
+
   if (codexToolbox) {
-    renderCodexToolbox();
+    try { renderCodexToolbox(); } catch (error) { console.error(error); }
   }
   if (activeConsolePage === "usage") {
     loadUsageDashboard();
+  }
+  if (activeConsolePage === "cli-sessions") {
+    try { renderCliSessions(); } catch (error) { console.error(error); }
   }
 }
 
@@ -8562,7 +8711,7 @@ function renderUniversalProviderForm() {
     button.classList.toggle("active", active);
     button.setAttribute("aria-checked", String(active));
   });
-  setText("universalProviderPresetHint", preset.description);
+  setText("universalProviderPresetHint", t(preset.descriptionKey));
 
   const apps = getUniversalProviderApps();
   document.querySelectorAll("[data-universal-app-card]").forEach((card) => {
@@ -8571,8 +8720,8 @@ function renderUniversalProviderForm() {
   updateUniversalUrlPreviews();
   const labels = [apps.claude && "Claude", apps.codex && "Codex", apps.grok && "Grok", apps.gemini && "Gemini"].filter(Boolean);
   setText("universalProviderFooterHint", labels.length
-    ? `将同步到 ${labels.join("、")}`
-    : "请至少启用一个应用");
+    ? t("universalSyncTargets", { apps: labels.join(currentLang === "zh" ? "、" : ", ") })
+    : t("universalNoAppSelected"));
 }
 
 // 同一个网关地址在各应用的实际写入形式不同（OpenAI 兼容协议自动补 /v1），实时展示避免歧义
@@ -8584,7 +8733,7 @@ function updateUniversalUrlPreviews() {
     // Claude 选 OpenAI 格式时按 OpenAI 惯例处理地址（补 /v1），并提示走本地代理
     const usesOpenAiRules = app === "codex" || app === "grok" || (app === "claude" && claudeOpenAi);
     if (!raw) {
-      hint.textContent = usesOpenAiRules ? "保存时地址自动补全 /v1 后缀" : "";
+      hint.textContent = usesOpenAiRules ? t("universalAutoV1Hint") : "";
       hint.hidden = !hint.textContent;
       return;
     }
@@ -8668,7 +8817,7 @@ function resetUniversalProviderForm(protocol = null) {
   $("universalProviderBaseUrl").value = "";
   $("universalProviderApiKey").value = "";
   $("universalProviderApiKey").type = "password";
-  setText("universalProviderApiKeyToggle", "显示");
+  setText("universalProviderApiKeyToggle", t("showKey"));
   const claudeApiFormat = $("universalClaudeApiFormat");
   if (claudeApiFormat) claudeApiFormat.value = "anthropic";
   const codexWireApi = $("universalCodexWireApi");
@@ -10314,7 +10463,7 @@ function bindConsoleUiOnce() {
     const input = $("universalProviderApiKey");
     const showing = input.type === "password";
     input.type = showing ? "text" : "password";
-    setText("universalProviderApiKeyToggle", showing ? "隐藏" : "显示");
+    setText("universalProviderApiKeyToggle", showing ? t("hideKey") : t("showKey"));
   });
   $("claudePageAddBtn")?.addEventListener("click", () => openModal(null));
   $("claudePageImportBtn")?.addEventListener("click", handleImport);

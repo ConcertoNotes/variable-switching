@@ -684,6 +684,56 @@ test("compact navigation accounts for every primary destination", () => {
   );
 });
 
+test("static copy is translated through data-i18n, not hardcoded", () => {
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+
+  // 属性驱动的翻译入口
+  assert.match(app, /function applyStaticI18n\(/);
+  assert.match(app, /root\.querySelectorAll\("\[data-i18n\]"\)/);
+  assert.match(app, /document\.title = t\("appTitle"\);\s*\n\s*applyStaticI18n\(\);/);
+
+  // 每个 data-i18n 的 key 都必须在中英两套字典里存在，否则 t() 会退化成回显 key
+  const keys = [...html.matchAll(/data-i18n(?:-placeholder|-title)?="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(keys.length > 40, `data-i18n 标记过少（${keys.length}），静态文案可能又被写死了`);
+
+  const enBlock = app.slice(app.indexOf("  en: {"), app.indexOf("  zh: {"));
+  const zhBlock = app.slice(app.indexOf("  zh: {"));
+  for (const key of new Set(keys)) {
+    assert.ok(new RegExp(`^\\s+${key}:`, "m").test(enBlock), `英文字典缺少 ${key}`);
+    assert.ok(new RegExp(`^\\s+${key}:`, "m").test(zhBlock), `中文字典缺少 ${key}`);
+  }
+
+  // 供应商预设的名称/描述存 key，不再把中文写死在表里
+  assert.match(app, /nameKey:\s*"universalPreset/);
+  assert.match(app, /descriptionKey:\s*"universalPreset/);
+  assert.doesNotMatch(
+    app.slice(app.indexOf("UNIVERSAL_PROVIDER_PRESETS"), app.indexOf("const I18N")),
+    /[一-龥]/,
+    "预设表里不应再有中文字面量"
+  );
+});
+
+test("switching language re-renders every page, not just the active one", () => {
+  const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  const fn = app.slice(app.indexOf("function setLanguage(lang)"), app.indexOf("function setTheme("));
+
+  // 所有页面常驻 DOM：只重渲染当前页会让其他页停在旧语言，切回去才发现没变。
+  for (const renderer of [
+    "renderProfiles", "loadStatus",
+    "renderCodexProfiles", "loadCodexStatus",
+    "renderGrokProfiles", "loadGrokStatus",
+    "renderGeminiProfiles", "loadGeminiStatus",
+    "renderOpenCodeProfiles", "loadOpenCodeStatus",
+    "renderClaudeDesktopProfiles", "renderUniversalProviderForm",
+    "renderSessionStatusCard",
+  ]) {
+    assert.ok(fn.includes(renderer), `setLanguage 漏了 ${renderer}`);
+  }
+  // 旧写法按 currentPage 分支，只有停留在该页时才重渲染
+  assert.doesNotMatch(fn, /if \(currentPage === "(codex|grok|gemini)"\)/);
+});
+
 test("glass effects stay on the two surfaces that need them", () => {
   const css = readStylesheets();
 
