@@ -1,0 +1,104 @@
+/* ==========================================================================
+   控制台重构 第 3 代：CONSOLE REDESIGN ADDONS
+   补丁层，主要修圆角与边框。
+
+   注意：本目录下的文件按 index.html 里的 <link> 顺序层叠，顺序即优先级。
+   不要重排文件顺序，也不要把规则在文件之间随意搬动。
+   ========================================================================== */
+
+/* ======================== CONSOLE REDESIGN ADDONS ======================== */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--console-muted);
+}
+.btn-ghost:hover {
+  background: var(--console-card-muted);
+  color: var(--console-text);
+  border-color: var(--console-line);
+}
+
+.console-page .status-card.error-card {
+  background: var(--console-card-muted) !important;
+  border-color: color-mix(in srgb, var(--console-red) 35%, var(--console-line)) !important;
+}
+.console-page .status-card.error-card .status-card-title,
+.console-page .status-card.error-card div {
+  color: var(--console-text) !important;
+}
+
+
+
+
+
+
+
+.wizard-review { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+
+.mobile-flow-card { margin-bottom: 16px; }
+.mobile-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.mobile-timeline li {
+  position: relative;
+  padding: 14px;
+  border: 1px solid var(--console-line);
+  border-radius: 12px;
+  background: var(--console-card-muted);
+}
+.mobile-timeline li strong,
+.mobile-timeline li small { display: block; }
+.mobile-timeline li strong { font-size: 13px; margin-bottom: 4px; }
+.mobile-timeline li small { color: var(--console-muted); font-size: 11px; }
+.mobile-timeline li.done {
+  border-color: color-mix(in srgb, var(--console-green) 45%, var(--console-line));
+  background: color-mix(in srgb, var(--console-green) 8%, var(--console-card));
+}
+.mobile-timeline li.active {
+  border-color: color-mix(in srgb, var(--console-blue) 45%, var(--console-line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--console-blue) 25%, transparent);
+}
+
+.empty-inline {
+  padding: 18px;
+  color: var(--console-muted);
+  font-size: 13px;
+  border: 1px dashed var(--console-line);
+  border-radius: 12px;
+  background: var(--console-card-muted);
+}
+
+.session-status-metrics { margin-top: 4px; }
+#sessionStatusCard { margin-bottom: 16px; }
+
+.console-card,
+.page-content .status-section,
+.page-content .profile-card,
+.page-content .active-config-bar {
+  border-radius: 14px !important;
+}
+
+.modal.codex-wizard-modal,
+.app-dialog {
+  border-radius: 18px !important;
+}
+
+.workspace-main { overflow: auto; min-height: calc(100vh - var(--topbar-height)); }
+#workspaceShell.app-hidden { opacity: 0; pointer-events: none; }
+#workspaceShell.app-reveal { opacity: 1 !important; pointer-events: auto !important; transition: opacity .28s ease; }
+.toolbar.app-hidden { pointer-events: none; }
+.toolbar.app-reveal { pointer-events: auto !important; opacity: 1 !important; }
+
+@media (max-width: 1080px) {
+  .wizard-review,
+.mobile-timeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .wizard-review,
+.mobile-timeline { grid-template-columns: 1fr; }
+}

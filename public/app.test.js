@@ -19,6 +19,18 @@ function commandRegistrationPattern(command) {
   return new RegExp(`\\n\\s*(?:\\w+::)?${command},`);
 }
 
+// 样式同样按层叠顺序拆成了 styles/*.css，断言「某条规则存在」时要看全部文件，
+// 否则规则在文件之间搬一次就会误报失败。拼接顺序与 index.html 的 link 顺序一致。
+function readStylesheets() {
+  const dir = path.join(__dirname, "styles");
+  return fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(".css"))
+    .sort()
+    .map((name) => fs.readFileSync(path.join(dir, name), "utf8"))
+    .join("\n");
+}
+
 // 各应用的运行时状态网格共用同一套横向布局规则。新增应用时只改这个数组，
 // 断言集中在 assertStatusGridsShareRule，不必逐个测试改选择器串。
 const STATUS_GRID_IDS = [
@@ -27,6 +39,16 @@ const STATUS_GRID_IDS = [
   "#grokStatusGrid",
   "#geminiStatusGrid",
   "#opencodeStatusGrid",
+];
+
+// 代理健康 / Desktop 状态与网关健康各自只渲染一张卡，也必须是单列，
+// 否则会继承 .status-grid 的 3 列、把唯一那张卡压到 1/3 宽、右边空掉 2/3。
+// 它们的卡内布局与上面几个不同，所以只共用「单列」这一条规则。
+const SINGLE_COLUMN_GRID_IDS = [
+  ...STATUS_GRID_IDS,
+  "#proxyHealthGrid",
+  "#claudeDesktopStatusGrid",
+  "#claudeDesktopGatewayHealthGrid",
 ];
 
 function assertStatusGridsShareRule(css, suffix, declaration, { ids = STATUS_GRID_IDS } = {}) {
@@ -128,23 +150,40 @@ test("document ids and local asset references stay valid", () => {
 });
 
 test("stylesheet braces stay balanced", () => {
-  const css = fs
-    .readFileSync(require.resolve("./style.css"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "");
-  let depth = 0;
-  let minimumDepth = 0;
-  for (const character of css) {
-    if (character === "{") depth += 1;
-    if (character === "}") depth -= 1;
-    minimumDepth = Math.min(minimumDepth, depth);
+  // 逐个文件校验：拆分后每个文件都必须自洽，一个文件缺 `}` 不能靠下一个文件补上，
+  // 否则规则会静默串到相邻文件里。
+  const dir = path.join(__dirname, "styles");
+  const names = fs.readdirSync(dir).filter((name) => name.endsWith(".css"));
+  assert.ok(names.length > 0, "styles/ 下应有拆分后的样式文件");
+
+  for (const name of names) {
+    const css = fs.readFileSync(path.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    let depth = 0;
+    let minimumDepth = 0;
+    for (const character of css) {
+      if (character === "{") depth += 1;
+      if (character === "}") depth -= 1;
+      minimumDepth = Math.min(minimumDepth, depth);
+    }
+    assert.equal(minimumDepth, 0, `${name} 出现了多余的 }`);
+    assert.equal(depth, 0, `${name} 有未闭合的 {`);
   }
-  assert.equal(minimumDepth, 0);
-  assert.equal(depth, 0);
+});
+
+test("index.html loads every stylesheet in cascade order", () => {
+  // 层叠顺序即优先级：link 的顺序必须与 styles/ 下的文件名排序一致，
+  // 漏掉一个文件或调换顺序都会让后面几代重构层失效。
+  const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+  const linked = [...html.matchAll(/<link rel="stylesheet" href="styles\/([^"]+)"/g)].map((m) => m[1]);
+  const onDisk = fs.readdirSync(path.join(__dirname, "styles")).filter((n) => n.endsWith(".css")).sort();
+
+  assert.deepEqual(linked, onDisk);
+  assert.doesNotMatch(html, /href="style\.css"/, "旧的单文件 style.css 不应再被引用");
 });
 
 test("settings groups stay independent and keep path actions compact", () => {
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const css = readStylesheets();
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
 
   // 4 组：通用 / 目录 / 备份 / 数据目录（多设备同步）
@@ -191,7 +230,7 @@ test("console navigation exposes the active page to assistive technology", () =>
 });
 
 test("Codex wizard keeps long forms scrollable inside the viewport", () => {
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const css = readStylesheets();
   assert.match(
     css,
     /\.codex-wizard-modal\s+#codexProfileForm\s*\{[^}]*overflow-y:\s*auto;/s
@@ -236,16 +275,19 @@ test("DeepSeek preset locks Responses and exposes its built-in model choices", (
 });
 
 test("Codex runtime status uses a full-width horizontal layout", () => {
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
-  assertStatusGridsShareRule(css, "", "grid-template-columns:\\s*1fr;");
-  assertStatusGridsShareRule(css, " .status-card", "repeat\\(auto-fit,\\s*minmax\\(");
+  const css = readStylesheets();
+  assertStatusGridsShareRule(css, "", "grid-template-columns:\\s*1fr;", { ids: SINGLE_COLUMN_GRID_IDS });
+  // 卡内字段用 flex 换行 + grow：字段数固定而 auto-fit 列数会变，
+  // 用 grid 时末行会留空格子，所以这里锁定 flex 方案。
+  assertStatusGridsShareRule(css, " .status-card", "flex-wrap:\\s*wrap;");
+  assertStatusGridsShareRule(css, " .status-item", "flex:\\s*1 1 200px;");
   assertStatusGridsShareRule(css, " .status-value", "text-overflow:\\s*ellipsis;");
 });
 
 test("Grok and Codex runtime status share the same responsive layout", () => {
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
-  assertStatusGridsShareRule(css, "", "grid-template-columns:\\s*1fr;");
-  assertStatusGridsShareRule(css, " .status-card", "repeat\\(auto-fit,\\s*minmax\\(");
+  const css = readStylesheets();
+  assertStatusGridsShareRule(css, "", "grid-template-columns:\\s*1fr;", { ids: SINGLE_COLUMN_GRID_IDS });
+  assertStatusGridsShareRule(css, " .status-card", "flex-wrap:\\s*wrap;");
 });
 
 test("Codex image generation is presented as a Skill instead of an unknown config table", () => {
@@ -364,7 +406,7 @@ test("provider name validation rejects blanks and duplicates while allowing the 
   assert.match(app, /String\(profile\?\.id\) !== String\(currentId/);
   assert.match(app, /配置名称已存在|Config name already exists/);
   assert.match(app, /codexSaveEnableBtn/);
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const css = readStylesheets();
   assert.match(css, /\.field-error[^}]*color:\s*#f43f5e/);
 });
 
@@ -398,7 +440,7 @@ test("provider dialogs follow the two-column modal form layout", () => {
 
 test("provider modal controls keep inline alignment and stable action columns", () => {
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const css = readStylesheets();
 
   assert.match(css, /\.provider-config-modal \.proxy-failover-checkbox\s*\{[^}]*display:\s*inline-flex[^}]*align-items:\s*center/s);
   assert.match(css, /\.provider-config-modal \.base-url-actions \.link-button\s*\{[^}]*display:\s*inline-flex[^}]*justify-content:\s*center[^}]*gap:\s*5px/s);
@@ -516,7 +558,7 @@ test("resolveUniversalAppBaseUrl adapts one gateway URL per app", () => {
 test("provider navigation follows saved configuration availability", () => {
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const css = readStylesheets();
   assert.equal((html.match(/data-provider-nav=/g) || []).length, 4);
   assert.match(app, /function renderProviderNavigation\(\)/);
   assert.match(app, /claude:\s*profiles\.length\s*>\s*0/);
@@ -572,7 +614,7 @@ test("plugin marketplace page and toolbox controls stay removed", () => {
 test("Codex Toolbox switches session sync and mobile control inside one page", () => {
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const css = readStylesheets();
   const openToolboxStart = app.indexOf("function openCodexToolbox()");
   const openToolboxEnd = app.indexOf("function closeCodexToolbox()", openToolboxStart);
   const openToolbox = app.slice(openToolboxStart, openToolboxEnd);
@@ -619,12 +661,23 @@ test("Claude Toolbox appears above Codex Toolbox and defaults to Skills", () => 
   assert.doesNotMatch(settingsPage, /settingsSkillsBtn|settingsPromptsBtn|settingsMcpBtn|settings-tools-card/);
   assert.match(app, /let activeDeveloperTool = "skills"/);
   assert.match(app, /function switchDeveloperTool\(tool\)/);
-  assert.match(app, /function mountDeveloperToolsPage\(\)/);
   assert.match(app, /openDeveloperTools\("skills"\)/);
+
+  // 三个工具面板静态内联在页面里，不再由 JS 从隐藏 overlay 搬运过来。
+  // 断言渲染结果而不是搬运函数，避免面板挂在 DOM 之外还能「通过」。
+  assert.doesNotMatch(app, /mountDeveloperToolsPage/);
+  assert.doesNotMatch(html, /id="skillsOverlay"|id="promptsOverlay"|id="mcpOverlay"/);
+  for (const hostId of ["developerToolSkillsContent", "developerToolPromptsContent", "developerToolMcpContent"]) {
+    assert.match(
+      html,
+      new RegExp(`id="${hostId}"[^>]*>\\s*<div class="mgmt-panel[^"]*developer-tool-panel"`),
+      `${hostId} 应直接内联 mgmt-panel`
+    );
+  }
 });
 
 test("compact navigation accounts for every primary destination", () => {
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const css = readStylesheets();
   assert.match(
     css,
     /@media\s*\(max-width:\s*760px\)[\s\S]*?\.sidebar-nav\s*\{[^}]*grid-auto-columns:\s*minmax\(76px,\s*1fr\);/s
@@ -632,7 +685,7 @@ test("compact navigation accounts for every primary destination", () => {
 });
 
 test("console provides keyboard focus and reduced-motion affordances", () => {
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const css = readStylesheets();
   assert.match(css, /:where\([^)]*button[^)]*\):focus-visible\s*\{/s);
   assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/s);
 });
@@ -674,8 +727,8 @@ test("Claude status and profiles reuse the Codex page structure", () => {
   assert.doesNotMatch(loadStatus, /statusSystemEnv|claude-runtime-group|status-badge/);
   assert.doesNotMatch(loadStatus, /editor-carousel|editorLocations|status\.editors/);
 
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
-  assertStatusGridsShareRule(css, "", "grid-template-columns:\\s*1fr;");
+  const css = readStylesheets();
+  assertStatusGridsShareRule(css, "", "grid-template-columns:\\s*1fr;", { ids: SINGLE_COLUMN_GRID_IDS });
   assert.match(css, /\.product-icon svg,\s*\.product-icon img\s*\{[^}]*width:\s*16px;[^}]*height:\s*16px;/s);
 });
 
@@ -705,7 +758,7 @@ test("Codex page mirrors the compact Claude action and status layout", () => {
 });
 
 test("Claude profile actions use the same equal-width buttons as Codex", () => {
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const css = readStylesheets();
   const app = fs.readFileSync(require.resolve("./app.js"), "utf8");
   const renderStart = app.indexOf("function renderProfiles()");
   const renderEnd = app.indexOf("function updateActiveConfigBar()", renderStart);
@@ -1081,7 +1134,7 @@ test("deep link confirmation dialog exposes v1 fields and an explicit conflict c
 
 test("initially hidden deep link conflict fieldset is not rendered by project CSS", () => {
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
-  const css = fs.readFileSync(require.resolve("./style.css"), "utf8");
+  const css = readStylesheets();
   const fieldset = html.match(/<fieldset\b[^>]*id="deeplinkConflictGroup"[^>]*>/)?.[0] || "";
   assert.match(fieldset, /\bhidden\b/);
 

@@ -2591,31 +2591,32 @@ function currentSupportHint() {
   return t("supportHintDefault");
 }
 
+// 更新状态统一渲染到设置页的「检查更新」条目上：旧的 hero 命令区已移除，
+// 这里是用户能看到检查/下载/安装进度的唯一常驻入口。
 function renderUpdateButton() {
-  const btn = $("updateBtn");
-  const textEl = $("updateBtnText");
-  const hintEl = $("supportHint");
-  if (!btn || !textEl || !hintEl) return;
-
+  const btn = $("settingsUpdateBtn");
+  const descEl = $("settingsUpdateBtnDesc");
   const mode = getUpdateActionMode();
-  if (mode === "busy") {
-    btn.disabled = true;
-    if (updateBusyAction === "download") {
-      textEl.textContent = t("downloadingUpdate", { percent: updateDownloadPercent });
-    } else if (updateBusyAction === "install") {
-      textEl.textContent = t("installingUpdate");
-    } else {
-      textEl.textContent = t("checkingUpdates");
-    }
-  } else if (mode === "release" && updateInfo?.latestVersion) {
-    btn.disabled = false;
-    textEl.textContent = t("updateReleaseBtn", updateVersionParams());
-  } else {
-    btn.disabled = false;
-    textEl.textContent = t("updateCheckBtn");
-  }
 
-  hintEl.textContent = currentSupportHint();
+  if (descEl) {
+    if (mode === "busy") {
+      if (updateBusyAction === "download") {
+        descEl.textContent = t("downloadingUpdate", { percent: updateDownloadPercent });
+      } else if (updateBusyAction === "install") {
+        descEl.textContent = t("installingUpdate");
+      } else {
+        descEl.textContent = t("checkingUpdates");
+      }
+    } else if (mode === "release" && updateInfo?.latestVersion) {
+      descEl.textContent = t("updateReleaseBtn", updateVersionParams());
+    } else {
+      descEl.textContent = t("updateCheckBtn");
+    }
+  }
+  if (btn) btn.disabled = mode === "busy";
+
+  const hintEl = $("supportHint");
+  if (hintEl) hintEl.textContent = currentSupportHint();
   renderUpdatePill();
   renderUpdateDownloadProgress();
 }
@@ -2896,10 +2897,6 @@ function applyLanguage() {
   setText("appSubtitle", t("appSubtitle"));
   const supportTitle = $("supportSectionTitle");
   if (supportTitle) supportTitle.textContent = t("supportSectionTitle");
-  setText("usageGuideBtnText", t("usageGuideBtn"));
-  const downloadSiteBtnText = $("downloadSiteBtnText");
-  if (downloadSiteBtnText) downloadSiteBtnText.textContent = t("downloadSiteBtn");
-  setText("githubRepoBtnText", t("githubRepoBtn"));
   updateClaudeStatusTitle();
   setText("statusHint", t("statusHint"));
   setText("profilesSectionTitle", currentLang === "zh" ? "Claude 配置列表" : "Claude Config List");
@@ -3282,7 +3279,7 @@ function applyLanguage() {
   if ($("modalOverlay")?.classList.contains("open")) {
     setText("modalTitle", editingId ? t("editConfig") : t("addConfig"));
   }
-  if ($("settingsOverlay")?.classList.contains("open")) {
+  if (activeConsolePage === "settings") {
     try { renderSettingsEditorPaths(getSettingsEditorPathInfos()); } catch (_) {}
   }
   } catch (error) {
@@ -3391,7 +3388,6 @@ function openCodexToolbox() {
 }
 
 function closeCodexToolbox() {
-  $("codexToolboxOverlay")?.classList.remove("open");
   stopToolboxRefresh();
 }
 
@@ -5837,14 +5833,6 @@ async function handleImport() {
   }
 }
 
-// ── Page Switching ──────────────────────────────────
-
-function switchPage(page) {
-  // 兼容旧横向 Tab：统一走控制台导航
-  const map = { claude: "claude", codex: "codex", grok: "grok" };
-  switchConsolePage(map[page] || page || "claude");
-}
-
 // ── Grok Profile Management ─────────────────────────
 
 function getSelectedGrokPreset() {
@@ -7152,7 +7140,6 @@ function openSkillsPanel() {
 }
 
 function closeSkillsPanel() {
-  $("skillsOverlay").classList.remove("open");
   hideSkillsEdit();
 }
 
@@ -7626,10 +7613,6 @@ function openPromptsPanel() {
   openDeveloperTools("prompts");
 }
 
-function closePromptsPanel() {
-  $("promptsOverlay").classList.remove("open");
-}
-
 // 表驱动，新增 tab 只需在这里加一行，不会漏掉按钮高亮或内容显隐
 const PROMPT_TABS = [
   { id: "presets", button: "promptTabPresets", content: "promptPresetsContent" },
@@ -7931,7 +7914,6 @@ function openMcpPanel() {
 }
 
 function closeMcpPanel() {
-  $("mcpOverlay").classList.remove("open");
   hideMcpEdit();
 }
 
@@ -8557,23 +8539,6 @@ function setNavDot(id, tone = "") {
   el.className = `nav-state-dot${tone ? ` ${tone}` : ""}`;
 }
 
-function mountToolboxPages() {
-  const tabs = $("toolboxPageTabs");
-  const session = $("toolboxSessionContent");
-  const remote = $("toolboxRemoteContent");
-  const toolboxHost = $("toolboxPageHost");
-  if (tabs && toolboxHost && tabs.parentElement !== toolboxHost) toolboxHost.appendChild(tabs);
-  if (session && toolboxHost && session.parentElement !== toolboxHost) toolboxHost.appendChild(session);
-  if (remote && toolboxHost && remote.parentElement !== toolboxHost) toolboxHost.appendChild(remote);
-
-  // 设置页：把设置面板 body 挂入页面
-  const settingsBody = document.querySelector("#settingsOverlay .settings-body");
-  const settingsHost = $("settingsPageHost");
-  if (settingsBody && settingsHost && settingsBody.parentElement !== settingsHost) {
-    settingsHost.appendChild(settingsBody);
-  }
-}
-
 function getSelectedUniversalProviderPreset() {
   return UNIVERSAL_PROVIDER_PRESETS.find((preset) => preset.id === selectedUniversalProviderPreset)
     || UNIVERSAL_PROVIDER_PRESETS[0];
@@ -8835,23 +8800,6 @@ async function handleUniversalProviderSubmit(event) {
   }
 }
 
-function mountDeveloperToolsPage() {
-  const panels = [
-    ["skillsOverlay", "developerToolSkillsContent"],
-    ["promptsOverlay", "developerToolPromptsContent"],
-    ["mcpOverlay", "developerToolMcpContent"],
-  ];
-  panels.forEach(([overlayId, hostId]) => {
-    const overlay = $(overlayId);
-    const host = $(hostId);
-    const panel = overlay?.querySelector(".mgmt-panel");
-    if (!panel || !host || panel.parentElement === host) return;
-    overlay.classList.remove("open");
-    panel.classList.add("developer-tool-panel");
-    host.appendChild(panel);
-  });
-}
-
 function switchDeveloperTool(tool) {
   const nextTool = ["skills", "prompts", "mcp"].includes(tool) ? tool : "skills";
   activeDeveloperTool = nextTool;
@@ -8886,7 +8834,6 @@ function switchDeveloperTool(tool) {
 }
 
 function openDeveloperTools(tool = "skills") {
-  mountDeveloperToolsPage();
   switchConsolePage("developer-tools");
   switchDeveloperTool(tool);
 }
@@ -9933,11 +9880,6 @@ function switchConsolePage(page) {
     panel.classList.toggle("active", panel.getAttribute("data-console-page-panel") === next);
   });
 
-  // 旧横向 tab 同步
-  document.querySelectorAll(".page-tab").forEach((tab) => {
-    tab.classList.toggle("active", tab.getAttribute("data-page") === next);
-  });
-
   if (next === "claude") {
     loadStatus();
     loadProfiles();
@@ -9958,11 +9900,8 @@ function switchConsolePage(page) {
   } else if (next === "add-provider") {
     renderUniversalProviderForm();
   } else if (next === "toolbox") {
-    mountToolboxPages();
     loadCodexToolbox();
     switchToolboxTab("session");
-  } else if (next === "developer-tools") {
-    mountDeveloperToolsPage();
   } else if (next === "usage") {
     bindUsageUiOnce();
     loadUsageDashboard();
@@ -9971,7 +9910,6 @@ function switchConsolePage(page) {
     // 懒加载：只有首次进入才扫描，之后靠刷新按钮/搜索重查，切走不轮询
     if (!cliSessionsLoadedOnce) loadCliSessions();
   } else if (next === "settings") {
-    mountToolboxPages();
     openSettingsInline();
   }
 
@@ -10420,7 +10358,6 @@ function bindConsoleUiOnce() {
 }
 
 function enhanceAfterDataLoad() {
-  mountToolboxPages();
   renderNavigationStatus();
   renderUniversalProviderForm();
   renderSessionStatusCard();
@@ -10494,7 +10431,6 @@ function triggerCurrentImport() {
   else handleImport();
 }
 
-$("heroToolboxBtn")?.addEventListener("click", openCodexToolbox);
 on("langZhBtn", "click", () => setLanguage("zh"));
 on("langEnBtn", "click", () => setLanguage("en"));
 on("themeLightBtn", "click", () => setTheme("light"));
@@ -10511,14 +10447,6 @@ on("profileApiKey", "input", () => clearProviderInlineStatus("claude"));
 on("profileModelFetchBtn", "click", () => handleModelFetch("claude"));
 on("profileEndpointTestBtn", "click", () => handleEndpointTest("claude"));
 bindOverlayDismiss("modalOverlay", closeModal);
-
-// ── Page Tabs Event Listeners ───────────────────────
-
-document.querySelectorAll(".page-tab[data-page]").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    switchPage(tab.getAttribute("data-page"));
-  });
-});
 
 // ── Codex Modal Event Listeners ─────────────────────
 
@@ -10603,8 +10531,6 @@ $("opencodeRefreshBtn")?.addEventListener("click", () => {
   else showToast(t("opencodeNoActiveProfile"), "warning");
 });
 $("codexToolboxBtn")?.addEventListener("click", openCodexToolbox);
-on("codexToolboxClose", "click", closeCodexToolbox);
-bindOverlayDismiss("codexToolboxOverlay", closeCodexToolbox);
 on("toolboxTabSession", "click", () => switchToolboxTab("session"));
 on("toolboxTabRemote", "click", () => switchToolboxTab("remote"));
 on("toolboxSessionSearchInput", "input", (event) => {
@@ -10695,11 +10621,9 @@ on("toolboxRemoteStopBtn", "click", async () => {
 // ── Management Panel Event Listeners ────────────────
 
 on("skillsBtn", "click", openSkillsPanel);
-on("skillsClose", "click", closeSkillsPanel);
 on("addSkillBtn", "click", () => showSkillsEdit(null, "command"));
 on("skillCancelBtn", "click", hideSkillsEdit);
 on("skillSaveBtn", "click", handleSaveSkill);
-bindOverlayDismiss("skillsOverlay", closeSkillsPanel);
 
 // Skills ZIP 安装
 on("installZipBtn", "click", handlePickSkillZip);
@@ -10750,9 +10674,7 @@ on("repoUrlInput", "keydown", (e) => {
 });
 
 on("promptsBtn", "click", openPromptsPanel);
-on("promptsClose", "click", closePromptsPanel);
 on("promptSaveBtn", "click", handleSavePrompt);
-bindOverlayDismiss("promptsOverlay", closePromptsPanel);
 on("promptTabPresets", "click", () => switchPromptTab("presets"));
 on("promptTabEditor", "click", () => switchPromptTab("editor"));
 on("promptTabTemplates", "click", () => switchPromptTab("templates"));
@@ -10773,7 +10695,6 @@ on("promptInsertSelect", "change", (e) => {
 });
 
 on("mcpBtn", "click", openMcpPanel);
-on("mcpClose", "click", closeMcpPanel);
 on("addMcpBtn", "click", () => showMcpEdit(null));
 on("mcpCancelBtn", "click", hideMcpEdit);
 on("mcpSaveBtn", "click", handleSaveMcp);
@@ -10781,7 +10702,6 @@ on("mcpTransport", "change", updateMcpTransportFields);
 document.querySelectorAll("#mcpModeTabs [data-mcp-mode]").forEach((button) => {
   button.addEventListener("click", () => setMcpEditorMode(button.dataset.mcpMode));
 });
-bindOverlayDismiss("mcpOverlay", closeMcpPanel);
 on("mcpTabInstalled", "click", () => switchMcpTab("installed"));
 on("mcpTabPresets", "click", () => switchMcpTab("presets"));
 on("mcpPresetSearch", "keydown", (e) => {
@@ -10791,10 +10711,6 @@ on("mcpPresetSearch", "keydown", (e) => {
   }
 });
 
-on("usageGuideBtn", "click", openUsageGuide);
-on("updateBtn", "click", handleUpdateButton);
-const downloadSiteBtn = $("downloadSiteBtn");
-if (downloadSiteBtn) downloadSiteBtn.addEventListener("click", openUpdateReleasePage);
 on("updatePillBtn", "click", async () => {
   if (updateBusy) return;
   if (updateInfo?.hasUpdate) {
@@ -10803,7 +10719,6 @@ on("updatePillBtn", "click", async () => {
     await openUpdateReleasePage();
   }
 });
-on("githubRepoBtn", "click", openGitHubRepo);
 on("usageGuideCloseBtn", "click", closeUsageGuide);
 on("usageGuideCloseIcon", "click", closeUsageGuide);
 on("usageGuideNeverBtn", "click", handleNeverShowUsageGuide);
@@ -11078,10 +10993,6 @@ async function openSettingsPanel() {
   }
 }
 
-function closeSettingsPanel() {
-  $("settingsOverlay").classList.remove("open");
-}
-
 // ── 全局快捷键捕获 ──────────────────────────────
 // 输入框只读，点击聚焦后按下的组合键即被捕获并立即保存。
 // 组合键必须包含 Ctrl / Alt / Win 之一：无修饰键的全局热键会吞掉正常输入。
@@ -11195,8 +11106,6 @@ async function handleImportProfiles() {
 }
 
 // Settings event listeners
-on("settingsClose", "click", closeSettingsPanel);
-bindOverlayDismiss("settingsOverlay", closeSettingsPanel);
 on("settingsAutoStart", "change", handleSettingsToggle);
 on("settingsMinTray", "change", handleSettingsToggle);
 on("settingsSilentStart", "change", handleSettingsToggle);
@@ -11652,7 +11561,6 @@ function renderSidebarVersion() {
   try {
     bindAppDialogOnce();
     bindConsoleUiOnce();
-    mountToolboxPages();
     switchConsolePage("add-provider");
     // B15: 尽早订阅后端通道状态推送，绑定流程中的状态变化不会漏收
     bindMobileChannelStatusListener();

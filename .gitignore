@@ -112,3 +112,8 @@ AGENTS.md
 .playwright-mcp
 %USERPROFILE%
 
+
+# 本地 UI 预览调试页，不进仓库
+public/__ui-preview.html
+public/__premerge.css
+public/__selectors.json

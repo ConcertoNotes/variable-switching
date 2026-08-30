@@ -1,0 +1,291 @@
+/* ==========================================================================
+   控制台重构 第 1 代：VARSWITCH CONSOLE REDESIGN
+   引入 --console-* 变量体系与侧边栏布局。
+
+   注意：本目录下的文件按 index.html 里的 <link> 顺序层叠，顺序即优先级。
+   不要重排文件顺序，也不要把规则在文件之间随意搬动。
+   ========================================================================== */
+
+/* ======================== VARSWITCH CONSOLE REDESIGN ======================== */
+
+
+
+
+
+
+.diagnostics-kicker {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brand);
+  margin-bottom: 6px;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-header-row .section-title {
+  margin-bottom: 0;
+}
+
+
+
+
+
+.diagnostics-card {
+  padding: 18px;
+  border-radius: 20px;
+  border: 0.5px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.diagnostics-card.healthy {
+  border-color: var(--success-border);
+  background: linear-gradient(135deg, var(--success-bg), var(--surface));
+}
+
+.diagnostics-card.warning {
+  border-color: var(--warning-border);
+  background: linear-gradient(135deg, var(--warning-bg), var(--surface));
+}
+
+.diagnostics-card.muted {
+  color: var(--text-muted);
+}
+
+.diagnostics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.diagnostics-title {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.diagnostics-state {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.diagnostics-state.ok {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.diagnostics-state.warn {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.diagnostics-grid > div {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--surface-solid);
+  min-width: 0;
+}
+
+.diagnostics-grid span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+
+.diagnostics-grid strong {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnostics-paths {
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: "SF Mono", "Cascadia Code", monospace;
+  margin-bottom: 12px;
+}
+
+
+
+
+
+.diagnostics-list {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.diagnostics-list strong {
+  color: var(--text);
+}
+
+.diagnostics-list ul {
+  margin: 6px 0 0 18px;
+  line-height: 1.7;
+}
+
+.diagnostics-footer {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  
+
+  
+
+  
+
+  .diagnostics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  
+
+  .diagnostics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Console quick actions refined placement */
+
+
+.console-hint-section {
+  margin-top: -8px;
+  margin-bottom: 20px;
+}
+
+.console-hint-section .support-hint {
+  padding: 0 2px;
+}
+
+.product-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  flex: 0 0 auto;
+  vertical-align: middle;
+}
+
+.product-icon svg,
+.product-icon img {
+  width: 16px;
+  height: 16px;
+  display: block;
+  object-fit: contain;
+}
+
+.product-icon-anthropic {
+  background: #f4efe7;
+  color: #191919;
+}
+
+.product-icon-codex { background: transparent; }
+
+.product-icon-codex img {
+  width: 20px;
+  height: 20px;
+  display: block;
+  object-fit: contain;
+}
+
+.product-icon-grok {
+  background: #f3f4f6;
+  color: #191919;
+}
+
+:root[data-theme="dark"] .product-icon-anthropic {
+  background: rgba(244, 239, 231, 0.14);
+  color: #f4efe7;
+}
+
+:root[data-theme="dark"] .product-icon-codex { background: transparent; }
+
+:root[data-theme="dark"] .product-icon-codex img { filter: invert(1); }
+
+:root[data-theme="dark"] .product-icon-grok {
+  background: rgba(156, 163, 175, 0.18);
+  color: #f5f5f5;
+}
+
+:root[data-theme="dark"] .product-icon-grok img {
+  filter: invert(1);
+}
+
+.status-card-title-text {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}

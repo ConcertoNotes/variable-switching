@@ -7,3 +7,6 @@ target/
 # Same directory via its Windows 8.3 short name. A broken TEMP env var uses this
 # form, making the MSVC linker drop lnk*.tmp files here during dev builds.
 %USERP~1/
+
+# 本地 UI 预览调试页，不进打包产物
+public/__ui-preview.html

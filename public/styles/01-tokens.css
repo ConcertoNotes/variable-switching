@@ -1,0 +1,199 @@
+/* ==========================================================================
+   设计变量与主题
+   所有 :root / :root[data-theme="dark"] 变量集中在这里，改配色只动这个文件。
+
+   注意：本目录下的文件按 index.html 里的 <link> 顺序层叠，顺序即优先级。
+   不要重排文件顺序，也不要把规则在文件之间随意搬动。
+   ========================================================================== */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* 设计变量：本文件所有 :root 定义已收拢至此，改主题只需要动这一处 */
+:root {
+  --bg: #F2F2F7;
+  --surface: rgba(255, 255, 255, 0.55);
+  --surface-solid: rgba(255, 255, 255, 0.85);
+  --surface-soft: rgba(255, 255, 255, 0.35);
+  --surface-hover: rgba(0, 0, 0, 0.04);
+  --text: #1C1C1E;
+  --text-secondary: #3A3A3C;
+  --text-muted: #8E8E93;
+  --line: rgba(0, 0, 0, 0.1);
+  --line-subtle: rgba(0, 0, 0, 0.05);
+  --brand: #007AFF;
+  --brand-hover: #0066D6;
+  --brand-subtle: rgba(0, 122, 255, 0.1);
+  --brand-muted: rgba(0, 122, 255, 0.18);
+  --success-bg: rgba(52, 199, 89, 0.12);
+  --success-text: #248A3D;
+  --success-border: rgba(52, 199, 89, 0.2);
+  --warning-bg: rgba(255, 149, 0, 0.12);
+  --warning-text: #C93400;
+  --warning-border: rgba(255, 149, 0, 0.2);
+  --error-bg: rgba(255, 59, 48, 0.12);
+  --error-text: #D70015;
+  --error-border: rgba(255, 59, 48, 0.2);
+  --shadow-sm: 0 0.5px 1px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.12);
+  --shadow-card: 0 0.5px 0 rgba(0, 0, 0, 0.04), 0 2px 12px rgba(0, 0, 0, 0.04);
+  --glass-blur: 40px;
+  --glass-saturate: saturate(180%);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  /* 画布与表面 */
+  --console-bg: #EFEFF4;
+  --console-card: #FFFFFF;
+  --console-card-muted: #F6F6F8;
+  --console-line: rgba(24, 24, 28, 0.075);
+  /* 文本层级 */
+  --console-text: #1D1D1F;
+  --console-muted: #6E6E73;
+  --console-weak: #98989D;
+  /* 强调色 */
+  --console-blue: #007AFF;
+  --console-blue-hover: #0071E3;
+  --console-green: #16A34A;
+  --console-amber: #D97706;
+  --console-red: #DC2626;
+  --sidebar-width: 228px;
+  --topbar-height: 56px;
+  --console-line-strong: rgba(24, 24, 28, 0.13);
+  --console-selection: rgba(0, 122, 255, 0.10);
+  --console-elevation: 0 1px 2px rgba(15, 23, 42, 0.035);
+  --console-recessed: #EFEFF2;
+  --hairline: rgba(24, 24, 28, 0.09);
+  --accent-grad: linear-gradient(180deg, #3B9CFF 0%, #007AFF 100%);
+  --accent-shadow: 0 1px 2.5px rgba(0, 98, 204, 0.32), 0 4px 14px -4px rgba(0, 122, 255, 0.45);
+  --accent-ring: rgba(0, 122, 255, 0.16);
+  /* 高度体系(阴影) */
+  --elev-card: 0 0 0 0.5px rgba(24, 24, 28, 0.04),
+    0 1px 1px rgba(24, 24, 28, 0.035),
+    0 10px 30px -14px rgba(24, 24, 28, 0.13);
+  --elev-raised: 0 0 0 0.5px rgba(24, 24, 28, 0.05),
+    0 2px 6px rgba(24, 24, 28, 0.05),
+    0 18px 44px -18px rgba(24, 24, 28, 0.22);
+  --elev-modal: 0 0 0 0.5px rgba(24, 24, 28, 0.07),
+    0 24px 60px -12px rgba(24, 24, 28, 0.28),
+    0 60px 140px -24px rgba(24, 24, 28, 0.32);
+  --inner-light: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  /* 磨砂材质 */
+  --material-chrome: rgba(248, 248, 251, 0.62);
+  --material-sidebar: rgba(252, 252, 254, 0.55);
+  --material-blur: saturate(190%) blur(32px);
+  /* 圆角体系 */
+  --r-control: 9px;
+  --r-field: 11px;
+  --r-inner: 14px;
+  --r-card: 20px;
+  --r-sheet: 24px;
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* 设计变量：本文件所有 :root[data-theme="dark"] 定义已收拢至此，改主题只需要动这一处 */
+:root[data-theme="dark"] {
+  --bg: #000000;
+  --surface: rgba(44, 44, 46, 0.5);
+  --surface-solid: rgba(44, 44, 46, 0.82);
+  --surface-soft: rgba(44, 44, 46, 0.32);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --text: #F2F2F7;
+  --text-secondary: #AEAEB2;
+  --text-muted: #636366;
+  --line: rgba(255, 255, 255, 0.1);
+  --line-subtle: rgba(255, 255, 255, 0.05);
+  --brand: #0A84FF;
+  --brand-hover: #409CFF;
+  --brand-subtle: rgba(10, 132, 255, 0.15);
+  --brand-muted: rgba(10, 132, 255, 0.22);
+  --success-bg: rgba(48, 209, 88, 0.15);
+  --success-text: #30D158;
+  --success-border: rgba(48, 209, 88, 0.25);
+  --warning-bg: rgba(255, 159, 10, 0.15);
+  --warning-text: #FF9F0A;
+  --warning-border: rgba(255, 159, 10, 0.25);
+  --error-bg: rgba(255, 69, 58, 0.15);
+  --error-text: #FF453A;
+  --error-border: rgba(255, 69, 58, 0.25);
+  --shadow-sm: 0 0.5px 1px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 0.5px 0 rgba(255, 255, 255, 0.04) inset, 0 2px 12px rgba(0, 0, 0, 0.2);
+  --console-bg: #0A0A0D;
+  --console-card: #1B1B1F;
+  --console-card-muted: #242428;
+  --console-line: rgba(255, 255, 255, 0.075);
+  --console-text: #F5F5F7;
+  --console-muted: #A1A1A6;
+  --console-weak: #7C7C81;
+  --console-blue: #0A84FF;
+  --console-blue-hover: #3699FF;
+  --console-green: #35C86F;
+  --console-amber: #F2A93B;
+  --console-red: #F05A67;
+  --console-line-strong: rgba(255, 255, 255, 0.14);
+  --console-selection: rgba(10, 132, 255, 0.17);
+  --console-elevation: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --console-recessed: #101013;
+  --hairline: rgba(255, 255, 255, 0.09);
+  --accent-grad: linear-gradient(180deg, #2E93FF 0%, #0A7AFF 100%);
+  --accent-shadow: 0 1px 2.5px rgba(0, 0, 0, 0.45), 0 4px 16px -4px rgba(10, 132, 255, 0.42);
+  --accent-ring: rgba(10, 132, 255, 0.26);
+  --elev-card: 0 0 0 0.5px rgba(0, 0, 0, 0.42),
+    0 1px 2px rgba(0, 0, 0, 0.38),
+    0 12px 32px -14px rgba(0, 0, 0, 0.5);
+  --elev-raised: 0 0 0 0.5px rgba(0, 0, 0, 0.48),
+    0 2px 8px rgba(0, 0, 0, 0.42),
+    0 20px 48px -18px rgba(0, 0, 0, 0.62);
+  --elev-modal: 0 0 0 0.5px rgba(255, 255, 255, 0.09),
+    0 24px 60px -12px rgba(0, 0, 0, 0.6),
+    0 60px 140px -24px rgba(0, 0, 0, 0.66);
+  --inner-light: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  --material-chrome: rgba(20, 20, 24, 0.58);
+  --material-sidebar: rgba(26, 26, 31, 0.55);
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.47;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  position: relative;
+  overflow-x: hidden;
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
+/* Vibrant mesh gradient background — muted, edge-focused */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 5% 10%, rgba(0, 122, 255, 0.10) 0%, transparent 45%),
+    radial-gradient(ellipse 60% 70% at 95% 15%, rgba(175, 82, 222, 0.08) 0%, transparent 45%),
+    radial-gradient(ellipse 70% 50% at 80% 80%, rgba(255, 45, 85, 0.06) 0%, transparent 45%),
+    radial-gradient(ellipse 50% 60% at 20% 90%, rgba(90, 200, 250, 0.08) 0%, transparent 45%),
+    radial-gradient(ellipse 40% 30% at 50% 50%, rgba(52, 199, 89, 0.03) 0%, transparent 40%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+:root[data-theme="dark"] body::before {
+  background:
+    radial-gradient(ellipse 80% 60% at 5% 10%, rgba(10, 132, 255, 0.07) 0%, transparent 45%),
+    radial-gradient(ellipse 60% 70% at 95% 15%, rgba(191, 90, 242, 0.06) 0%, transparent 45%),
+    radial-gradient(ellipse 70% 50% at 80% 80%, rgba(255, 55, 95, 0.04) 0%, transparent 45%),
+    radial-gradient(ellipse 50% 60% at 20% 90%, rgba(100, 210, 255, 0.05) 0%, transparent 45%),
+    radial-gradient(ellipse 40% 30% at 50% 50%, rgba(48, 209, 88, 0.02) 0%, transparent 40%);
+}
